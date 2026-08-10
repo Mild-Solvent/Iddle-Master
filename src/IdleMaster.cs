@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.2.1.0")]
+[assembly: AssemblyFileVersion("0.2.1.0")]
 
 namespace IdleMaster
 {
@@ -2726,9 +2726,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly Label memLabel;
         private readonly Panel memBar;
         private readonly Panel memFill;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnReport, btnTrim, btnConfig;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnReport, btnTrim, btnConfig, btnUpdate;
         private readonly CheckBox chkSentry;
         private readonly Label sentryLabel;
+        private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
         private Sentry sentry;
         private NotifyIcon tray;
@@ -2746,8 +2747,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             engine = new Engine(cfg, AppendLog);
 
             Text = "IDLE MASTER";
-            Size = new Size(700, 668);
-            MinimumSize = new Size(560, 480);
+            Size = new Size(700, 706);
+            MinimumSize = new Size(560, 520);
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Bg;
             ForeColor = Fg;
@@ -2801,17 +2802,27 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             btnConfig = SmallButton("Settings", 502, 306);
             btnConfig.Click += delegate { EditConfig(); };
 
+            btnUpdate = SmallButton("Check for updates", 22, 342);
+            btnUpdate.Click += delegate { CheckUpdates(); };
+
+            updateLabel = new Label();
+            updateLabel.SetBounds(182, 348, 480, 20);
+            updateLabel.ForeColor = Dim;
+            updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            updateLabel.Text = "running v" + App.Version + " - " + Updater.Repo;
+            Controls.Add(updateLabel);
+
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 346, 190, 22);
+            chkSentry.SetBounds(24, 382, 190, 22);
             chkSentry.ForeColor = Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = new Label();
-            sentryLabel.SetBounds(220, 348, 442, 20);
+            sentryLabel.SetBounds(220, 384, 442, 20);
             sentryLabel.ForeColor = Dim;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
@@ -2824,7 +2835,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             logBox.ForeColor = Color.FromArgb(180, 220, 190);
             logBox.Font = new Font("Consolas", 9f);
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 376, 640, 214);
+            logBox.SetBounds(22, 412, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -3023,50 +3034,91 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         // say so, and the installer that arrives is the one you publish.
         private void CheckUpdates()
         {
-            AppendLog("Asking GitHub about newer releases (you are on " + App.Version + ")...");
+            btnUpdate.Enabled = false;
+            Status("asking GitHub...", Dim);
+            AppendLog("Checking " + Updater.Repo + " for releases newer than " + App.Version + "...");
+
             Thread t = new Thread(delegate()
             {
-                Updater.Release r;
+                Updater.Release r = null;
+                string failure = null;
                 try { r = Updater.Latest(); }
-                catch (Exception ex)
-                {
-                    AppendLog("! update check failed: " + ex.Message.Split('\n')[0]);
-                    return;
-                }
+                catch (Exception ex) { failure = ex.Message.Split('\n')[0]; }
 
-                BeginInvoke((Action)delegate
-                {
-                    if (!r.Newer)
-                    {
-                        AppendLog("You are on the newest release (" + App.Version
-                            + (r.Tag.Length > 0 ? ", latest published is " + r.Tag : "") + ").");
-                        return;
-                    }
-                    if (r.Url.Length == 0)
-                    {
-                        AppendLog("! " + r.Tag + " is out but has no installer attached.");
-                        return;
-                    }
-                    if (MessageBox.Show(this,
-                        r.Tag + " is out (you have " + App.Version + ")."
-                        + "\n\nDownload the installer and run it now? Your config is kept.",
-                        "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
-                        != DialogResult.Yes) return;
-
-                    try
-                    {
-                        AppendLog("Downloading " + r.Tag + "...");
-                        string setup = Updater.Fetch(r);
-                        AppendLog("Running " + setup);
-                        Process.Start(new ProcessStartInfo(setup) { UseShellExecute = true });
-                        reallyExit = true;
-                        Close();
-                    }
-                    catch (Exception ex) { AppendLog("! update failed: " + ex.Message.Split('\n')[0]); }
-                });
+                try { BeginInvoke((Action)delegate { Finish(r, failure); }); }
+                catch (Exception) { }
             });
             t.IsBackground = true;
             t.Start();
+        }
+
+        private void Finish(Updater.Release r, string failure)
+        {
+            btnUpdate.Enabled = true;
+
+            if (failure != null)
+            {
+                Status("update check failed", Color.FromArgb(220, 140, 80));
+                AppendLog("! update check failed: " + failure);
+                return;
+            }
+            if (r.Tag.Length == 0)
+            {
+                Status("no releases published yet", Dim);
+                return;
+            }
+            if (!r.Newer)
+            {
+                Status("v" + App.Version + " is the newest (" + r.Tag + " published)", Dim);
+                AppendLog("Already on the newest release.");
+                return;
+            }
+            if (r.Url.Length == 0)
+            {
+                Status(r.Tag + " is out, but has no installer attached", Color.FromArgb(220, 140, 80));
+                AppendLog("! " + r.Tag + " has no IdleMasterSetup.exe asset - update it by hand.");
+                return;
+            }
+
+            Status(r.Tag + " is available", Color.FromArgb(120, 200, 255));
+            if (MessageBox.Show(this,
+                r.Tag + " is out - you are on " + App.Version + "."
+                + "\n\nDownload it and update this copy in " + App.Dir + "?"
+                + "\n\nYour idlemaster.ini is kept exactly as it is. Idle Master will close "
+                + "while the installer replaces it.",
+                "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+                != DialogResult.Yes)
+            {
+                AppendLog("Update available (" + r.Tag + ") - not installed, your call.");
+                return;
+            }
+
+            try
+            {
+                AppendLog("Downloading " + r.Tag + "...");
+                Status("downloading " + r.Tag + "...", Color.FromArgb(120, 200, 255));
+                string setup = Updater.Fetch(r);
+                AppendLog("Handing over to " + setup);
+
+                // Point the installer at THIS copy, so updating a portable exe
+                // updates it where it stands instead of installing a second one.
+                Process.Start(new ProcessStartInfo(setup, "--dir \"" + App.Dir + "\"")
+                { UseShellExecute = true });
+
+                reallyExit = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                Status("update failed", Color.FromArgb(220, 140, 80));
+                AppendLog("! update failed: " + ex.Message.Split('\n')[0]);
+            }
+        }
+
+        private void Status(string text, Color color)
+        {
+            updateLabel.Text = "v" + App.Version + "  -  " + text;
+            updateLabel.ForeColor = color;
         }
 
         // The lists and switches, edited in place. The running sentry picks up the

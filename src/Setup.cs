@@ -16,8 +16,17 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+
+// Keep in step with IdleMaster.cs - the installer showing 0.0.0.0 in its file
+// properties looks like something half-built.
+[assembly: AssemblyTitle("Idle Master Setup")]
+[assembly: AssemblyDescription("Installer for Idle Master")]
+[assembly: AssemblyProduct("Idle Master")]
+[assembly: AssemblyVersion("0.2.1.0")]
+[assembly: AssemblyFileVersion("0.2.1.0")]
 
 namespace IdleMasterSetup
 {
@@ -55,13 +64,14 @@ namespace IdleMasterSetup
             catch (Exception) { return null; }
         }
 
-        public static string InstalledVersion()
+        public static string VersionOf(string exe)
         {
-            string dir = InstalledDir();
-            if (dir == null) return null;
-            string exe = Path.Combine(dir, ExeName);
-            if (!File.Exists(exe)) return null;
-            try { return FileVersionInfo.GetVersionInfo(exe).FileVersion; }
+            if (exe == null || !File.Exists(exe)) return null;
+            try
+            {
+                FileVersionInfo fv = FileVersionInfo.GetVersionInfo(exe);
+                return fv.FileMajorPart + "." + fv.FileMinorPart + "." + fv.FileBuildPart;
+            }
             catch (Exception) { return null; }
         }
 
@@ -69,12 +79,8 @@ namespace IdleMasterSetup
         // there is only ever one place the version is written down.
         public static string PayloadVersion(string extractedExe)
         {
-            try
-            {
-                FileVersionInfo fv = FileVersionInfo.GetVersionInfo(extractedExe);
-                return fv.FileMajorPart + "." + fv.FileMinorPart + "." + fv.FileBuildPart;
-            }
-            catch (Exception) { return "?"; }
+            string v = VersionOf(extractedExe);
+            return v == null ? "?" : v;
         }
 
         public static byte[] Payload()
@@ -105,6 +111,7 @@ namespace IdleMasterSetup
             string exe = Path.Combine(dir, ExeName);
 
             StandDown(dir, say);
+            WaitForExit(say);
 
             // A running exe cannot be overwritten, but it can be renamed out of the
             // way - which is what makes "update while it is running" work at all.
@@ -201,6 +208,33 @@ namespace IdleMasterSetup
                 say("asked the running copy to stand down");
             }
             catch (Exception) { }
+        }
+
+        // When the app updates itself it launches this and then closes, so give it
+        // a moment to actually be gone before we start replacing files underneath it.
+        private static void WaitForExit(Action<string> say)
+        {
+            bool waited = false;
+            for (int i = 0; i < 16; i++)
+            {
+                Process[] live = Process.GetProcessesByName("IdleMaster");
+                try
+                {
+                    if (live.Length == 0)
+                    {
+                        if (waited) say("it has closed");
+                        return;
+                    }
+                    if (!waited) { say("waiting for Idle Master to close..."); waited = true; }
+                }
+                finally
+                {
+                    foreach (Process p in live) { try { p.Dispose(); } catch (Exception) { } }
+                }
+                Thread.Sleep(500);
+            }
+            // Still up after 8s - it is probably a window somebody left open. The
+            // rename path below handles that, or fails with something readable.
         }
 
         private static void Sweep(string dir)
@@ -374,8 +408,13 @@ namespace IdleMasterSetup
 
         public SetupForm(string preset)
         {
+            // Either a registered install, or the app pointing us at its own folder
+            // to update a portable copy in place.
             string already = Setup.InstalledDir();
-            bool updating = already != null && Directory.Exists(already);
+            if (preset != null && File.Exists(Path.Combine(preset, Setup.ExeName)))
+                already = preset;
+            bool updating = already != null && Directory.Exists(already)
+                            && File.Exists(Path.Combine(already, Setup.ExeName));
 
             Text = "Idle Master Setup";
             ClientSize = new Size(560, 430);
@@ -394,7 +433,7 @@ namespace IdleMasterSetup
             Controls.Add(title);
 
             Label sub = new Label();
-            string have = Setup.InstalledVersion();
+            string have = updating ? Setup.VersionOf(Path.Combine(already, Setup.ExeName)) : null;
             sub.Text = updating
                 ? "Updating your install" + (have != null ? " (you have " + have + ")" : "")
                 : "Reclaim RAM. Keep Sunshine and Tailscale alive.";

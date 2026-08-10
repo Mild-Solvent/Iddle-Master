@@ -29,10 +29,15 @@ Windows' *Installed apps* so you can uninstall normally, and can register the
 logon task for you.
 
 **Updating is the same file.** Run a newer setup and it replaces the exe in
-place, keeping `idlemaster.ini` exactly as you left it. Or let the app do it:
-tray icon → **Check for updates**, which asks GitHub, and if there is something
-newer, downloads that release's setup and runs it. Nothing downloads until you
-say yes.
+place, keeping `idlemaster.ini` exactly as you left it.
+
+Or let the app do it: **Check for updates** in the main window (also on the tray
+menu) asks GitHub for the newest release, and the line beside it tells you where
+you stand — *v0.2.1 is the newest*, or *v0.3.0-beta is available*. If there is
+something newer it downloads that release's installer and hands over to it,
+pointed at the folder this copy is running from, so a portable copy updates
+itself where it stands instead of installing a second one somewhere else.
+Nothing is downloaded until you say yes.
 
 Silent, for scripts:
 
