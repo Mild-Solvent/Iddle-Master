@@ -16,6 +16,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Text;
@@ -23,6 +24,12 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+
+[assembly: AssemblyTitle("Idle Master")]
+[assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
+[assembly: AssemblyProduct("Idle Master")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
 
 namespace IdleMaster
 {
@@ -157,6 +164,13 @@ namespace IdleMaster
         public bool SentrySkipForeground = true;    // never kill what you are actively looking at
         public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
 
+        // --- ask first: anything that shows up AFTER the mode ran gets a dialog
+        public bool AskBeforeKill = true;
+        public int AskTimeoutSeconds = 25;          // no answer = keep it, and ask again later
+        public int AskAboveMb = 250;                // also ask about newcomers this big
+                                                    // that are on no list at all. 0 = off.
+        public bool Tray = true;                    // tray icon; closing the window hides to it
+
         public readonly List<string> Protect = new List<string>();
         public readonly List<string> ProtectServices = new List<string>();
         public readonly List<string> BoostKill = new List<string>();
@@ -176,8 +190,8 @@ namespace IdleMaster
             string section = "";
             foreach (string raw in File.ReadAllLines(Path_))
             {
-                string line = raw.Trim();
-                if (line.Length == 0 || line.StartsWith("#") || line.StartsWith(";")) continue;
+                string line = StripComment(raw);
+                if (line.Length == 0) continue;
                 if (line.StartsWith("[") && line.EndsWith("]"))
                 {
                     section = line.Substring(1, line.Length - 2).Trim().ToLowerInvariant();
@@ -207,6 +221,10 @@ namespace IdleMaster
                         case "sentryrespawnlimit": c.SentryRespawnLimit = Int(v, c.SentryRespawnLimit, 1); break;
                         case "sentrybackoffminutes": c.SentryBackoffMinutes = Int(v, c.SentryBackoffMinutes, 1); break;
                         case "trimwhenfreebelowmb": c.TrimWhenFreeBelowMb = Int(v, c.TrimWhenFreeBelowMb, 0); break;
+                        case "askbeforekill": c.AskBeforeKill = b; break;
+                        case "tray": c.Tray = b; break;
+                        case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
+                        case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
                     }
                     continue;
                 }
@@ -223,6 +241,78 @@ namespace IdleMaster
                 }
             }
             return c;
+        }
+
+        // A line with everything after '#' or ';' removed. Entries written by the
+        // dialogs carry a trailing "# you chose this on ..." note, so without this
+        // they would be read as part of the process name and never match anything.
+        public static string StripComment(string raw)
+        {
+            string s = raw;
+            int cut = s.IndexOfAny(new char[] { '#', ';' });
+            if (cut >= 0) s = s.Substring(0, cut);
+            return s.Trim();
+        }
+
+        // Overwrites this instance in place, so everything already holding a
+        // reference (engine, sentry) sees the edits without being rebuilt.
+        public void CopyFrom(Config o)
+        {
+            KillExplorer = o.KillExplorer; NetworkGuard = o.NetworkGuard;
+            TrimWorkingSets = o.TrimWorkingSets; ClearStandbyList = o.ClearStandbyList;
+            CloseBrowsersInBoost = o.CloseBrowsersInBoost;
+            Sentry = o.Sentry; SentrySeconds = o.SentrySeconds;
+            SentryServiceMinutes = o.SentryServiceMinutes; SentryTrimMinutes = o.SentryTrimMinutes;
+            SentryGuardMinutes = o.SentryGuardMinutes; SentryRespawnLimit = o.SentryRespawnLimit;
+            SentryBackoffMinutes = o.SentryBackoffMinutes;
+            SentrySkipForeground = o.SentrySkipForeground;
+            TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
+            AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
+            AskAboveMb = o.AskAboveMb; Tray = o.Tray;
+
+            Swap(Protect, o.Protect); Swap(ProtectServices, o.ProtectServices);
+            Swap(BoostKill, o.BoostKill); Swap(BoostServices, o.BoostServices);
+            Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
+            Swap(RestoreLaunch, o.RestoreLaunch);
+        }
+
+        private static void Swap(List<string> mine, List<string> theirs)
+        {
+            mine.Clear();
+            mine.AddRange(theirs);
+        }
+
+        // Writes a decision you made in a dialog straight back into the ini, so it
+        // survives a restart. Inserted right under the section header, tagged with
+        // the date, so you can find and undo it later.
+        public static bool Append(string section, string value)
+        {
+            try
+            {
+                List<string> lines = new List<string>(File.ReadAllLines(Path_));
+                string header = "[" + section + "]";
+                int at = -1;
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    if (!lines[i].Trim().Equals(header, StringComparison.OrdinalIgnoreCase)) continue;
+                    at = i;
+                    break;
+                }
+                if (at < 0)
+                {
+                    lines.Add("");
+                    lines.Add(header);
+                    at = lines.Count - 1;
+                }
+                foreach (string l in lines)
+                    if (l.Trim().Equals(value, StringComparison.OrdinalIgnoreCase)) return true;
+
+                lines.Insert(at + 1, value + "   # you chose this on "
+                    + DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
+                File.WriteAllLines(Path_, lines.ToArray());
+                return true;
+            }
+            catch (Exception) { return false; }
         }
 
         private static int Int(string v, int fallback, int min)
@@ -281,6 +371,22 @@ SentrySkipForeground=1
 # Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
 TrimWhenFreeBelowMb=0
 
+# --- ASK FIRST --------------------------------------------------------------
+# The sentry takes a census on its first sweep. Everything already running that
+# matches a list is junk you asked it to clear, and dies without a word. Anything
+# that shows up AFTER that is something YOU started, so it gets a dialog instead:
+# Keep it / Always keep / Trash it. ""Always keep"" writes the name into [protect]
+# below, so it is remembered forever.
+AskBeforeKill=1
+# No answer in this many seconds = keep it, and ask again in SentryBackoffMinutes.
+AskTimeoutSeconds=25
+# Also ask about newcomers that are on NO list at all but bigger than this many MB
+# ('Trash it' adds them to [boost.kill]). 0 = only ask about listed processes.
+AskAboveMb=250
+# Tray icon. Closing the window hides to the tray and keeps hunting; exit from
+# the tray menu when you actually want it gone.
+Tray=1
+
 # ---------------------------------------------------------------------------
 # NEVER touched, whatever else any list says. This is the safety net.
 # ---------------------------------------------------------------------------
@@ -312,6 +418,20 @@ wlanext
 sunshine
 sunshinesvc
 tailscaled
+# Docker and the WSL/Hyper-V machinery it rides on. Killing the desktop app while
+# the engine has containers up is a good way to lose work, and the backend costs
+# nothing once it is idle.
+Docker Desktop
+docker
+dockerd
+com.docker.*
+docker-ai
+vpnkit*
+wslservice
+wsl
+wslhost
+vmmem*
+vmcompute
 # Defender
 MsMpEng
 MpDefenderCoreService
@@ -323,6 +443,14 @@ IdleMaster
 [protect.services]
 SunshineService
 Tailscale
+# Docker: com.docker.service is the privileged helper the engine talks to, and
+# vmms/WSLService/vmcompute are the backend it runs on.
+com.docker.service
+vmms
+WSLService
+LxssManager
+vmcompute
+HvHost
 WinDefend
 MDCoreSvc
 WdNisSvc
@@ -444,9 +572,9 @@ firefox
 opera
 claude
 Code
-Docker Desktop
-com.docker.*
-vpnkit*
+# Docker used to be here. It is in [protect] now - the containers you left running
+# matter more than the ~700 MB the backend costs. Delete it from [protect] if you
+# would rather have the RAM.
 # tray icons nobody can see
 tailscale-ipn
 SecurityHealthSystray
@@ -471,8 +599,6 @@ SearchIndexer
 
 [idle.services]
 nordvpn-service
-vmms
-WSLService
 CoworkVMService
 WpnService
 CDPSvc
@@ -503,6 +629,165 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 #C:\Program Files\NordVPN\NordVPN.exe|--auto-start
 #C:\Program Files (x86)\Razer\Razer Cortex\RazerCortex.exe|-autorun
 ";
+    }
+
+    // --------------------------------------------------------------- ini edits
+
+    // The config window edits the file line by line rather than regenerating it,
+    // so every comment you (or the default config) wrote survives being saved.
+    // Unchecking an entry comments it out instead of deleting it, which is exactly
+    // what a '#' means in this file already.
+    internal sealed class IniFile
+    {
+        private readonly List<string> lines;
+
+        public IniFile() { lines = new List<string>(File.ReadAllLines(Config.Path_)); }
+
+        public sealed class Entry
+        {
+            public readonly string Text;
+            public bool Enabled;
+            public Entry(string text, bool enabled) { Text = text; Enabled = enabled; }
+        }
+
+        private static bool IsHeader(string line, string section)
+        {
+            return line.Trim().Equals("[" + section + "]", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsAnyHeader(string line)
+        {
+            string t = line.Trim();
+            return t.StartsWith("[") && t.EndsWith("]");
+        }
+
+        private int HeaderOf(string section)
+        {
+            for (int i = 0; i < lines.Count; i++)
+                if (IsHeader(lines[i], section)) return i;
+            return -1;
+        }
+
+        private int EndOf(int header)
+        {
+            for (int i = header + 1; i < lines.Count; i++)
+                if (IsAnyHeader(lines[i])) return i;
+            return lines.Count;
+        }
+
+        // The value of a line, whether or not it is commented out.
+        private static string Bare(string raw)
+        {
+            string s = raw.Trim();
+            while (s.StartsWith("#") || s.StartsWith(";")) s = s.Substring(1).Trim();
+            int cut = s.IndexOfAny(new char[] { '#', ';' });
+            if (cut >= 0) s = s.Substring(0, cut);
+            return s.Trim();
+        }
+
+        private static bool Disabled(string raw)
+        {
+            string t = raw.TrimStart();
+            return t.StartsWith("#") || t.StartsWith(";");
+        }
+
+        // Entries of a list section, commented-out ones included so you can see and
+        // re-enable what the default config ships as suggestions.
+        public List<Entry> Section(string section)
+        {
+            List<Entry> found = new List<Entry>();
+            int h = HeaderOf(section);
+            if (h < 0) return found;
+            int end = EndOf(h);
+            for (int i = h + 1; i < end; i++)
+            {
+                string bare = Bare(lines[i]);
+                if (bare.Length == 0) continue;                 // blank or pure prose comment
+                if (bare.IndexOf('=') >= 0 && section == "settings") continue;
+                found.Add(new Entry(bare, !Disabled(lines[i])));
+            }
+            return found;
+        }
+
+        private int LineOf(string section, string text)
+        {
+            int h = HeaderOf(section);
+            if (h < 0) return -1;
+            int end = EndOf(h);
+            for (int i = h + 1; i < end; i++)
+                if (Bare(lines[i]).Equals(text, StringComparison.OrdinalIgnoreCase)) return i;
+            return -1;
+        }
+
+        public void SetEnabled(string section, string text, bool on)
+        {
+            int i = LineOf(section, text);
+            if (i < 0) { if (on) Add(section, text); return; }
+            if (Disabled(lines[i]) == !on) return;
+            lines[i] = on ? lines[i].TrimStart('#', ';', ' ', '\t') : "#" + lines[i];
+        }
+
+        public void Add(string section, string text)
+        {
+            if (LineOf(section, text) >= 0) { SetEnabled(section, text, true); return; }
+            int h = HeaderOf(section);
+            if (h < 0)
+            {
+                lines.Add("");
+                lines.Add("[" + section + "]");
+                h = lines.Count - 1;
+            }
+            lines.Insert(h + 1, text);
+        }
+
+        public void Remove(string section, string text)
+        {
+            int i = LineOf(section, text);
+            if (i >= 0) lines.RemoveAt(i);
+        }
+
+        public string GetSetting(string key)
+        {
+            int h = HeaderOf("settings");
+            if (h < 0) return null;
+            int end = EndOf(h);
+            for (int i = h + 1; i < end; i++)
+            {
+                string bare = Bare(lines[i]);
+                int eq = bare.IndexOf('=');
+                if (eq <= 0) continue;
+                if (bare.Substring(0, eq).Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                    return bare.Substring(eq + 1).Trim();
+            }
+            return null;
+        }
+
+        public void SetSetting(string key, string value)
+        {
+            int h = HeaderOf("settings");
+            if (h < 0)
+            {
+                lines.Insert(0, "[settings]");
+                h = 0;
+            }
+            int end = EndOf(h);
+            for (int i = h + 1; i < end; i++)
+            {
+                string bare = Bare(lines[i]);
+                int eq = bare.IndexOf('=');
+                if (eq <= 0) continue;
+                if (!bare.Substring(0, eq).Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                lines[i] = key + "=" + value;
+                return;
+            }
+            lines.Insert(h + 1, key + "=" + value);
+        }
+
+        public void Save()
+        {
+            File.WriteAllLines(Config.Path_, lines.ToArray(), new UTF8Encoding(false));
+        }
     }
 
     // ----------------------------------------------------------------- state
@@ -560,6 +845,27 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public KillHit(string name, long bytes) { Name = name; Bytes = bytes; }
     }
 
+    // Every process sharing one name, treated as one thing you would recognise:
+    // "Docker Desktop, 4 processes, 512 MB" rather than four separate questions.
+    internal sealed class Candidate
+    {
+        public readonly string Name;
+        public long Bytes;
+        public readonly List<int> Pids = new List<int>();
+        public Candidate(string name) { Name = name; }
+        public string Key { get { return Name.ToLowerInvariant(); } }
+    }
+
+    internal enum Verdict { Keep, KeepAlways, Kill, NoAnswer }
+
+    // What the sentry wants to know about one newcomer.
+    internal sealed class Question
+    {
+        public Candidate What;
+        public bool OnKillList;      // false = on no list at all, just big and new
+        public string Mode;
+    }
+
     internal sealed class Engine
     {
         private readonly Config cfg;
@@ -608,43 +914,72 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return false;
         }
 
-        // A single silent sweep, used by the sentry. Returns what it killed instead
-        // of logging it, so the caller decides how noisy to be. 'skip' holds names
-        // the sentry has given up on (respawn backoff); 'protectPid' is spared.
-        public List<KillHit> Hunt(List<string> patterns, ICollection<string> skip, int protectPid)
+        // One census of what is running, grouped by name, so the sentry can ask
+        // about an app once instead of once per process. Nothing is killed here.
+        // 'skip' holds names in respawn backoff; 'sparePid' is the foreground app.
+        public List<Candidate> Census(ICollection<string> skip, int sparePid)
         {
-            List<KillHit> hits = new List<KillHit>();
-            if (patterns.Count == 0) return hits;
+            Dictionary<string, Candidate> byName = new Dictionary<string, Candidate>();
             int me = Process.GetCurrentProcess().Id;
 
-            Process[] all = Process.GetProcesses();
-            foreach (Process p in all)
+            foreach (Process p in Process.GetProcesses())
             {
                 try
                 {
                     string name;
                     long ws;
-                    try { name = p.ProcessName; ws = p.WorkingSet64; }
+                    int pid;
+                    try { name = p.ProcessName; ws = p.WorkingSet64; pid = p.Id; }
                     catch (Exception) { continue; }
 
-                    if (p.Id == me || p.Id == protectPid) continue;
-                    if (skip != null && skip.Contains(name.ToLowerInvariant())) continue;
+                    if (pid == me || pid == sparePid) continue;
+                    string key = name.ToLowerInvariant();
+                    if (skip != null && skip.Contains(key)) continue;
                     if (IsProtectedProcess(name)) continue;
 
-                    bool wanted = false;
-                    foreach (string pat in patterns)
-                        if (Match(pat, name)) { wanted = true; break; }
-                    if (!wanted) continue;
-
-                    try
+                    Candidate c;
+                    if (!byName.TryGetValue(key, out c))
                     {
-                        p.Kill();
-                        p.WaitForExit(3000);
-                        hits.Add(new KillHit(name, ws));
+                        c = new Candidate(name);
+                        byName[key] = c;
                     }
-                    catch (Exception) { /* already gone, or refuses - the sweep retries later */ }
+                    c.Bytes += ws;
+                    c.Pids.Add(pid);
                 }
                 finally { try { p.Dispose(); } catch (Exception) { } }
+            }
+
+            List<Candidate> list = new List<Candidate>();
+            foreach (KeyValuePair<string, Candidate> kv in byName) list.Add(kv.Value);
+            return list;
+        }
+
+        public bool OnList(List<string> patterns, string name)
+        {
+            foreach (string pat in patterns)
+                if (Match(pat, name)) return true;
+            return false;
+        }
+
+        // Kills everything a Candidate covers. Returns only what actually died -
+        // a process can exit or refuse between the census and here.
+        public List<KillHit> Reap(Candidate c)
+        {
+            List<KillHit> hits = new List<KillHit>();
+            foreach (int pid in c.Pids)
+            {
+                Process p = null;
+                try
+                {
+                    p = Process.GetProcessById(pid);
+                    long ws = p.WorkingSet64;
+                    if (IsProtectedProcess(p.ProcessName)) continue;
+                    p.Kill();
+                    p.WaitForExit(3000);
+                    hits.Add(new KillHit(c.Name, ws));
+                }
+                catch (Exception) { /* gone already, or refuses - the next sweep retries */ }
+                finally { if (p != null) { try { p.Dispose(); } catch (Exception) { } } }
             }
             freedBytes += TotalOf(hits);
             return hits;
@@ -1159,6 +1494,133 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         }
     }
 
+    // ------------------------------------------------------------------ dialog
+
+    // The toast that appears when something you started lands on a kill list.
+    // Bottom-right, always on top, counts down, and defaults to leaving it alone -
+    // the tool should never be the reason you lost work you were in the middle of.
+    internal sealed class AskForm : Form
+    {
+        private static readonly List<AskForm> Open = new List<AskForm>();
+
+        private readonly System.Windows.Forms.Timer countdown;
+        private readonly Label ticker;
+        private int left;
+
+        public Verdict Choice = Verdict.NoAnswer;
+
+        public AskForm(Question q, int seconds)
+        {
+            left = seconds;
+
+            Text = "Idle Master";
+            FormBorderStyle = FormBorderStyle.FixedToolWindow;
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+            TopMost = true;
+            BackColor = Color.FromArgb(24, 24, 30);
+            ForeColor = Color.FromArgb(225, 225, 232);
+            Font = new Font("Segoe UI", 9f);
+            ClientSize = new Size(430, 176);
+
+            Rectangle area = Screen.PrimaryScreen.WorkingArea;
+            Location = new Point(area.Right - Width - 16, area.Bottom - Height - 16);
+
+            Label head = new Label();
+            head.Text = q.What.Name;
+            head.Font = new Font("Segoe UI", 13f, FontStyle.Bold);
+            head.ForeColor = Color.FromArgb(120, 200, 255);
+            head.SetBounds(16, 14, 400, 26);
+            Controls.Add(head);
+
+            string size = Engine.Size(q.What.Bytes);
+            string many = q.What.Pids.Count > 1 ? q.What.Pids.Count + " processes, " : "";
+            Label body = new Label();
+            body.Text = q.OnKillList
+                ? "just started - " + many + size + ".\n\nIt is on your "
+                  + q.Mode.ToUpperInvariant() + " kill list, so the sentry is about to close it."
+                : "just started - " + many + size + ".\n\nIt is on no list, but it is big enough "
+                  + "to be worth asking about.";
+            body.SetBounds(16, 44, 400, 56);
+            Controls.Add(body);
+
+            ticker = new Label();
+            ticker.SetBounds(16, 104, 400, 18);
+            ticker.ForeColor = Color.FromArgb(120, 120, 132);
+            Controls.Add(ticker);
+            Tick();
+
+            Button keep = Btn("Keep it", 16, Color.FromArgb(42, 42, 52));
+            keep.Click += delegate { Answer(Verdict.Keep); };
+
+            Button always = Btn("Always keep", 122, Color.FromArgb(28, 92, 58));
+            always.Click += delegate { Answer(Verdict.KeepAlways); };
+
+            Button kill = Btn("Trash it", 300, Color.FromArgb(110, 40, 40));
+            kill.Click += delegate { Answer(Verdict.Kill); };
+
+            AcceptButton = keep;
+            CancelButton = keep;
+
+            countdown = new System.Windows.Forms.Timer();
+            countdown.Interval = 1000;
+            countdown.Tick += delegate
+            {
+                left--;
+                if (left <= 0) Answer(Verdict.NoAnswer);
+                else Tick();
+            };
+            countdown.Start();
+
+            lock (Open) Open.Add(this);
+        }
+
+        private void Tick()
+        {
+            ticker.Text = "no answer in " + left + "s = left alone, and asked again later";
+        }
+
+        private Button Btn(string text, int x, Color c)
+        {
+            Button b = new Button();
+            b.Text = text;
+            b.SetBounds(x, 132, 100, 30);
+            b.BackColor = c;
+            b.ForeColor = Color.White;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            Controls.Add(b);
+            return b;
+        }
+
+        private void Answer(Verdict v)
+        {
+            Choice = v;
+            countdown.Stop();
+            Close();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            lock (Open) Open.Remove(this);
+            base.OnFormClosed(e);
+        }
+
+        // Called when the sentry is told to stand down while a dialog is still up.
+        public static void CloseAll()
+        {
+            List<AskForm> copy;
+            lock (Open) copy = new List<AskForm>(Open);
+            foreach (AskForm f in copy)
+            {
+                try { if (!f.IsDisposed) f.Answer(Verdict.NoAnswer); }
+                catch (Exception) { }
+            }
+        }
+
+        public static bool AnyOpen { get { lock (Open) return Open.Count > 0; } }
+    }
+
     // ------------------------------------------------------------------ sentry
 
     // A mode is a snapshot: you boost, and twenty minutes later WebView2 is back,
@@ -1180,7 +1642,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly string mode;
 
         private Thread thread;
-        private Mutex instance;
+        private Semaphore slot;          // a Mutex would be thread-affine, and the
+        private bool holding;            // watch can end on either thread
+        private readonly object gate = new object();
         private EventWaitHandle stopFlag;
         private volatile bool stopping;
 
@@ -1196,6 +1660,15 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         // name -> when its backoff expires; name -> how many times we have killed it
         private readonly Dictionary<string, DateTime> cooling = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, int> tally = new Dictionary<string, int>();
+
+        // Everything running when the watch began. Those are the ones the mode was
+        // aimed at, so they die quietly. Anything not in here arrived afterwards,
+        // which means you started it, which means it gets a dialog.
+        private readonly HashSet<string> census = new HashSet<string>();
+        private bool firstSweep = true;
+
+        // Set by whoever owns a UI. Null means nobody can answer, so nothing is asked.
+        public Func<Question, Verdict> Ask;
 
         public Sentry(Config c, Engine e, Action<string> logger, string modeName)
         {
@@ -1217,14 +1690,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             catch (Exception) { return false; }
         }
 
+        // The handle outlives the watch, so existence proves nothing - only failing
+        // to take the slot means somebody else really is holding it.
         public static bool IsRunningSomewhere()
         {
             try
             {
-                Mutex m;
-                if (!Mutex.TryOpenExisting(OnlyOne, out m)) return false;
-                m.Close();
-                return true;
+                Semaphore s;
+                if (!Semaphore.TryOpenExisting(OnlyOne, out s)) return false;
+                bool free = s.WaitOne(0);
+                if (free) s.Release();
+                s.Close();
+                return !free;
             }
             catch (Exception) { return false; }
         }
@@ -1234,12 +1711,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             if (Alive) return true;
             try
             {
-                bool mine;
-                instance = new Mutex(true, OnlyOne, out mine);
-                if (!mine)
+                bool fresh;
+                slot = new Semaphore(1, 1, OnlyOne, out fresh);
+                holding = slot.WaitOne(0);
+                if (!holding)
                 {
-                    instance.Close();
-                    instance = null;
+                    slot.Close();
+                    slot = null;
                     log("[sentry] another sentry already has the watch - not starting a second one");
                     return false;
                 }
@@ -1275,8 +1753,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         public void Stop()
         {
-            if (!Alive) { Release(); return; }
             stopping = true;
+            AskForm.CloseAll();     // a dialog nobody answered must not hold the join
+            if (!Alive) { Release(); return; }
             try { if (stopFlag != null) stopFlag.Set(); }
             catch (Exception) { }
             try { thread.Join(4000); }
@@ -1286,11 +1765,26 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 + Engine.Size(Reclaimed) + " kept out of RAM.");
         }
 
+        // Safe to call from either thread, and safe to call twice: whoever finishes
+        // first frees the slot so the next sentry - in this process or another -
+        // can take the watch immediately.
+        private void ReleaseSlot()
+        {
+            lock (gate)
+            {
+                if (!holding || slot == null) return;
+                try { slot.Release(); }
+                catch (Exception) { }
+                try { slot.Close(); }
+                catch (Exception) { }
+                holding = false;
+                slot = null;
+            }
+        }
+
         private void Release()
         {
-            try { if (instance != null) { instance.ReleaseMutex(); instance.Close(); } }
-            catch (Exception) { }
-            instance = null;
+            ReleaseSlot();
             try { if (stopFlag != null) { stopFlag.Reset(); stopFlag.Close(); } }
             catch (Exception) { }
             stopFlag = null;
@@ -1300,9 +1794,6 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         private void Loop()
         {
-            List<string> patterns = engine.PatternsFor(mode);
-            List<string> services = engine.ServicesFor(mode);
-
             DateTime nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
             DateTime nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
             DateTime nextGuard = DateTime.Now.AddMinutes(cfg.SentryGuardMinutes);
@@ -1311,11 +1802,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             {
                 try
                 {
-                    SweepProcesses(patterns);
+                    // Rebuilt every sweep, so edits made in the config window take
+                    // effect without restarting the watch.
+                    SweepProcesses(engine.PatternsFor(mode));
 
                     if (DateTime.Now >= nextService)
                     {
-                        SweepServices(services);
+                        SweepServices(engine.ServicesFor(mode));
                         nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
                     }
 
@@ -1352,6 +1845,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 catch (Exception) { break; }
             }
             stopping = true;
+            ReleaseSlot();     // stopped from outside: hand the watch back right away
         }
 
         private void SweepProcesses(List<string> patterns)
@@ -1364,7 +1858,62 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             int spare = 0;
             if (mode == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
 
-            List<KillHit> hits = engine.Hunt(patterns, skip, spare);
+            List<Candidate> all = engine.Census(skip, spare);
+            List<KillHit> hits = new List<KillHit>();
+
+            foreach (Candidate c in all)
+            {
+                bool listed = engine.OnList(patterns, c.Name);
+
+                if (firstSweep)
+                {
+                    // Opening census: everything present now is what the mode was for.
+                    census.Add(c.Key);
+                    if (listed) hits.AddRange(engine.Reap(c));
+                    continue;
+                }
+
+                bool newcomer = !census.Contains(c.Key);
+                if (!listed && !newcomer) continue;                 // untouched, as always
+                if (!listed && cfg.AskAboveMb <= 0) { census.Add(c.Key); continue; }
+                if (!listed && c.Bytes < (long)cfg.AskAboveMb * 1024 * 1024)
+                {
+                    census.Add(c.Key);                              // small and harmless
+                    continue;
+                }
+
+                // Something already known to be junk, respawning: no question.
+                if (listed && !newcomer) { hits.AddRange(engine.Reap(c)); continue; }
+
+                switch (Consult(c, listed))
+                {
+                    case Verdict.Kill:
+                        hits.AddRange(engine.Reap(c));
+                        census.Add(c.Key);                          // silent from now on
+                        if (!listed && Config.Append("boost.kill", c.Name))
+                        {
+                            cfg.BoostKill.Add(c.Name);
+                            log("[sentry] " + c.Name + " added to the boost kill list");
+                        }
+                        break;
+
+                    case Verdict.KeepAlways:
+                        if (Config.Append("protect", c.Name))
+                        {
+                            cfg.Protect.Add(c.Name);
+                            log("[sentry] " + c.Name + " is protected from now on");
+                        }
+                        break;
+
+                    default:    // Keep, or nobody answered
+                        cooling[c.Key] = DateTime.Now.AddMinutes(cfg.SentryBackoffMinutes);
+                        log("[sentry] leaving " + c.Name + " alone for "
+                            + cfg.SentryBackoffMinutes + " min");
+                        break;
+                }
+            }
+
+            firstSweep = false;
             if (hits.Count == 0) return;
 
             Dictionary<string, int> byName = new Dictionary<string, int>();
@@ -1402,6 +1951,22 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             }
         }
 
+        // Put the question to whoever is at the keyboard. With no UI, or in idle
+        // mode where nobody is watching, the lists decide on their own.
+        private Verdict Consult(Candidate c, bool listed)
+        {
+            if (!cfg.AskBeforeKill || Ask == null || mode == "idle" || stopping)
+                return listed ? Verdict.Kill : Verdict.Keep;
+
+            Question q = new Question();
+            q.What = c;
+            q.OnKillList = listed;
+            q.Mode = mode;
+            log("[sentry] " + c.Name + " showed up (" + Engine.Size(c.Bytes) + ") - asking you");
+            try { return Ask(q); }
+            catch (Exception) { return Verdict.Keep; }
+        }
+
         private void ExpireBackoff()
         {
             if (cooling.Count == 0) return;
@@ -1437,6 +2002,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public static string Dir
         {
             get { return Path.GetDirectoryName(Application.ExecutablePath); }
+        }
+
+        public static string Version
+        {
+            get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); }
         }
 
         private static string LogPath { get { return Path.Combine(Dir, "idlemaster.log"); } }
@@ -1526,14 +2096,20 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Console.WriteLine("no mode given, enforcing the last one: " + enforce);
                 }
 
-                Sentry sentry = new Sentry(cfg, eng, logger, enforce);
-                if (!sentry.Start()) return 1;
-                Console.CancelKeyPress += delegate(object s, ConsoleCancelEventArgs e)
+                if (Sentry.IsRunningSomewhere())
                 {
-                    e.Cancel = true;
-                    sentry.Stop();
-                };
-                sentry.Join();
+                    Console.WriteLine("a sentry is already on watch - nothing to do.");
+                    return 1;
+                }
+
+                // The watch runs as a tray app rather than a console loop: it needs
+                // a message pump to put the "something just started" dialog on screen.
+                Console.WriteLine("hunting " + enforce + " in the tray. --unwatch stops it.");
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                MainForm form = new MainForm(cfg);
+                form.HideOnStart(enforce);
+                Application.Run(form);
             }
             return 0;
         }
@@ -1572,6 +2148,574 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         }
     }
 
+    // ---------------------------------------------------------------- updates
+
+    // Asks GitHub what the newest release is and, if you say yes, hands over to the
+    // installer for that release. The installer knows how to replace a running exe,
+    // so updating is the same operation as installing.
+    internal static class Updater
+    {
+        public const string Repo = "Mild-Solvent/Iddle-Master";
+        // Deliberately NOT /releases/latest: that endpoint pretends prereleases do
+        // not exist, and every release of this thing so far is a beta. The list
+        // endpoint returns newest first and includes them.
+        private const string Api = "https://api.github.com/repos/" + Repo + "/releases?per_page=10";
+        private const string Asset = "IdleMasterSetup.exe";
+
+        public sealed class Release
+        {
+            public string Tag = "";
+            public string Url = "";
+            public bool Newer;
+        }
+
+        public static Release Latest()
+        {
+            // .NET 4 defaults to SSL3/TLS1.0, which GitHub refused years ago.
+            try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; }
+            catch (Exception) { }
+
+            using (WebClient w = new WebClient())
+            {
+                w.Headers.Add("User-Agent", "IdleMaster/" + App.Version);
+                w.Headers.Add("Accept", "application/vnd.github+json");
+                string json = w.DownloadString(Api);
+
+                Release r = new Release();
+                MatchCollection tags = Regex.Matches(json, "\"tag_name\"\\s*:\\s*\"([^\"]+)\"");
+                if (tags.Count == 0) return r;
+
+                r.Tag = tags[0].Groups[1].Value;
+
+                // Assets are listed inside the release they belong to, so the
+                // newest release's assets are everything before the next tag_name.
+                int from = tags[0].Index;
+                int to = tags.Count > 1 ? tags[1].Index : json.Length;
+                Match url = Regex.Match(json.Substring(from, to - from),
+                    "\"browser_download_url\"\\s*:\\s*\"([^\"]*" + Regex.Escape(Asset) + ")\"",
+                    RegexOptions.IgnoreCase);
+                if (url.Success) r.Url = url.Groups[1].Value;
+
+                r.Newer = IsNewer(r.Tag, App.Version);
+                return r;
+            }
+        }
+
+        // "v0.3.0-beta" beats "0.2.0". Anything unparseable counts as not newer.
+        public static bool IsNewer(string remote, string local)
+        {
+            int[] a = Parts(remote), b = Parts(local);
+            for (int i = 0; i < 4; i++)
+            {
+                if (a[i] > b[i]) return true;
+                if (a[i] < b[i]) return false;
+            }
+            return false;
+        }
+
+        private static int[] Parts(string tag)
+        {
+            int[] n = new int[4];
+            if (string.IsNullOrEmpty(tag)) return n;
+            string s = tag.Trim();
+            if (s.StartsWith("v", StringComparison.OrdinalIgnoreCase)) s = s.Substring(1);
+            int dash = s.IndexOf('-');
+            if (dash >= 0) s = s.Substring(0, dash);
+            string[] bits = s.Split('.');
+            for (int i = 0; i < bits.Length && i < 4; i++)
+                int.TryParse(bits[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out n[i]);
+            return n;
+        }
+
+        // Downloads the installer for a release into TEMP and returns its path.
+        public static string Fetch(Release r)
+        {
+            string to = Path.Combine(Path.GetTempPath(), Asset);
+            using (WebClient w = new WebClient())
+            {
+                w.Headers.Add("User-Agent", "IdleMaster/" + App.Version);
+                w.DownloadFile(r.Url, to);
+            }
+            return to;
+        }
+    }
+
+    // ------------------------------------------------------------ config window
+
+    // Pick names off the machine instead of typing them: running processes by how
+    // much RAM they are actually costing, or installed services by display name.
+    internal sealed class PickForm : Form
+    {
+        private readonly CheckedListBox box = new CheckedListBox();
+        private readonly List<string> values = new List<string>();
+        public readonly List<string> Picked = new List<string>();
+
+        public PickForm(string title, bool services)
+        {
+            Text = title;
+            Size = new Size(560, 520);
+            StartPosition = FormStartPosition.CenterParent;
+            BackColor = Color.FromArgb(24, 24, 30);
+            ForeColor = Color.FromArgb(225, 225, 232);
+            Font = new Font("Segoe UI", 9f);
+
+            box.SetBounds(12, 12, 520, 420);
+            box.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            box.BackColor = Color.FromArgb(14, 14, 18);
+            box.ForeColor = Color.FromArgb(210, 225, 215);
+            box.CheckOnClick = true;
+            box.BorderStyle = BorderStyle.FixedSingle;
+            Controls.Add(box);
+
+            if (services) FillServices(); else FillProcesses();
+
+            Button ok = new Button();
+            ok.Text = "Add selected";
+            ok.SetBounds(316, 444, 105, 30);
+            ok.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            ok.BackColor = Color.FromArgb(28, 92, 58);
+            ok.ForeColor = Color.White;
+            ok.FlatStyle = FlatStyle.Flat;
+            ok.FlatAppearance.BorderSize = 0;
+            ok.Click += delegate
+            {
+                foreach (int i in box.CheckedIndices) Picked.Add(values[i]);
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+            Controls.Add(ok);
+
+            Button cancel = new Button();
+            cancel.Text = "Cancel";
+            cancel.SetBounds(427, 444, 105, 30);
+            cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            cancel.BackColor = Color.FromArgb(42, 42, 52);
+            cancel.ForeColor = Color.FromArgb(225, 225, 232);
+            cancel.FlatStyle = FlatStyle.Flat;
+            cancel.FlatAppearance.BorderSize = 0;
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cancel);
+            CancelButton = cancel;
+        }
+
+        private void FillProcesses()
+        {
+            Dictionary<string, long> ram = new Dictionary<string, long>();
+            Dictionary<string, int> count = new Dictionary<string, int>();
+            foreach (Process p in Process.GetProcesses())
+            {
+                try
+                {
+                    string n = p.ProcessName;
+                    if (!ram.ContainsKey(n)) { ram[n] = 0; count[n] = 0; }
+                    ram[n] += p.WorkingSet64;
+                    count[n]++;
+                }
+                catch (Exception) { }
+                finally { try { p.Dispose(); } catch (Exception) { } }
+            }
+            List<KeyValuePair<string, long>> sorted = new List<KeyValuePair<string, long>>(ram);
+            sorted.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
+            { return b.Value.CompareTo(a.Value); });
+
+            foreach (KeyValuePair<string, long> kv in sorted)
+            {
+                values.Add(kv.Key);
+                box.Items.Add(string.Format(CultureInfo.InvariantCulture, "{0,-34} {1,8}  {2}",
+                    kv.Key, Engine.Size(kv.Value), count[kv.Key] > 1 ? "x" + count[kv.Key] : ""));
+            }
+        }
+
+        private void FillServices()
+        {
+            List<ServiceController> all = new List<ServiceController>(ServiceController.GetServices());
+            all.Sort(delegate(ServiceController a, ServiceController b)
+            {
+                int byState = (b.Status == ServiceControllerStatus.Running ? 1 : 0)
+                            - (a.Status == ServiceControllerStatus.Running ? 1 : 0);
+                if (byState != 0) return byState;
+                return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+            });
+            foreach (ServiceController sc in all)
+            {
+                try
+                {
+                    values.Add(sc.ServiceName);
+                    box.Items.Add((sc.Status == ServiceControllerStatus.Running ? "* " : "  ")
+                        + sc.ServiceName + "   -   " + sc.DisplayName);
+                }
+                catch (Exception) { }
+            }
+        }
+    }
+
+    // One editable list: everything in a section, commented-out entries included
+    // as unchecked rows so you can see what the config ships and turn it on.
+    internal sealed class ListPane : Panel
+    {
+        private readonly string section;
+        private readonly bool services;
+        private readonly CheckedListBox box = new CheckedListBox();
+        private readonly List<IniFile.Entry> before;
+
+        public ListPane(IniFile ini, string sectionName, string caption, bool isServices)
+        {
+            section = sectionName;
+            services = isServices;
+            before = ini.Section(section);
+
+            BackColor = Color.FromArgb(24, 24, 30);
+            ForeColor = Color.FromArgb(225, 225, 232);
+
+            Label head = new Label();
+            head.Text = caption;
+            head.ForeColor = Color.FromArgb(120, 200, 255);
+            head.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+            head.SetBounds(6, 6, 300, 18);
+            Controls.Add(head);
+
+            box.SetBounds(6, 28, 320, 300);
+            box.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            box.BackColor = Color.FromArgb(14, 14, 18);
+            box.ForeColor = Color.FromArgb(210, 225, 215);
+            box.Font = new Font("Consolas", 9f);
+            box.CheckOnClick = true;
+            box.BorderStyle = BorderStyle.FixedSingle;
+            Controls.Add(box);
+
+            foreach (IniFile.Entry e in before) box.Items.Add(e.Text, e.Enabled);
+
+            Button add = Btn("Add from machine", 6, 334, 130);
+            add.Click += delegate { Pick(); };
+
+            Button typed = Btn("Type one", 142, 334, 88);
+            typed.Click += delegate { Typed(); };
+
+            Button del = Btn("Remove", 236, 334, 90);
+            del.Click += delegate
+            {
+                for (int i = box.Items.Count - 1; i >= 0; i--)
+                    if (box.SelectedIndices.Contains(i)) box.Items.RemoveAt(i);
+            };
+        }
+
+        private Button Btn(string text, int x, int y, int w)
+        {
+            Button b = new Button();
+            b.Text = text;
+            b.SetBounds(x, y, w, 28);
+            b.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            b.BackColor = Color.FromArgb(42, 42, 52);
+            b.ForeColor = Color.FromArgb(225, 225, 232);
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            Controls.Add(b);
+            return b;
+        }
+
+        private void Pick()
+        {
+            using (PickForm f = new PickForm(services ? "Running services" : "Running processes", services))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                foreach (string v in f.Picked)
+                {
+                    if (Has(v)) continue;
+                    box.Items.Add(v, true);
+                }
+            }
+        }
+
+        private void Typed()
+        {
+            using (Form f = new Form())
+            {
+                f.Text = "Add entry";
+                f.FormBorderStyle = FormBorderStyle.FixedDialog;
+                f.StartPosition = FormStartPosition.CenterParent;
+                f.ClientSize = new Size(340, 96);
+                f.BackColor = Color.FromArgb(24, 24, 30);
+                f.ForeColor = Color.FromArgb(225, 225, 232);
+                f.MinimizeBox = f.MaximizeBox = false;
+
+                Label l = new Label();
+                l.Text = services ? "Service name:" : "Process name ('*' allowed):";
+                l.SetBounds(12, 10, 300, 18);
+                f.Controls.Add(l);
+
+                TextBox t = new TextBox();
+                t.SetBounds(12, 32, 316, 22);
+                t.BackColor = Color.FromArgb(14, 14, 18);
+                t.ForeColor = Color.FromArgb(225, 225, 232);
+                t.BorderStyle = BorderStyle.FixedSingle;
+                f.Controls.Add(t);
+
+                Button ok = new Button();
+                ok.Text = "Add";
+                ok.SetBounds(228, 60, 100, 28);
+                ok.BackColor = Color.FromArgb(28, 92, 58);
+                ok.ForeColor = Color.White;
+                ok.FlatStyle = FlatStyle.Flat;
+                ok.FlatAppearance.BorderSize = 0;
+                ok.DialogResult = DialogResult.OK;
+                f.Controls.Add(ok);
+                f.AcceptButton = ok;
+
+                if (f.ShowDialog(this) != DialogResult.OK) return;
+                string v = t.Text.Trim();
+                if (v.Length == 0 || Has(v)) return;
+                box.Items.Add(v, true);
+            }
+        }
+
+        private bool Has(string v)
+        {
+            foreach (object o in box.Items)
+                if (string.Equals(o.ToString(), v, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        public void Save(IniFile ini)
+        {
+            List<string> now = new List<string>();
+            for (int i = 0; i < box.Items.Count; i++) now.Add(box.Items[i].ToString());
+
+            foreach (IniFile.Entry e in before)
+            {
+                int at = -1;
+                for (int i = 0; i < now.Count; i++)
+                    if (now[i].Equals(e.Text, StringComparison.OrdinalIgnoreCase)) { at = i; break; }
+
+                if (at < 0) { ini.Remove(section, e.Text); continue; }
+                bool on = box.GetItemChecked(at);
+                if (on != e.Enabled) ini.SetEnabled(section, e.Text, on);
+            }
+
+            for (int i = 0; i < now.Count; i++)
+            {
+                bool old = false;
+                foreach (IniFile.Entry e in before)
+                    if (now[i].Equals(e.Text, StringComparison.OrdinalIgnoreCase)) { old = true; break; }
+                if (old) continue;
+                ini.Add(section, now[i]);
+                if (!box.GetItemChecked(i)) ini.SetEnabled(section, now[i], false);
+            }
+        }
+    }
+
+    // The whole config, with no text editor in sight.
+    internal sealed class ConfigForm : Form
+    {
+        // key, label
+        private static readonly string[][] Flags = new string[][]
+        {
+            new string[] { "Sentry",               "Keep hunting after a mode has run" },
+            new string[] { "AskBeforeKill",        "Ask before killing anything that started after the boost" },
+            new string[] { "SentrySkipForeground", "Never kill the window you are using (boost only)" },
+            new string[] { "Tray",                 "Tray icon - closing the window hides to it" },
+            new string[] { "KillExplorer",         "Absolute idle also closes the shell (taskbar, desktop)" },
+            new string[] { "NetworkGuard",         "Check Sunshine + Tailscale, restart them if they die" },
+            new string[] { "TrimWorkingSets",      "Squeeze the working set of every surviving process" },
+            new string[] { "ClearStandbyList",     "Purge the standby (cached) list" },
+            new string[] { "CloseBrowsersInBoost", "Boost closes browsers too" },
+        };
+
+        // key, label, min, max, default
+        private static readonly string[][] Numbers = new string[][]
+        {
+            new string[] { "SentrySeconds",        "Sweep for new junk every (seconds)",            "5", "3600", "20" },
+            new string[] { "SentryServiceMinutes", "Re-stop restarted services every (minutes)",    "1", "1440", "5" },
+            new string[] { "SentryTrimMinutes",    "Re-trim RAM every (minutes)",                   "1", "1440", "10" },
+            new string[] { "SentryGuardMinutes",   "Check the stream stack every (minutes)",        "1", "1440", "5" },
+            new string[] { "SentryRespawnLimit",   "Give up on a process after this many respawns", "1", "100",  "6" },
+            new string[] { "SentryBackoffMinutes", "...and leave it alone for (minutes)",           "1", "1440", "30" },
+            new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "25" },
+            new string[] { "AskAboveMb",           "Ask about unlisted newcomers bigger than (MB, 0 = off)", "0", "99999", "250" },
+            new string[] { "TrimWhenFreeBelowMb",  "Emergency trim when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
+        };
+
+        private readonly IniFile ini = new IniFile();
+        private readonly Dictionary<string, CheckBox> flags = new Dictionary<string, CheckBox>();
+        private readonly Dictionary<string, NumericUpDown> numbers = new Dictionary<string, NumericUpDown>();
+        private readonly List<ListPane> panes = new List<ListPane>();
+
+        public bool Saved;
+
+        public ConfigForm()
+        {
+            Text = "Idle Master - configuration";
+            Size = new Size(780, 660);
+            MinimumSize = new Size(680, 560);
+            StartPosition = FormStartPosition.CenterParent;
+            BackColor = Color.FromArgb(18, 18, 22);
+            ForeColor = Color.FromArgb(225, 225, 232);
+            Font = new Font("Segoe UI", 9f);
+
+            TabControl tabs = new TabControl();
+            tabs.SetBounds(10, 10, 754, 560);
+            tabs.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(tabs);
+
+            tabs.TabPages.Add(SettingsTab());
+            tabs.TabPages.Add(Pair("Never touch", "protect", "Processes that survive everything",
+                                                  "protect.services", "Services that survive everything"));
+            tabs.TabPages.Add(Pair("Boost now", "boost.kill", "Processes closed by Boost",
+                                                "boost.services", "Services stopped by Boost"));
+            tabs.TabPages.Add(Pair("Absolute idle", "idle.kill", "Also closed by Absolute Idle",
+                                                    "idle.services", "Also stopped by Absolute Idle"));
+            tabs.TabPages.Add(Single("Restore", "restore.launch",
+                "Relaunched by Restore desktop  (full path, optional |arguments)"));
+
+            Label hint = new Label();
+            hint.Text = "Unchecked entries stay in the file, commented out. Nothing here can override "
+                      + "'Never touch'.";
+            hint.ForeColor = Color.FromArgb(120, 120, 132);
+            hint.SetBounds(14, 580, 520, 32);
+            hint.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(hint);
+
+            Button save = new Button();
+            save.Text = "Save";
+            save.SetBounds(556, 580, 100, 30);
+            save.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            save.BackColor = Color.FromArgb(28, 92, 58);
+            save.ForeColor = Color.White;
+            save.FlatStyle = FlatStyle.Flat;
+            save.FlatAppearance.BorderSize = 0;
+            save.Click += delegate { Persist(); };
+            Controls.Add(save);
+
+            Button cancel = new Button();
+            cancel.Text = "Cancel";
+            cancel.SetBounds(664, 580, 100, 30);
+            cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            cancel.BackColor = Color.FromArgb(42, 42, 52);
+            cancel.ForeColor = Color.FromArgb(225, 225, 232);
+            cancel.FlatStyle = FlatStyle.Flat;
+            cancel.FlatAppearance.BorderSize = 0;
+            cancel.Click += delegate { Close(); };
+            Controls.Add(cancel);
+            CancelButton = cancel;
+        }
+
+        private TabPage SettingsTab()
+        {
+            TabPage page = new TabPage("Settings");
+            page.BackColor = Color.FromArgb(24, 24, 30);
+            page.ForeColor = Color.FromArgb(225, 225, 232);
+            page.AutoScroll = true;
+
+            int y = 12;
+            foreach (string[] f in Flags)
+            {
+                CheckBox c = new CheckBox();
+                c.Text = f[1];
+                c.Checked = Truthy(ini.GetSetting(f[0]), true);
+                c.SetBounds(16, y, 700, 24);
+                c.ForeColor = Color.FromArgb(225, 225, 232);
+                page.Controls.Add(c);
+                flags[f[0]] = c;
+                y += 26;
+            }
+
+            y += 10;
+            foreach (string[] n in Numbers)
+            {
+                Label l = new Label();
+                l.Text = n[1];
+                l.SetBounds(16, y + 4, 480, 20);
+                page.Controls.Add(l);
+
+                NumericUpDown u = new NumericUpDown();
+                u.Minimum = decimal.Parse(n[2], CultureInfo.InvariantCulture);
+                u.Maximum = decimal.Parse(n[3], CultureInfo.InvariantCulture);
+                u.Value = Clamp(u, ini.GetSetting(n[0]), n[4]);
+                u.SetBounds(504, y, 90, 22);
+                u.BackColor = Color.FromArgb(14, 14, 18);
+                u.ForeColor = Color.FromArgb(225, 225, 232);
+                u.BorderStyle = BorderStyle.FixedSingle;
+                page.Controls.Add(u);
+                numbers[n[0]] = u;
+                y += 28;
+            }
+            return page;
+        }
+
+        private static decimal Clamp(NumericUpDown u, string raw, string fallback)
+        {
+            decimal d;
+            if (raw == null || !decimal.TryParse(raw.Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out d))
+                d = decimal.Parse(fallback, CultureInfo.InvariantCulture);
+            if (d < u.Minimum) d = u.Minimum;
+            if (d > u.Maximum) d = u.Maximum;
+            return d;
+        }
+
+        private static bool Truthy(string v, bool fallback)
+        {
+            if (v == null) return fallback;
+            v = v.Trim();
+            return v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase)
+                || v.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private TabPage Pair(string title, string leftSection, string leftCaption,
+                             string rightSection, string rightCaption)
+        {
+            TabPage page = new TabPage(title);
+            page.BackColor = Color.FromArgb(24, 24, 30);
+
+            ListPane left = new ListPane(ini, leftSection, leftCaption, false);
+            left.SetBounds(4, 4, 366, 490);
+            left.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            page.Controls.Add(left);
+
+            ListPane right = new ListPane(ini, rightSection, rightCaption, true);
+            right.SetBounds(376, 4, 366, 490);
+            right.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            page.Controls.Add(right);
+
+            panes.Add(left);
+            panes.Add(right);
+            return page;
+        }
+
+        private TabPage Single(string title, string section, string caption)
+        {
+            TabPage page = new TabPage(title);
+            page.BackColor = Color.FromArgb(24, 24, 30);
+
+            ListPane pane = new ListPane(ini, section, caption, false);
+            pane.SetBounds(4, 4, 738, 490);
+            pane.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            page.Controls.Add(pane);
+
+            panes.Add(pane);
+            return page;
+        }
+
+        private void Persist()
+        {
+            try
+            {
+                foreach (KeyValuePair<string, CheckBox> kv in flags)
+                    ini.SetSetting(kv.Key, kv.Value.Checked ? "1" : "0");
+                foreach (KeyValuePair<string, NumericUpDown> kv in numbers)
+                    ini.SetSetting(kv.Key, ((int)kv.Value.Value).ToString(CultureInfo.InvariantCulture));
+                foreach (ListPane p in panes) p.Save(ini);
+                ini.Save();
+                Saved = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the config:\n\n" + ex.Message,
+                    "Idle Master", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
     // ------------------------------------------------------------------- gui
 
     internal sealed class MainForm : Form
@@ -1587,6 +2731,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly Label sentryLabel;
         private readonly System.Windows.Forms.Timer timer;
         private Sentry sentry;
+        private NotifyIcon tray;
+        private bool reallyExit;
+        private bool startHidden;
+        private bool watchMode;
 
         private static readonly Color Bg = Color.FromArgb(18, 18, 22);
         private static readonly Color Fg = Color.FromArgb(225, 225, 232);
@@ -1613,7 +2761,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             Controls.Add(title);
 
             Label sub = new Label();
-            sub.Text = "Sunshine + Tailscale stay up. Everything else is negotiable.";
+            sub.Text = "Sunshine + Tailscale stay up. Everything else is negotiable.   v" + App.Version;
             sub.ForeColor = Dim;
             sub.SetBounds(22, 50, 500, 20);
             Controls.Add(sub);
@@ -1650,12 +2798,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             btnReport.Click += delegate { Run("report"); };
             btnTrim = SmallButton("Trim RAM now", 342, 306);
             btnTrim.Click += delegate { Run("trim"); };
-            btnConfig = SmallButton("Edit config", 502, 306);
-            btnConfig.Click += delegate
-            {
-                try { Process.Start(new ProcessStartInfo("notepad.exe", "\"" + Config.Path_ + "\"")); }
-                catch (Exception ex) { AppendLog("! " + ex.Message); }
-            };
+            btnConfig = SmallButton("Settings", 502, 306);
+            btnConfig.Click += delegate { EditConfig(); };
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
@@ -1697,19 +2841,117 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 AppendLog("Note: last run was '" + st.Mode + "' and has not been restored yet ("
                     + st.StoppedServices.Count + " services still stopped).");
 
+            if (cfg.Tray) BuildTray();
+
             // A mode was run earlier and never restored - pick the watch back up.
             if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry && !Sentry.IsRunningSomewhere())
                 StartSentry(st.Mode);
 
-            FormClosing += delegate { StopSentry(false); };
+            FormClosing += OnClosing;
+        }
+
+        // Started by --watch: no window, just the tray icon and the sentry.
+        public void HideOnStart(string enforce)
+        {
+            startHidden = true;
+            watchMode = true;
+            WindowState = FormWindowState.Minimized;
+            // Touching Handle builds the window now, on this thread, so the sentry
+            // has something to marshal its dialogs onto before anything is shown.
+            IntPtr forced = Handle;
+            GC.KeepAlive(forced);
+            if (enforce.Length > 0) StartSentry(enforce);
+        }
+
+        protected override void SetVisibleCore(bool value)
+        {
+            if (startHidden)
+            {
+                startHidden = false;
+                base.SetVisibleCore(false);
+                return;
+            }
+            base.SetVisibleCore(value);
+        }
+
+        private void BuildTray()
+        {
+            tray = new NotifyIcon();
+            tray.Icon = SystemIcons.Shield;
+            tray.Text = "Idle Master";
+            tray.Visible = true;
+            tray.DoubleClick += delegate { ShowWindow(); };
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Items.Add("Open Idle Master", null, delegate { ShowWindow(); });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Boost now", null, delegate { ShowWindow(); Run("boost"); });
+            menu.Items.Add("Absolute idle", null, delegate { ShowWindow(); ConfirmIdle(); });
+            menu.Items.Add("Restore desktop", null, delegate { ShowWindow(); Run("restore"); });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Stop hunting", null, delegate
+            {
+                chkSentry.Checked = false;
+                StopSentry();
+            });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
+            menu.Items.Add("Exit", null, delegate { reallyExit = true; Close(); });
+            tray.ContextMenuStrip = menu;
+        }
+
+        private void ShowWindow()
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+        }
+
+        // Closing the window while the sentry is up would let RAM drift back, so
+        // it goes to the tray instead. Exit from the tray menu when you mean it.
+        private void OnClosing(object sender, FormClosingEventArgs e)
+        {
+            bool hunting = sentry != null && sentry.Alive;
+            if (!reallyExit && cfg.Tray && hunting && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+                try
+                {
+                    tray.ShowBalloonTip(4000, "Still hunting",
+                        "Idle Master is holding " + sentry.Mode.ToUpperInvariant()
+                        + " in the tray. Right-click the icon to stop it.", ToolTipIcon.Info);
+                }
+                catch (Exception) { }
+                return;
+            }
+            StopSentry(false);
+            if (tray != null) { tray.Visible = false; tray.Dispose(); }
         }
 
         private void StartSentry(string mode)
         {
             if (sentry != null && sentry.Alive) return;
             sentry = new Sentry(cfg, engine, AppendLog, mode);
+            sentry.Ask = AskOnUiThread;
             if (!sentry.Start()) sentry = null;
             UpdateSentry();
+        }
+
+        // Called from the sentry's thread; blocks it until you answer or it times
+        // out. That is fine - the next sweep is 20 seconds away anyway.
+        private Verdict AskOnUiThread(Question q)
+        {
+            if (InvokeRequired)
+            {
+                try { return (Verdict)Invoke((Func<Question, Verdict>)AskOnUiThread, q); }
+                catch (Exception) { return Verdict.Keep; }
+            }
+            using (AskForm f = new AskForm(q, cfg.AskTimeoutSeconds))
+            {
+                f.ShowDialog();
+                return f.Choice;
+            }
         }
 
         // disarm=false is "the window is closing" - the watch should resume next launch.
@@ -1749,7 +2991,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private void UpdateSentry()
         {
             bool on = sentry != null && sentry.Alive;
-            if (!on && chkSentry.Checked && sentry != null) { sentry = null; }
+            if (!on && sentry != null)
+            {
+                sentry = null;
+                // --unwatch (or Restore from elsewhere) killed the watch, and a tray
+                // app with nothing to do is just a stray icon.
+                if (watchMode) { reallyExit = true; Close(); return; }
+            }
 
             if (on)
             {
@@ -1769,6 +3017,78 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 sentryLabel.Text = "off - RAM will drift back up on its own";
                 sentryLabel.ForeColor = Dim;
             }
+        }
+
+        // Asks GitHub, then hands the decision to you. Nothing downloads until you
+        // say so, and the installer that arrives is the one you publish.
+        private void CheckUpdates()
+        {
+            AppendLog("Asking GitHub about newer releases (you are on " + App.Version + ")...");
+            Thread t = new Thread(delegate()
+            {
+                Updater.Release r;
+                try { r = Updater.Latest(); }
+                catch (Exception ex)
+                {
+                    AppendLog("! update check failed: " + ex.Message.Split('\n')[0]);
+                    return;
+                }
+
+                BeginInvoke((Action)delegate
+                {
+                    if (!r.Newer)
+                    {
+                        AppendLog("You are on the newest release (" + App.Version
+                            + (r.Tag.Length > 0 ? ", latest published is " + r.Tag : "") + ").");
+                        return;
+                    }
+                    if (r.Url.Length == 0)
+                    {
+                        AppendLog("! " + r.Tag + " is out but has no installer attached.");
+                        return;
+                    }
+                    if (MessageBox.Show(this,
+                        r.Tag + " is out (you have " + App.Version + ")."
+                        + "\n\nDownload the installer and run it now? Your config is kept.",
+                        "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+                        != DialogResult.Yes) return;
+
+                    try
+                    {
+                        AppendLog("Downloading " + r.Tag + "...");
+                        string setup = Updater.Fetch(r);
+                        AppendLog("Running " + setup);
+                        Process.Start(new ProcessStartInfo(setup) { UseShellExecute = true });
+                        reallyExit = true;
+                        Close();
+                    }
+                    catch (Exception ex) { AppendLog("! update failed: " + ex.Message.Split('\n')[0]); }
+                });
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // The lists and switches, edited in place. The running sentry picks up the
+        // new config immediately - no restart, no text editor.
+        private void EditConfig()
+        {
+            using (ConfigForm f = new ConfigForm())
+            {
+                f.ShowDialog(this);
+                if (!f.Saved) return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                chkSentry.Checked = cfg.Sentry;
+                AppendLog("Config saved. " + cfg.Protect.Count + " protected names, "
+                    + cfg.BoostKill.Count + " on the boost list, "
+                    + cfg.IdleKill.Count + " more on the idle list.");
+                if (sentry != null && sentry.Alive)
+                    AppendLog("The sentry is using the new lists from its next sweep.");
+            }
+            catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
         }
 
         private Button BigButton(string text, string sub, Color color, int x, int y)
@@ -1852,15 +3172,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
         }
 
+        // Everything the engine and the sentry say arrives here, from any thread.
+        // The file write happens on the UI hop only - doing it before the hop as
+        // well is what put every line in the log twice.
         private void AppendLog(string line)
         {
-            App.FileLog(line);
             if (logBox.InvokeRequired)
             {
                 try { logBox.BeginInvoke((Action<string>)AppendLog, line); }
-                catch (Exception) { }
+                catch (Exception) { App.FileLog(line); }
                 return;
             }
+            App.FileLog(line);
             logBox.AppendText(line + Environment.NewLine);
         }
 

@@ -16,6 +16,32 @@ A boost is only a snapshot, so there is also a **sentry**: after a mode runs it
 keeps sweeping the same lists in the background, and RAM stays where you put it
 instead of drifting back up. See [Keeping it clean](#keeping-it-clean).
 
+## Install
+
+Download **`IdleMasterSetup.exe`** from
+[Releases](https://github.com/Mild-Solvent/Iddle-Master/releases) and run it.
+One file, ~120 KB, the app is carried inside it.
+
+It installs to `%LOCALAPPDATA%\Programs\IdleMaster` — your own profile, so
+installing needs no administrator (the app elevates itself when it runs, which is
+where admin is actually needed). It makes a Start Menu shortcut, registers in
+Windows' *Installed apps* so you can uninstall normally, and can register the
+logon task for you.
+
+**Updating is the same file.** Run a newer setup and it replaces the exe in
+place, keeping `idlemaster.ini` exactly as you left it. Or let the app do it:
+tray icon → **Check for updates**, which asks GitHub, and if there is something
+newer, downloads that release's setup and runs it. Nothing downloads until you
+say yes.
+
+Silent, for scripts:
+
+```
+IdleMasterSetup.exe --silent            install or update, no window
+IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster
+IdleMasterSetup.exe --uninstall         removes it, keeps your config
+```
+
 ## Build
 
 ```bash
@@ -23,7 +49,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Compiles with the .NET Framework compiler that ships inside Windows. No SDK,
-no NuGet, no internet. Output: `dist\IdleMaster.exe`.
+no NuGet, no internet. Outputs `dist\IdleMaster.exe` and `dist\IdleMasterSetup.exe`
+(the app embedded in the installer).
 
 ## Run
 
@@ -90,8 +117,32 @@ list after Absolute Idle — and it stands down the instant you hit Restore. In 
 window it's the *Keep hunting after boost* checkbox, with a live count of what it
 has reaped; on the command line it's `--watch` / `--unwatch`.
 
+### It asks before killing anything you started
+
+On its first sweep the sentry takes a census. Everything running *then* that
+matches a list is the junk the mode was aimed at, and dies without a word.
+Anything that appears **after** that is something you deliberately started, so it
+gets a toast in the corner instead:
+
+> **Docker Desktop** just started — 4 processes, 512 MB.
+> It is on your BOOST kill list, so the sentry is about to close it.
+> `Keep it` · `Always keep` · `Trash it`
+
+- **Keep it** — left alone for 30 minutes, then asked again.
+- **Always keep** — written into `[protect]`, remembered forever.
+- **Trash it** — closed now, and closed silently from then on.
+
+No answer in 25 seconds counts as *keep it*. The tool should never be the reason
+you lost work while you were away from the keyboard.
+
+Set `AskAboveMb` and it also asks about newcomers that are on no list at all but
+bigger than that (250 MB by default) — *Trash it* adds them to `[boost.kill]`, so
+the lists learn from what you actually do. Idle mode never asks: nobody is there.
+
+### Two brakes
+
 Because "kill it every 20 seconds forever" is a good way to make a machine
-miserable, two things hold it back:
+miserable, two more things hold it back:
 
 **Respawn backoff.** If one process name comes back `SentryRespawnLimit` times
 (6 by default), the sentry stops fighting it for 30 minutes and writes a line
@@ -127,7 +178,9 @@ most of the code is about not stranding you.
 **Protected list wins over everything.** `[protect]` and `[protect.services]` in
 the ini are checked before any kill or stop, even if something is also listed in
 a kill list. Sunshine, tailscaled, Defender, lsass, the audio stack, the NVIDIA
-*display* container, and the exe itself are all in there.
+*display* container, Docker and its WSL/Hyper-V backend, and the exe itself are
+all in there. Docker is protected on purpose: containers you left running matter
+more than the RAM the backend costs. Take it out of `[protect]` if you disagree.
 
 **Network guard.** Before finishing (and mid-run, in idle mode) it verifies that
 `SunshineService` and `Tailscale` are running, that something is listening on a
@@ -155,9 +208,17 @@ idle mode leaves the desktop alone.
 
 ## Tuning it
 
-Everything lives in `dist\idlemaster.ini`, next to the exe. Plain text, `*`
-wildcards, `#` comments out a line. The exe re-reads it on every launch — no
-rebuild needed.
+**Settings** in the main window opens the config editor: every switch as a
+checkbox, every interval as a number, and each list as a checklist you can add to
+from what is running right now — pick processes sorted by how much RAM they are
+costing, or services by display name. Unchecking an entry comments it out instead
+of deleting it, so the suggestions that ship commented-out are visible and one
+click from being live. Saving re-reads the config immediately; a running sentry
+picks up the new lists on its next sweep.
+
+It edits `idlemaster.ini` line by line, so every comment in it survives. You can
+still edit the file by hand if you prefer — plain text, `*` wildcards, `#`
+comments out a line.
 
 Two entries are deliberately left commented out because they're the ones that
 could bite you from bed:
@@ -175,11 +236,13 @@ will catch that and scream in the log, but test it once while you're awake.
 ## Files
 
 ```
-src/IdleMaster.cs     everything: engine, sentry, config parser, CLI, WinForms UI
-src/app.manifest      requireAdministrator + per-monitor DPI
-build.ps1             one-line build
-dist/IdleMaster.exe   the thing
-dist/idlemaster.ini   the lists, edit freely
-dist/idlemaster.log   append-only record of every run
-dist/idlemaster.state written by boost/idle, consumed by restore
+src/IdleMaster.cs         engine, sentry, ask dialog, config editor, updater, UI
+src/Setup.cs              the installer; carries the app as an embedded resource
+src/app.manifest          requireAdministrator + per-monitor DPI
+build.ps1                 builds both exes
+dist/IdleMaster.exe       the app
+dist/IdleMasterSetup.exe  the thing you publish and people download
+dist/idlemaster.ini       the lists; edit in Settings or by hand
+dist/idlemaster.log       append-only record of every run
+dist/idlemaster.state     written by boost/idle, consumed by restore
 ```
