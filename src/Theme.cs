@@ -12,26 +12,33 @@ namespace IdleMaster
 {
     internal static class Theme
     {
-        // ---- palette
+        // ---- palette: "Ice"
+        //
+        // One accent hue. Steel blue carries everything positive - titles, the
+        // log, the boost button, the sentry line. The neutrals are the same gray
+        // ladder tinted cold, and red is reserved for absolute idle and for
+        // destroying things. Nothing else gets a colour of its own.
 
-        public static readonly Color Bg      = Color.FromArgb(18, 18, 22);
-        public static readonly Color Panel   = Color.FromArgb(24, 24, 30);
-        public static readonly Color Input   = Color.FromArgb(14, 14, 18);
-        public static readonly Color LogBg   = Color.FromArgb(12, 12, 15);
-        public static readonly Color LogFg   = Color.FromArgb(180, 220, 190);
-        public static readonly Color ListFg  = Color.FromArgb(210, 225, 215);
-        public static readonly Color Fg      = Color.FromArgb(225, 225, 232);
-        public static readonly Color Dim     = Color.FromArgb(120, 120, 132);
-        public static readonly Color Accent  = Color.FromArgb(120, 200, 255);
-        public static readonly Color Good    = Color.FromArgb(28, 92, 58);
-        public static readonly Color Danger  = Color.FromArgb(110, 40, 40);
-        public static readonly Color Neutral = Color.FromArgb(42, 42, 52);
-        public static readonly Color Warn    = Color.FromArgb(220, 140, 80);
-        public static readonly Color Track   = Color.FromArgb(38, 38, 46);
+        public static readonly Color Bg      = Color.FromArgb(17, 19, 24);
+        public static readonly Color Panel   = Color.FromArgb(26, 29, 37);
+        public static readonly Color Input   = Color.FromArgb(13, 15, 19);
+        public static readonly Color LogBg   = Color.FromArgb(11, 13, 17);
+        public static readonly Color LogFg   = Color.FromArgb(168, 203, 232);
+        public static readonly Color ListFg  = Color.FromArgb(174, 200, 222);
+        public static readonly Color Fg      = Color.FromArgb(226, 230, 236);
+        public static readonly Color Dim     = Color.FromArgb(120, 128, 140);
+        public static readonly Color Accent  = Color.FromArgb(143, 193, 240);
+        public static readonly Color Good    = Color.FromArgb(30, 78, 120);     // primary action (boost)
+        public static readonly Color Danger  = Color.FromArgb(110, 40, 48);
+        public static readonly Color Neutral = Color.FromArgb(35, 40, 51);
+        public static readonly Color Warn    = Color.FromArgb(208, 132, 132);   // soft red - failures, idle tag
+        public static readonly Color Track   = Color.FromArgb(35, 40, 51);
 
-        public static readonly Color GaugeOk   = Color.FromArgb(90, 190, 120);
-        public static readonly Color GaugeWarn = Color.FromArgb(220, 180, 70);
-        public static readonly Color GaugeBad  = Color.FromArgb(220, 80, 80);
+        // Blue while fine, reddening as RAM runs out - the only place a colour
+        // change is the message itself.
+        public static readonly Color GaugeOk   = Color.FromArgb(61, 126, 191);
+        public static readonly Color GaugeWarn = Color.FromArgb(176, 96, 96);
+        public static readonly Color GaugeBad  = Color.FromArgb(200, 72, 72);
 
         // ---- fonts
 
