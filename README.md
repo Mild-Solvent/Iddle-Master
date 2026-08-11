@@ -213,8 +213,9 @@ idle mode leaves the desktop alone.
 
 ## Tuning it
 
-The fastest way is the live **What's eating RAM** table in the main window: it
-refreshes every two seconds, tags each row with the list it is on
+The fastest way is **What's eating RAM?**, which opens the Master's own little
+task manager: a live table that refreshes every two seconds, tags each row with
+the list it is on
 (`BOOST` / `IDLE` / `KEEP`), and a right-click offers *End it now*, *Close on
 every boost*, *Also close on absolute idle*, or *Never touch* — each choice is
 written straight into the ini, dated, and picked up by a running sentry on its
@@ -250,7 +251,7 @@ will catch that and scream in the log, but test it once while you're awake.
 
 ```
 src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
-src/Ui.cs                 every window: main, quick + advanced settings, ask toast
+src/Ui.cs                 every window: main, task manager, settings, ask toast
 src/Theme.cs              the dark palette, fonts, and control styling
 src/Setup.cs              the installer; carries the app as an embedded resource
 src/app.manifest          requireAdministrator + per-monitor DPI

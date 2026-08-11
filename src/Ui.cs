@@ -6,7 +6,8 @@
 //   ListPane          : one editable ini section inside the advanced window.
 //   QuickSettingsForm : the handful of switches most people actually touch.
 //   ConfigForm        : the whole config - reached via "Advanced settings".
-//   MainForm          : gauge, mode buttons, live "what's eating RAM" list, log.
+//   EatersForm        : the live task manager behind "What's eating RAM?".
+//   MainForm          : gauge, mode buttons, and the log console front and centre.
 //
 // Same compiler rules as the rest: C# 5, in-box .NET Framework csc.
 
@@ -792,7 +793,7 @@ namespace IdleMaster
         }
     }
 
-    // ------------------------------------------------------------------- gui
+    // ------------------------------------------------------------ task manager
 
     // ListView is the only stock control that can show the eaters table, and the
     // only way to reach its protected DoubleBuffered is to inherit it.
@@ -801,119 +802,47 @@ namespace IdleMaster
         public EaterListView() { DoubleBuffered = true; }
     }
 
-    internal sealed class MainForm : Form
+    // The Master's task manager: what's eating RAM, live, with the verdicts one
+    // right-click away. Opened by the main window; non-modal so the log stays
+    // visible while you work through the list.
+    internal sealed class EatersForm : Form
     {
-        private const int EaterRows = 30;
+        private const int MaxRows = 30;
 
         private readonly Config cfg;
         private readonly Engine engine;
-        private readonly TextBox logBox;
-        private readonly MemGauge gauge;
+        private readonly Action<string> log;
+        private readonly Func<bool> sentryAlive;
         private readonly EaterListView eaters;
         private readonly ColumnHeader colName, colCount, colMem, colTag;
-        private readonly ContextMenuStrip rowMenu;
         private readonly ToolStripMenuItem miKill, miBoost, miIdle, miProtect;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnTrim, btnConfig, btnUpdate;
-        private readonly CheckBox chkSentry;
-        private readonly Label sentryLabel;
-        private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
-        private Sentry sentry;
-        private NotifyIcon tray;
-        private bool reallyExit;
-        private bool startHidden;
-        private bool watchMode;
         private bool rowMenuOpen;
 
-        public MainForm(Config c)
+        public EatersForm(Config c, Engine e, Action<string> logger, Func<bool> sentryUp)
         {
             cfg = c;
-            engine = new Engine(cfg, AppendLog);
+            engine = e;
+            log = logger;
+            sentryAlive = sentryUp;
 
             Theme.Form(this);
-            Text = "IDLE MASTER";
-            ClientSize = new Size(744, 780);
-            MinimumSize = new Size(660, 640);
-            StartPosition = FormStartPosition.CenterScreen;
+            Text = "IDLE MASTER - task manager";
+            Size = new Size(640, 560);
+            MinimumSize = new Size(480, 320);
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
 
-            Label title = new Label();
-            title.Text = "IDLE MASTER";
-            title.Font = Theme.Title();
-            title.ForeColor = Theme.Accent;
-            title.SetBounds(20, 12, 320, 36);
-            Controls.Add(title);
+            Label cap = Theme.Caption("WHAT'S EATING RAM");
+            cap.SetBounds(16, 12, 240, 18);
+            Controls.Add(cap);
 
-            btnUpdate = Theme.Quiet("Updates");
-            btnUpdate.SetBounds(524, 16, 96, 30);
-            btnUpdate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnUpdate.Click += delegate { CheckUpdates(); };
-            Controls.Add(btnUpdate);
-
-            btnConfig = Theme.Quiet("Settings");
-            btnConfig.SetBounds(628, 16, 96, 30);
-            btnConfig.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnConfig.Click += delegate { EditConfig(); };
-            Controls.Add(btnConfig);
-
-            Label sub = Theme.Hint("Sunshine + Tailscale stay up. Everything else is negotiable.");
-            sub.SetBounds(22, 50, 480, 18);
-            Controls.Add(sub);
-
-            updateLabel = Theme.Hint("v" + App.Version + "  -  " + Updater.Repo);
-            updateLabel.SetBounds(22, 70, 700, 18);
-            updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(updateLabel);
-
-            gauge = new MemGauge();
-            gauge.SetBounds(20, 96, 704, 34);
-            gauge.Font = Theme.Bold();
-            gauge.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(gauge);
-
-            btnBoost = BigButton("BOOST NOW",
-                "Kill the background junk. Desktop stays usable.", Theme.Good);
-            btnBoost.Click += delegate { Run("boost"); };
-
-            btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to vitals + Sunshine + Tailscale. For sleep.", Theme.Danger);
-            btnIdle.Click += delegate { ConfirmIdle(); };
-            LayoutBigButtons();
-            Resize += delegate { LayoutBigButtons(); };
-
-            btnRestore = Theme.Quiet("Restore desktop");
-            btnRestore.SetBounds(20, 226, 140, 30);
-            Controls.Add(btnRestore);
-            btnRestore.Click += delegate { Run("restore"); };
-
-            btnTrim = Theme.Quiet("Trim RAM now");
-            btnTrim.SetBounds(168, 226, 140, 30);
-            Controls.Add(btnTrim);
-            btnTrim.Click += delegate { Run("trim"); };
-
-            chkSentry = new CheckBox();
-            chkSentry.Text = "Sentry: keep hunting";
-            chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(330, 230, 160, 22);
-            chkSentry.ForeColor = Theme.Fg;
-            chkSentry.FlatStyle = FlatStyle.Flat;
-            chkSentry.Click += delegate { ToggleSentry(); };
-            Controls.Add(chkSentry);
-
-            sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(496, 232, 228, 18);
-            sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(sentryLabel);
-
-            Label capEaters = Theme.Caption("WHAT'S EATING RAM");
-            capEaters.SetBounds(20, 268, 220, 18);
-            Controls.Add(capEaters);
-
-            Label hintEaters = Theme.Hint("right-click a row to act on it");
-            hintEaters.Font = Theme.Small();
-            hintEaters.TextAlign = ContentAlignment.MiddleRight;
-            hintEaters.SetBounds(464, 268, 260, 18);
-            hintEaters.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            Controls.Add(hintEaters);
+            Label hint = Theme.Hint("updates every 2 s - right-click a row to act on it");
+            hint.Font = Theme.Small();
+            hint.TextAlign = ContentAlignment.MiddleRight;
+            hint.SetBounds(264, 12, 344, 18);
+            hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(hint);
 
             eaters = new EaterListView();
             eaters.View = View.Details;
@@ -925,21 +854,21 @@ namespace IdleMaster
             eaters.BackColor = Theme.Input;
             eaters.ForeColor = Theme.Fg;
             eaters.OwnerDraw = true;
-            eaters.DrawColumnHeader += DrawEaterHeader;
-            eaters.DrawItem += delegate(object s, DrawListViewItemEventArgs e) { e.DrawDefault = true; };
-            eaters.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs e) { e.DrawDefault = true; };
-            colName = eaters.Columns.Add("Process", 420);
+            eaters.DrawColumnHeader += DrawHeader;
+            eaters.DrawItem += delegate(object s, DrawListViewItemEventArgs a) { a.DrawDefault = true; };
+            eaters.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs a) { a.DrawDefault = true; };
+            colName = eaters.Columns.Add("Process", 320);
             colCount = eaters.Columns.Add("Instances", 74, HorizontalAlignment.Right);
             colMem = eaters.Columns.Add("Memory", 96, HorizontalAlignment.Right);
             colTag = eaters.Columns.Add("Tag", 80);
-            eaters.SetBounds(20, 290, 704, 300);
+            eaters.SetBounds(16, 36, 592, 476);
             eaters.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            eaters.Resize += delegate { SizeEaterColumns(); };
+            eaters.Resize += delegate { SizeColumns(); };
             Controls.Add(eaters);
-            SizeEaterColumns();
+            SizeColumns();
 
-            rowMenu = new ContextMenuStrip();
-            Theme.Menu(rowMenu);
+            ContextMenuStrip menu = new ContextMenuStrip();
+            Theme.Menu(menu);
             miKill = new ToolStripMenuItem("End it now");
             miKill.Click += delegate { KillSelected(); };
             miBoost = new ToolStripMenuItem("Close on every boost");
@@ -948,70 +877,30 @@ namespace IdleMaster
             miIdle.Click += delegate { AddSelected("idle.kill", "idle list"); };
             miProtect = new ToolStripMenuItem("Never touch (protect)");
             miProtect.Click += delegate { AddSelected("protect", "protected list"); };
-            rowMenu.Items.Add(miKill);
-            rowMenu.Items.Add(new ToolStripSeparator());
-            rowMenu.Items.Add(miBoost);
-            rowMenu.Items.Add(miIdle);
-            rowMenu.Items.Add(miProtect);
-            rowMenu.Opening += RowMenuOpening;
-            rowMenu.Closed += delegate { rowMenuOpen = false; };
-            eaters.ContextMenuStrip = rowMenu;
-
-            Label capLog = Theme.Caption("ACTIVITY");
-            capLog.SetBounds(20, 598, 200, 18);
-            capLog.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
-            Controls.Add(capLog);
-
-            logBox = new TextBox();
-            logBox.Multiline = true;
-            logBox.ReadOnly = true;
-            logBox.ScrollBars = ScrollBars.Vertical;
-            logBox.BackColor = Theme.LogBg;
-            logBox.ForeColor = Theme.LogFg;
-            logBox.Font = Theme.Mono();
-            logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(20, 620, 704, 140);
-            logBox.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(logBox);
+            menu.Items.Add(miKill);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miBoost);
+            menu.Items.Add(miIdle);
+            menu.Items.Add(miProtect);
+            menu.Opening += MenuOpening;
+            menu.Closed += delegate { rowMenuOpen = false; };
+            eaters.ContextMenuStrip = menu;
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 2000;
-            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); RefreshEaters(); };
+            timer.Tick += delegate { RefreshNow(); };
             timer.Start();
-            UpdateMemory();
-            UpdateSentry();
-            RefreshEaters();
-
-            AppendLog("Ready. Config: " + Config.Path_);
-            StateFile st = StateFile.Load();
-            if (st.Mode.Length > 0)
-                AppendLog("Note: last run was '" + st.Mode + "' and has not been restored yet ("
-                    + st.StoppedServices.Count + " services still stopped).");
-
-            if (cfg.Tray) BuildTray();
-
-            // A mode was run earlier and never restored - pick the watch back up.
-            if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry && !Sentry.IsRunningSomewhere())
-                StartSentry(st.Mode);
-
-            FormClosing += OnClosing;
+            RefreshNow();
         }
 
-        private void LayoutBigButtons()
-        {
-            int half = (ClientSize.Width - 48) / 2;
-            btnBoost.SetBounds(20, 142, half, 72);
-            btnIdle.SetBounds(28 + half, 142, half, 72);
-        }
-
-        private void SizeEaterColumns()
+        private void SizeColumns()
         {
             int rest = colCount.Width + colMem.Width + colTag.Width;
             int w = eaters.ClientSize.Width - rest - 4;
             if (w > 80) colName.Width = w;
         }
 
-        private void DrawEaterHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        private void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
         {
             using (SolidBrush b = new SolidBrush(Theme.Panel))
                 e.Graphics.FillRectangle(b, e.Bounds);
@@ -1023,16 +912,14 @@ namespace IdleMaster
                 align | TextFormatFlags.VerticalCenter);
         }
 
-        // ---- the live list
-
         // Rows are updated in place, keyed by name, so scroll position and the
         // selection survive every 2-second refresh.
-        private void RefreshEaters()
+        public void RefreshNow()
         {
             if (!Visible || WindowState == FormWindowState.Minimized || rowMenuOpen) return;
 
             List<ProcRow> rows = Engine.Snapshot(engine);
-            int n = Math.Min(EaterRows, rows.Count);
+            int n = Math.Min(MaxRows, rows.Count);
 
             string selected = eaters.SelectedItems.Count > 0 ? eaters.SelectedItems[0].Name : null;
             eaters.BeginUpdate();
@@ -1104,7 +991,7 @@ namespace IdleMaster
             if (s.Text != text) s.Text = text;
         }
 
-        private void RowMenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
         {
             if (eaters.SelectedItems.Count == 0) { e.Cancel = true; return; }
             rowMenuOpen = true;
@@ -1139,8 +1026,8 @@ namespace IdleMaster
                 string line = hits.Count > 0
                     ? "Ended " + r.Name + " - " + Engine.Size(Engine.TotalOf(hits)) + " back."
                     : "Nothing died - " + r.Name + " was gone already or refused.";
-                AppendLog(line);
-                try { BeginInvoke((Action)RefreshEaters); }
+                log(line);
+                try { BeginInvoke((Action)RefreshNow); }
                 catch (Exception) { }
             });
             t.IsBackground = true;
@@ -1154,21 +1041,164 @@ namespace IdleMaster
 
             if (!Config.Append(section, r.Name.ToLowerInvariant()))
             {
-                AppendLog("! could not write " + r.Name + " into the " + label + ".");
+                log("! could not write " + r.Name + " into the " + label + ".");
                 return;
             }
             try
             {
                 cfg.CopyFrom(Config.Load());
-                AppendLog(r.Name + " added to the " + label + ".");
-                if (sentry != null && sentry.Alive)
-                    AppendLog("The sentry is using the new lists from its next sweep.");
+                log(r.Name + " added to the " + label + ".");
+                if (sentryAlive())
+                    log("The sentry is using the new lists from its next sweep.");
             }
-            catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
-            RefreshEaters();
+            catch (Exception ex) { log("! could not reload the config: " + ex.Message); }
+            RefreshNow();
         }
 
-        // ---- window plumbing
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            timer.Stop();
+            base.OnFormClosed(e);
+        }
+    }
+
+    // ------------------------------------------------------------------- gui
+
+    internal sealed class MainForm : Form
+    {
+        private readonly Config cfg;
+        private readonly Engine engine;
+        private readonly TextBox logBox;
+        private readonly MemGauge gauge;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate;
+        private readonly CheckBox chkSentry;
+        private readonly Label sentryLabel;
+        private readonly Label updateLabel;
+        private readonly System.Windows.Forms.Timer timer;
+        private Sentry sentry;
+        private NotifyIcon tray;
+        private EatersForm eatersWin;
+        private bool reallyExit;
+        private bool startHidden;
+        private bool watchMode;
+
+        public MainForm(Config c)
+        {
+            cfg = c;
+            engine = new Engine(cfg, AppendLog);
+
+            Theme.Form(this);
+            Text = "IDLE MASTER";
+            Size = new Size(700, 706);
+            MinimumSize = new Size(560, 520);
+            StartPosition = FormStartPosition.CenterScreen;
+
+            Label title = new Label();
+            title.Text = "IDLE MASTER";
+            title.Font = Theme.Title();
+            title.ForeColor = Theme.Accent;
+            title.SetBounds(20, 14, 400, 36);
+            Controls.Add(title);
+
+            Label sub = Theme.Hint("Sunshine + Tailscale stay up. Everything else is negotiable.   v"
+                + App.Version);
+            sub.SetBounds(22, 50, 500, 20);
+            Controls.Add(sub);
+
+            gauge = new MemGauge();
+            gauge.SetBounds(22, 78, 640, 36);
+            gauge.Font = Theme.Bold();
+            gauge.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(gauge);
+
+            btnBoost = BigButton("BOOST NOW",
+                "Kill the background junk. Desktop stays usable.", Theme.Good, 130);
+            btnBoost.Click += delegate { Run("boost"); };
+
+            btnIdle = BigButton("ABSOLUTE IDLE",
+                "Strip to Windows vitals + Sunshine + Tailscale. For sleep.", Theme.Danger, 218);
+            btnIdle.Click += delegate { ConfirmIdle(); };
+
+            btnRestore = SmallButton("Restore desktop", 22);
+            btnRestore.Click += delegate { Run("restore"); };
+            btnEaters = SmallButton("What's eating RAM?", 182);
+            btnEaters.Click += delegate { OpenEaters(); };
+            btnTrim = SmallButton("Trim RAM now", 342);
+            btnTrim.Click += delegate { Run("trim"); };
+            btnConfig = SmallButton("Settings", 502);
+            btnConfig.Click += delegate { EditConfig(); };
+
+            btnUpdate = Theme.Quiet("Check for updates");
+            btnUpdate.SetBounds(22, 342, 152, 30);
+            btnUpdate.Click += delegate { CheckUpdates(); };
+            Controls.Add(btnUpdate);
+
+            updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
+            updateLabel.SetBounds(182, 348, 480, 20);
+            updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(updateLabel);
+
+            chkSentry = new CheckBox();
+            chkSentry.Text = "Keep hunting after boost";
+            chkSentry.Checked = cfg.Sentry;
+            chkSentry.SetBounds(24, 382, 190, 22);
+            chkSentry.ForeColor = Theme.Fg;
+            chkSentry.FlatStyle = FlatStyle.Flat;
+            chkSentry.Click += delegate { ToggleSentry(); };
+            Controls.Add(chkSentry);
+
+            sentryLabel = Theme.Hint("");
+            sentryLabel.SetBounds(220, 384, 442, 20);
+            sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(sentryLabel);
+
+            logBox = new TextBox();
+            logBox.Multiline = true;
+            logBox.ReadOnly = true;
+            logBox.ScrollBars = ScrollBars.Vertical;
+            logBox.BackColor = Theme.LogBg;
+            logBox.ForeColor = Theme.LogFg;
+            logBox.Font = Theme.Mono();
+            logBox.BorderStyle = BorderStyle.FixedSingle;
+            logBox.SetBounds(22, 412, 640, 212);
+            logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(logBox);
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 2000;
+            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); };
+            timer.Start();
+            UpdateMemory();
+            UpdateSentry();
+
+            AppendLog("Ready. Config: " + Config.Path_);
+            StateFile st = StateFile.Load();
+            if (st.Mode.Length > 0)
+                AppendLog("Note: last run was '" + st.Mode + "' and has not been restored yet ("
+                    + st.StoppedServices.Count + " services still stopped).");
+
+            if (cfg.Tray) BuildTray();
+
+            // A mode was run earlier and never restored - pick the watch back up.
+            if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry && !Sentry.IsRunningSomewhere())
+                StartSentry(st.Mode);
+
+            FormClosing += OnClosing;
+        }
+
+        // One live task-manager window, reused if it is already open.
+        private void OpenEaters()
+        {
+            if (eatersWin != null && !eatersWin.IsDisposed)
+            {
+                eatersWin.Activate();
+                return;
+            }
+            eatersWin = new EatersForm(cfg, engine, AppendLog,
+                delegate { return sentry != null && sentry.Alive; });
+            eatersWin.Location = new Point(Location.X + Width - 40, Location.Y + 40);
+            eatersWin.Show(this);
+        }
 
         // Started by --watch: no window, just the tray icon and the sentry.
         public void HideOnStart(string enforce)
@@ -1325,7 +1355,7 @@ namespace IdleMaster
             {
                 string txt = "hunting " + sentry.Mode.ToUpperInvariant() + " - "
                     + sentry.Reaped + " reaped, " + Engine.Size(sentry.Reclaimed) + " held off";
-                if (sentry.Restopped > 0) txt += ", " + sentry.Restopped + " re-stopped";
+                if (sentry.Restopped > 0) txt += ", " + sentry.Restopped + " services re-stopped";
                 sentryLabel.Text = txt;
                 sentryLabel.ForeColor = Theme.Accent;
             }
@@ -1451,16 +1481,26 @@ namespace IdleMaster
                 if (sentry != null && sentry.Alive)
                     AppendLog("The sentry is using the new lists from its next sweep.");
                 if (cfg.Tray && tray == null) BuildTray();
-                RefreshEaters();
+                if (eatersWin != null && !eatersWin.IsDisposed) eatersWin.RefreshNow();
             }
             catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
         }
 
-        private Button BigButton(string text, string sub, Color color)
+        private Button BigButton(string text, string sub, Color color, int y)
         {
             Button b = Theme.Button(text + "\n" + sub, color, Color.White);
+            b.SetBounds(22, y, 640, 76);
             b.Font = Theme.Big();
             b.TextAlign = ContentAlignment.MiddleCenter;
+            b.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(b);
+            return b;
+        }
+
+        private Button SmallButton(string text, int x)
+        {
+            Button b = Theme.Quiet(text);
+            b.SetBounds(x, 306, 152, 30);
             Controls.Add(b);
             return b;
         }
@@ -1500,7 +1540,7 @@ namespace IdleMaster
                     BeginInvoke((Action)delegate
                     {
                         SetBusy(false);
-                        RefreshEaters();
+                        if (eatersWin != null && !eatersWin.IsDisposed) eatersWin.RefreshNow();
                         if ((what == "boost" || what == "idle") && chkSentry.Checked)
                             StartSentry(what);
                     });
