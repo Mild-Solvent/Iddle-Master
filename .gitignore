@@ -1,4 +1,5 @@
 ﻿dist/idlemaster.log
 dist/idlemaster.state
 dist/IdleMaster.old*.exe
+dist/*.old-*
 *.pdb

@@ -119,7 +119,7 @@ service came back. The **sentry** is a background thread that re-applies the
 
 It enforces **whichever mode ran last** — boost after Boost Now, the full idle
 list after Absolute Idle — and it stands down the instant you hit Restore. In the
-window it's the *Keep hunting after boost* checkbox, with a live count of what it
+window it's the *Sentry: keep hunting* checkbox, with a live count of what it
 has reaped; on the command line it's `--watch` / `--unwatch`.
 
 ### It asks before killing anything you started
@@ -213,13 +213,21 @@ idle mode leaves the desktop alone.
 
 ## Tuning it
 
-**Settings** in the main window opens the config editor: every switch as a
-checkbox, every interval as a number, and each list as a checklist you can add to
-from what is running right now — pick processes sorted by how much RAM they are
-costing, or services by display name. Unchecking an entry comments it out instead
-of deleting it, so the suggestions that ship commented-out are visible and one
-click from being live. Saving re-reads the config immediately; a running sentry
-picks up the new lists on its next sweep.
+The fastest way is the live **What's eating RAM** table in the main window: it
+refreshes every two seconds, tags each row with the list it is on
+(`BOOST` / `IDLE` / `KEEP`), and a right-click offers *End it now*, *Close on
+every boost*, *Also close on absolute idle*, or *Never touch* — each choice is
+written straight into the ini, dated, and picked up by a running sentry on its
+next sweep.
+
+**Settings** opens the switches most people touch — sentry on/off, ask-before-
+kill, tray, sweep interval, emergency trim — in plain words. **Advanced
+settings...** behind it is the whole config: every switch as a checkbox, every
+interval as a number, and each list as a checklist you can add to from what is
+running right now — pick processes sorted by how much RAM they are costing, or
+services by display name. Unchecking an entry comments it out instead of
+deleting it, so the suggestions that ship commented-out are visible and one
+click from being live. Saving re-reads the config immediately.
 
 It edits `idlemaster.ini` line by line, so every comment in it survives. You can
 still edit the file by hand if you prefer — plain text, `*` wildcards, `#`
@@ -241,7 +249,9 @@ will catch that and scream in the log, but test it once while you're awake.
 ## Files
 
 ```
-src/IdleMaster.cs         engine, sentry, ask dialog, config editor, updater, UI
+src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
+src/Ui.cs                 every window: main, quick + advanced settings, ask toast
+src/Theme.cs              the dark palette, fonts, and control styling
 src/Setup.cs              the installer; carries the app as an embedded resource
 src/app.manifest          requireAdministrator + per-monitor DPI
 build.ps1                 builds both exes
