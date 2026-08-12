@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Idle Master — a 50 KB exe that keeps a streaming box quiet</title>
+<meta name="description" content="Two buttons that take a Windows machine from 11 GB of background clutter down to Windows vitals, and a sentry that keeps it there. Sunshine and Tailscale never move.">
+<meta property="og:title" content="Idle Master">
+<meta property="og:description" content="A single 50 KB exe for a machine that has to stay awake so Sunshine can stream it, but shouldn't be burning 11 GB of RAM doing nothing at 3am.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M9 10.5h2.6v11H9zM14.4 10.5h4.2c3.6 0 5.9 2.1 5.9 5.5s-2.3 5.5-5.9 5.5h-4.2zm2.6 2.3v6.4h1.4c2.1 0 3.4-1.2 3.4-3.2s-1.3-3.2-3.4-3.2z' fill='%238fc1f0'/%3E%3C/svg%3E">
+
+<style>
+  :root{
+    --bg:#111318; --panel:#1a1d25; --input:#0d0f13; --logbg:#0b0d11;
+    --logfg:#a8cbe8; --fg:#e2e6ec; --dim:#78808c; --accent:#8fc1f0;
+    --good:#1e4e78; --danger:#6e2830; --neutral:#232833; --warn:#d08484;
+    --line:#242a35;
+    --mono:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.65 var(--sans);
+    background-image:radial-gradient(900px 500px at 50% -180px,#18202c 0%,transparent 70%);
+    background-repeat:no-repeat;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:0 22px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1,h2,h3{line-height:1.25;letter-spacing:-.01em}
+  h2{font-size:1.6rem;margin:0 0 6px}
+  h3{font-size:1.05rem;margin:28px 0 8px;color:var(--fg)}
+  p{margin:0 0 14px}
+  code{font-family:var(--mono);font-size:.87em;background:var(--input);
+       border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--logfg)}
+  section{padding:56px 0;border-top:1px solid var(--line)}
+  .lead{color:var(--dim);max-width:62ch}
+  .kicker{font:600 12px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;
+          color:var(--dim);margin:0 0 14px}
+
+  /* ---------- nav ---------- */
+  nav{position:sticky;top:0;z-index:10;background:rgba(17,19,24,.86);
+      backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:22px;height:54px}
+  .brand{font-weight:700;letter-spacing:-.02em;color:var(--fg)}
+  .brand span{color:var(--accent)}
+  nav .links{margin-left:auto;display:flex;gap:20px;font-size:.9rem}
+  nav .links a{color:var(--dim)}
+  nav .links a:hover{color:var(--fg);text-decoration:none}
+
+  /* ---------- hero ---------- */
+  header{padding:76px 0 62px}
+  header h1{font-size:clamp(2.3rem,6vw,3.4rem);margin:0 0 16px;font-weight:800}
+  header h1 .hl{color:var(--accent)}
+  .sub{font-size:1.12rem;color:var(--dim);max-width:60ch;margin:0 0 28px}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:11px 20px;border-radius:7px;
+       font-weight:600;font-size:.95rem;border:1px solid transparent;transition:.14s}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:var(--good);color:#eaf3fb;border-color:#2a608e}
+  .btn-primary:hover{background:#25608f}
+  .btn-ghost{background:var(--neutral);color:var(--fg);border-color:var(--line)}
+  .btn-ghost:hover{background:#2b313e}
+  .meta{color:var(--dim);font-size:.85rem;margin:14px 0 0}
+  .meta code{background:none;border:none;padding:0}
+
+  /* ---------- console ---------- */
+  .console{background:var(--logbg);border:1px solid var(--line);border-radius:9px;
+           overflow:hidden;box-shadow:0 18px 40px -24px #000}
+  .console .bar{display:flex;align-items:center;gap:7px;padding:9px 12px;
+                background:var(--panel);border-bottom:1px solid var(--line)}
+  .dot{width:10px;height:10px;border-radius:50%;background:#2c333f}
+  .console .bar .t{margin-left:8px;font:12px/1 var(--mono);color:var(--dim)}
+  .console pre{margin:0;padding:16px 18px;overflow-x:auto;
+               font:13px/1.75 var(--mono);color:var(--logfg)}
+  .console .d{color:var(--dim)}
+  .console .a{color:var(--accent)}
+  .console .w{color:var(--warn)}
+
+  /* ---------- modes ---------- */
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:26px 0 0}
+  .mode{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}
+  .mode .tag{display:inline-block;font:700 11px/1 var(--sans);letter-spacing:.11em;
+             padding:6px 10px;border-radius:5px;margin:0 0 12px}
+  .mode.boost .tag{background:var(--good);color:#dcecfa}
+  .mode.idle  .tag{background:var(--danger);color:#f2d9dc}
+  .mode h3{margin:0 0 8px;font-size:1.15rem}
+  .mode p{margin:0 0 10px;color:var(--dim);font-size:.95rem}
+  .mode .keeps{font-size:.85rem;color:var(--dim);border-top:1px solid var(--line);
+               padding-top:11px;margin-top:14px}
+  .mode .keeps b{color:var(--logfg);font-weight:600}
+  .restore{margin-top:16px;background:var(--input);border:1px solid var(--line);
+           border-radius:10px;padding:16px 20px;color:var(--dim);font-size:.95rem}
+  .restore b{color:var(--fg)}
+
+  /* ---------- tables ---------- */
+  .tbl{width:100%;border-collapse:collapse;margin:18px 0;font-size:.93rem;
+       background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .tbl th{text-align:left;font:600 12px/1 var(--sans);letter-spacing:.09em;
+          text-transform:uppercase;color:var(--dim);padding:12px 16px;
+          background:var(--input);border-bottom:1px solid var(--line)}
+  .tbl td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  .tbl tr:last-child td{border-bottom:none}
+  .tbl td.n{font-family:var(--mono);color:var(--logfg);white-space:nowrap}
+  .scroll{overflow-x:auto}
+  .pill{display:inline-block;font:700 10px/1 var(--mono);letter-spacing:.08em;
+        padding:4px 7px;border-radius:4px;border:1px solid}
+  .pill.b{color:#9cc9f2;border-color:#2a608e;background:#16283a}
+  .pill.i{color:#e0a9ad;border-color:#7a3038;background:#31191d}
+
+  /* ---------- toast mock ---------- */
+  .toast{background:var(--panel);border:1px solid #2f3a49;border-radius:9px;
+         padding:16px 18px;max-width:430px;box-shadow:0 16px 34px -20px #000;margin:6px 0 0}
+  .toast .h{font-weight:700;margin:0 0 6px}
+  .toast .b{color:var(--dim);font-size:.9rem;margin:0 0 14px}
+  .toast .row{display:flex;gap:8px;flex-wrap:wrap}
+  .toast .row span{font-size:.82rem;padding:6px 12px;border-radius:5px;
+                   border:1px solid var(--line);background:var(--neutral);color:var(--fg)}
+  .toast .row span.k{background:var(--good);border-color:#2a608e;color:#e6f1fb}
+  .toast .row span.t{background:var(--danger);border-color:#8a3a44;color:#f6dfe2}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:34px}
+  /* grid items default to min-width:auto, which lets a wide <pre> push the page sideways */
+  .cols>*,.modes>*{min-width:0}
+  .note{border-left:2px solid var(--warn);padding:2px 0 2px 16px;color:var(--dim);
+        margin:18px 0;font-size:.95rem}
+  .note b{color:var(--warn)}
+  ul{margin:0 0 14px;padding-left:20px;color:var(--dim)}
+  li{margin:0 0 8px}
+  li b{color:var(--fg);font-weight:600}
+
+  footer{border-top:1px solid var(--line);padding:34px 0 54px;color:var(--dim);font-size:.88rem}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center}
+  footer a{color:var(--dim)}
+
+  @media (max-width:720px){
+    .modes,.cols{grid-template-columns:1fr}
+    nav .links a:not(.gh){display:none}
+    header{padding:52px 0 44px}
+    section{padding:44px 0}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <span class="brand">IDLE <span>MASTER</span></span>
+    <span class="links">
+      <a href="#modes">Modes</a>
+      <a href="#sentry">Sentry</a>
+      <a href="#safety">Safety</a>
+      <a href="#cli">CLI</a>
+      <a class="gh" href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <h1>Your machine stays awake.<br>It doesn't have to stay <span class="hl">fat</span>.</h1>
+    <p class="sub">
+      A single 50&nbsp;KB exe for a box that has to keep running so Sunshine can stream it,
+      but shouldn't be burning 11&nbsp;GB of RAM doing nothing at 3am.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">
+        Download for Windows
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Mild-Solvent/Iddle-Master">Source on GitHub</a>
+    </div>
+    <p class="meta">
+      ~120 KB installer, the app carried inside it · installs to your own profile, no admin ·
+      <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">all releases</a>
+    </p>
+
+    <div class="console" style="margin-top:38px">
+      <div class="bar">
+        <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+        <span class="t">idlemaster.log</span>
+      </div>
+<pre><span class="d">23:41:02</span>  BOOST NOW <span class="d">— 11.4 GB in use, 15.9 GB total</span>
+<span class="d">23:41:02</span>  killed <span class="a">msedgewebview2</span> ×17 <span class="d">(540 MB)</span>
+<span class="d">23:41:03</span>  killed <span class="a">RazerCortex</span>, <span class="a">RazerCentral</span>, <span class="a">GameManagerService3</span> <span class="d">(305 MB)</span>
+<span class="d">23:41:03</span>  stopped service <span class="a">WSearch</span> <span class="d">(60 MB)</span>
+<span class="d">23:41:04</span>  <span class="a">WhatsApp.Root</span> has a window open <span class="d">- leaving it alone</span>
+<span class="d">23:41:05</span>  trimmed working sets, purged standby list
+<span class="d">23:41:05</span>  network guard: <span class="a">SunshineService</span> up, <span class="a">Tailscale</span> up
+<span class="d">23:41:05</span>  <span class="a">1.9 GB freed.</span> sentry armed <span class="d">— sweeping every 20 s</span>
+<span class="d">03:12:44</span>  <span class="w">NvContainerLocalSystem respawned 6× — backing off 30 min</span></pre>
+    </div>
+  </div>
+</header>
+
+<section id="modes">
+  <div class="wrap">
+    <p class="kicker">Two buttons</p>
+    <h2>One takes the clutter. One takes everything.</h2>
+    <p class="lead">Nothing is disabled, only stopped — a reboot puts the machine back on its own.</p>
+
+    <div class="modes">
+      <div class="mode boost">
+        <span class="tag">BOOST NOW</span>
+        <h3>Kill the clutter, keep working</h3>
+        <p>Updaters, launcher services, tray webviews, the search indexer — the processes
+           nobody opened on purpose. Frees roughly 1.5–2&nbsp;GB.</p>
+        <div class="keeps"><b>Survives:</b> your desktop, your browser, everything you opened yourself — and anything with a window on screen.</div>
+      </div>
+      <div class="mode idle">
+        <span class="tag">ABSOLUTE IDLE</span>
+        <h3>Strip it to Windows vitals</h3>
+        <p>Browsers, chat apps, the shell itself. Lands the whole machine around
+           1.5–2&nbsp;GB in use — kernel, Defender, and your remote access.</p>
+        <div class="keeps"><b>Survives:</b> Sunshine, Tailscale, Defender, networking. Nothing else.</div>
+      </div>
+    </div>
+
+    <div class="restore">
+      <b>Restore desktop</b> puts back exactly what the last run took away — each run writes
+      the list of what it stopped, and Restore walks it backwards.
+    </div>
+  </div>
+</section>
+
+<section id="sentry">
+  <div class="wrap">
+    <p class="kicker">The sentry</p>
+    <h2>Killing 2 GB once is easy.</h2>
+    <p class="lead">
+      Twenty minutes later WebView2 has respawned for a tray icon, <code>WSearch</code>
+      trigger-started itself, and Razer's launcher is back. A background thread re-applies
+      the <em>same lists</em> on a timer, so RAM stays where you put it.
+    </p>
+
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th style="width:110px">Every</th><th>It does</th></tr></thead>
+        <tbody>
+          <tr><td class="n">20 s</td><td>sweeps processes against the active mode's kill lists</td></tr>
+          <tr><td class="n">5 min</td><td>re-stops services from those lists that restarted themselves</td></tr>
+          <tr><td class="n">10 min</td><td>trims working sets and purges the standby list again</td></tr>
+          <tr><td class="n">5 min</td><td>checks Sunshine + Tailscale, restarts them if they died</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cols" style="margin-top:34px">
+      <div>
+        <h3>It asks before killing anything you started</h3>
+        <p class="lead">
+          On its first sweep it takes a census. Everything running <em>then</em> is the junk
+          the mode was aimed at. Anything that appears <b style="color:var(--fg)">after</b>
+          is something you deliberately started — so it gets a toast instead of a bullet.
+        </p>
+        <ul>
+          <li><b>Keep it</b> — left alone 30 minutes, then asked again.</li>
+          <li><b>Always keep</b> — written into <code>[protect]</code>, remembered forever.</li>
+          <li><b>Trash it</b> — closed now, and silently from then on.</li>
+        </ul>
+        <p class="lead">No answer in 25 seconds counts as <em>keep it</em>. The tool should never
+           be the reason you lost work while you were away from the keyboard.</p>
+      </div>
+      <div>
+        <div class="toast">
+          <p class="h">Docker Desktop just started</p>
+          <p class="b">4 processes, 512 MB. It is on your BOOST kill list, so the sentry
+             is about to close it.</p>
+          <div class="row"><span class="k">Keep it</span><span>Always keep</span><span class="t">Trash it</span></div>
+        </div>
+
+        <h3>Two brakes</h3>
+        <ul>
+          <li><b>Respawn backoff</b> — if one name comes back six times, it stops fighting
+              for 30 minutes. An endless kill/respawn loop costs more CPU than the process
+              ever cost you in RAM.</li>
+          <li><b>Open windows are sacred</b> — during boost, a process whose parent chain
+              owns a visible window is never touched. Close the window and the leftovers
+              are reclaimed as usual.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="measured">
+  <div class="wrap">
+    <p class="kicker">Measured, not guessed</p>
+    <h2>What it found on one real machine</h2>
+    <p class="lead">15.9 GB total, 11.4 GB in use at the time of the scan. Run
+       <code>--report</code> first — it tags every process and service with the mode that
+       would close it, so you see the plan before anything dies.</p>
+
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Process</th><th style="width:110px">RAM</th><th style="width:190px">Closed by</th></tr></thead>
+        <tbody>
+          <tr><td>Brave (28 processes)</td><td class="n">5.0 GB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>Claude desktop (17 processes)</td><td class="n">3.0 GB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>NordVPN UI + service + updater</td><td class="n">760 MB</td><td><span class="pill b">BOOST</span> <span class="pill i">IDLE</span></td></tr>
+          <tr><td>msedgewebview2 (17 tray/widget hosts)</td><td class="n">540 MB</td><td><span class="pill b">BOOST</span></td></tr>
+          <tr><td>Windows shell (explorer, search host)</td><td class="n">490 MB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>Razer Cortex + Central + services</td><td class="n">305 MB</td><td><span class="pill b">BOOST</span></td></tr>
+          <tr><td>NVIDIA overlay / ShadowPlay</td><td class="n">110 MB</td><td><span class="pill b">BOOST</span></td></tr>
+          <tr><td>Lenovo Vantage + add-ins</td><td class="n">90 MB</td><td><span class="pill b">BOOST</span></td></tr>
+          <tr><td>Tailscale tray icon <em style="color:var(--dim)">(the daemon is untouched)</em></td><td class="n">68 MB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>Windows Search indexer</td><td class="n">60 MB</td><td><span class="pill b">BOOST</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="safety">
+  <div class="wrap">
+    <p class="kicker">The safety story</p>
+    <h2>Most of the code is about not stranding you.</h2>
+    <p class="lead">This kills processes on a machine you can only reach remotely. That fact
+       shapes everything.</p>
+
+    <div class="cols">
+      <div>
+        <h3>Protected list wins over everything</h3>
+        <p class="lead"><code>[protect]</code> is checked before any kill, even if something is
+           also on a kill list. Sunshine, tailscaled, Defender, lsass, the audio stack, the
+           NVIDIA display container, Docker and its WSL backend — containers you left running
+           matter more than the RAM the backend costs.</p>
+
+        <h3>Network guard</h3>
+        <p class="lead">Before finishing, it verifies Sunshine and Tailscale are running, that
+           something is listening on a Sunshine port, and that the Tailscale adapter is up. If
+           a service died as collateral damage it restarts it and says so loudly.</p>
+      </div>
+      <div>
+        <h3>Everything is reversible</h3>
+        <p class="lead">Services are <em>stopped</em>, never disabled, so a reboot returns the
+           machine to normal on its own. Restore disarms the sentry <em>first</em> — otherwise
+           it would shoot everything Restore just brought back.</p>
+
+        <div class="note">
+          <b>The one scary part.</b> Absolute idle closes <code>explorer.exe</code> — your
+          taskbar and wallpaper disappear. If you stream in to a blank screen:
+          <b style="color:var(--fg)">Ctrl+Shift+Esc</b> → File → Run new task → browse to
+          <code>IdleMaster.exe</code> → Restore desktop. Task Manager is handled by winlogon,
+          so it works with no shell running. Or set <code>KillExplorer=0</code> and idle mode
+          leaves the desktop alone.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cli">
+  <div class="wrap">
+    <p class="kicker">Command line</p>
+    <h2>Everything the window does, scriptable.</h2>
+
+    <div class="console" style="margin:22px 0 0">
+      <div class="bar">
+        <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+        <span class="t">IdleMaster.exe</span>
+      </div>
+<pre>IdleMaster.exe               <span class="d">open the window</span>
+IdleMaster.exe --boost       <span class="d">boost mode, no UI</span>
+IdleMaster.exe --idle        <span class="d">absolute idle, no UI</span>
+IdleMaster.exe --restore     <span class="d">undo (also stops the sentry)</span>
+IdleMaster.exe --report      <span class="d">print what's eating RAM, and the plan</span>
+IdleMaster.exe --boost --watch   <span class="d">boost, then keep hunting</span>
+IdleMaster.exe --watch       <span class="d">take up the watch for the last mode</span>
+IdleMaster.exe --unwatch     <span class="d">stop the sentry</span>
+IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span></pre>
+    </div>
+
+    <div class="cols" style="margin-top:38px">
+      <div>
+        <h3>Install</h3>
+        <p class="lead">Run <code>IdleMasterSetup.exe</code>. It installs to
+           <code>%LOCALAPPDATA%\Programs\IdleMaster</code> — your own profile, so no
+           administrator is needed (the app elevates itself when it runs, which is where
+           admin is actually needed). Start Menu shortcut, normal entry in
+           <em>Installed apps</em>, optional logon task.</p>
+        <p class="lead">Updating is the same file, and <b style="color:var(--fg)">Check for
+           updates</b> in the window does it for you — a portable copy updates itself where
+           it stands. Nothing downloads until you say yes. Your <code>idlemaster.ini</code>
+           is never overwritten.</p>
+      </div>
+      <div>
+        <h3>Build it yourself</h3>
+        <p class="lead">Compiles with the .NET Framework compiler that already ships inside
+           Windows. No SDK, no NuGet, no internet.</p>
+        <div class="console">
+          <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">powershell</span></div>
+<pre>powershell -ExecutionPolicy Bypass -File build.ps1</pre>
+        </div>
+        <p class="lead" style="margin-top:14px">Outputs <code>dist\IdleMaster.exe</code> and
+           <code>dist\IdleMasterSetup.exe</code>, the app embedded in the installer.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="download" style="text-align:center">
+  <div class="wrap">
+    <h2>Take the machine back.</h2>
+    <p class="lead" style="margin:0 auto 26px">One file. No dependencies. Reversible by a reboot.</p>
+    <div class="cta" style="justify-content:center">
+      <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">Download IdleMasterSetup.exe</a>
+      <a class="btn btn-ghost" href="https://github.com/Mild-Solvent/Iddle-Master#readme">Read the docs</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Idle Master — Windows 10/11, x64.</span>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master/issues">Issues</a>
+  </div>
+</footer>
+
+</body>
+</html>
