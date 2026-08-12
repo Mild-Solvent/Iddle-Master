@@ -40,7 +40,7 @@
       "softwareVersion": "0.5.0",
       "downloadUrl": "https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe",
       "installUrl": "https://github.com/Mild-Solvent/Iddle-Master/releases/latest",
-      "softwareHelp": "https://github.com/Mild-Solvent/Iddle-Master#readme",
+      "softwareHelp": "https://mild-solvent.github.io/Iddle-Master/docs.html",
       "codeRepository": "https://github.com/Mild-Solvent/Iddle-Master",
       "programmingLanguage": "C#",
       "isAccessibleForFree": true,
@@ -127,139 +127,7 @@
 }
 </script>
 
-<style>
-  :root{
-    --bg:#111318; --panel:#1a1d25; --input:#0d0f13; --logbg:#0b0d11;
-    --logfg:#a8cbe8; --fg:#e2e6ec; --dim:#78808c; --accent:#8fc1f0;
-    --good:#1e4e78; --danger:#6e2830; --neutral:#232833; --warn:#d08484;
-    --line:#242a35;
-    --mono:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace;
-    --sans:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
-  }
-  *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
-  body{
-    margin:0; background:var(--bg); color:var(--fg);
-    font:16px/1.65 var(--sans);
-    background-image:radial-gradient(900px 500px at 50% -180px,#18202c 0%,transparent 70%);
-    background-repeat:no-repeat;
-  }
-  .wrap{max-width:960px;margin:0 auto;padding:0 22px}
-  a{color:var(--accent);text-decoration:none}
-  a:hover{text-decoration:underline}
-  h1,h2,h3{line-height:1.25;letter-spacing:-.01em}
-  h2{font-size:1.6rem;margin:0 0 6px}
-  h3{font-size:1.05rem;margin:28px 0 8px;color:var(--fg)}
-  p{margin:0 0 14px}
-  code{font-family:var(--mono);font-size:.87em;background:var(--input);
-       border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--logfg)}
-  section{padding:56px 0;border-top:1px solid var(--line)}
-  .lead{color:var(--dim);max-width:62ch}
-  .kicker{font:600 12px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;
-          color:var(--dim);margin:0 0 14px}
-
-  /* ---------- nav ---------- */
-  nav{position:sticky;top:0;z-index:10;background:rgba(17,19,24,.86);
-      backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-  nav .wrap{display:flex;align-items:center;gap:22px;height:54px}
-  .brand{font-weight:700;letter-spacing:-.02em;color:var(--fg)}
-  .brand span{color:var(--accent)}
-  nav .links{margin-left:auto;display:flex;gap:20px;font-size:.9rem}
-  nav .links a{color:var(--dim)}
-  nav .links a:hover{color:var(--fg);text-decoration:none}
-
-  /* ---------- hero ---------- */
-  header{padding:76px 0 62px}
-  header h1{font-size:clamp(2.3rem,6vw,3.4rem);margin:0 0 16px;font-weight:800}
-  header h1 .hl{color:var(--accent)}
-  .sub{font-size:1.12rem;color:var(--dim);max-width:60ch;margin:0 0 28px}
-  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-  .btn{display:inline-flex;align-items:center;gap:9px;padding:11px 20px;border-radius:7px;
-       font-weight:600;font-size:.95rem;border:1px solid transparent;transition:.14s}
-  .btn:hover{text-decoration:none;transform:translateY(-1px)}
-  .btn-primary{background:var(--good);color:#eaf3fb;border-color:#2a608e}
-  .btn-primary:hover{background:#25608f}
-  .btn-ghost{background:var(--neutral);color:var(--fg);border-color:var(--line)}
-  .btn-ghost:hover{background:#2b313e}
-  .meta{color:var(--dim);font-size:.85rem;margin:14px 0 0}
-  .meta code{background:none;border:none;padding:0}
-
-  /* ---------- console ---------- */
-  .console{background:var(--logbg);border:1px solid var(--line);border-radius:9px;
-           overflow:hidden;box-shadow:0 18px 40px -24px #000}
-  .console .bar{display:flex;align-items:center;gap:7px;padding:9px 12px;
-                background:var(--panel);border-bottom:1px solid var(--line)}
-  .dot{width:10px;height:10px;border-radius:50%;background:#2c333f}
-  .console .bar .t{margin-left:8px;font:12px/1 var(--mono);color:var(--dim)}
-  .console pre{margin:0;padding:16px 18px;overflow-x:auto;
-               font:13px/1.75 var(--mono);color:var(--logfg)}
-  .console .d{color:var(--dim)}
-  .console .a{color:var(--accent)}
-  .console .w{color:var(--warn)}
-
-  /* ---------- modes ---------- */
-  .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:26px 0 0}
-  .mode{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}
-  .mode .tag{display:inline-block;font:700 11px/1 var(--sans);letter-spacing:.11em;
-             padding:6px 10px;border-radius:5px;margin:0 0 12px}
-  .mode.boost .tag{background:var(--good);color:#dcecfa}
-  .mode.idle  .tag{background:var(--danger);color:#f2d9dc}
-  .mode h3{margin:0 0 8px;font-size:1.15rem}
-  .mode p{margin:0 0 10px;color:var(--dim);font-size:.95rem}
-  .mode .keeps{font-size:.85rem;color:var(--dim);border-top:1px solid var(--line);
-               padding-top:11px;margin-top:14px}
-  .mode .keeps b{color:var(--logfg);font-weight:600}
-  .restore{margin-top:16px;background:var(--input);border:1px solid var(--line);
-           border-radius:10px;padding:16px 20px;color:var(--dim);font-size:.95rem}
-  .restore b{color:var(--fg)}
-
-  /* ---------- tables ---------- */
-  .tbl{width:100%;border-collapse:collapse;margin:18px 0;font-size:.93rem;
-       background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden}
-  .tbl th{text-align:left;font:600 12px/1 var(--sans);letter-spacing:.09em;
-          text-transform:uppercase;color:var(--dim);padding:12px 16px;
-          background:var(--input);border-bottom:1px solid var(--line)}
-  .tbl td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:top}
-  .tbl tr:last-child td{border-bottom:none}
-  .tbl td.n{font-family:var(--mono);color:var(--logfg);white-space:nowrap}
-  .scroll{overflow-x:auto}
-  .pill{display:inline-block;font:700 10px/1 var(--mono);letter-spacing:.08em;
-        padding:4px 7px;border-radius:4px;border:1px solid}
-  .pill.b{color:#9cc9f2;border-color:#2a608e;background:#16283a}
-  .pill.i{color:#e0a9ad;border-color:#7a3038;background:#31191d}
-
-  /* ---------- toast mock ---------- */
-  .toast{background:var(--panel);border:1px solid #2f3a49;border-radius:9px;
-         padding:16px 18px;max-width:430px;box-shadow:0 16px 34px -20px #000;margin:6px 0 0}
-  .toast .h{font-weight:700;margin:0 0 6px}
-  .toast .b{color:var(--dim);font-size:.9rem;margin:0 0 14px}
-  .toast .row{display:flex;gap:8px;flex-wrap:wrap}
-  .toast .row span{font-size:.82rem;padding:6px 12px;border-radius:5px;
-                   border:1px solid var(--line);background:var(--neutral);color:var(--fg)}
-  .toast .row span.k{background:var(--good);border-color:#2a608e;color:#e6f1fb}
-  .toast .row span.t{background:var(--danger);border-color:#8a3a44;color:#f6dfe2}
-
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:34px}
-  /* grid items default to min-width:auto, which lets a wide <pre> push the page sideways */
-  .cols>*,.modes>*{min-width:0}
-  .note{border-left:2px solid var(--warn);padding:2px 0 2px 16px;color:var(--dim);
-        margin:18px 0;font-size:.95rem}
-  .note b{color:var(--warn)}
-  ul{margin:0 0 14px;padding-left:20px;color:var(--dim)}
-  li{margin:0 0 8px}
-  li b{color:var(--fg);font-weight:600}
-
-  footer{border-top:1px solid var(--line);padding:34px 0 54px;color:var(--dim);font-size:.88rem}
-  footer .wrap{display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center}
-  footer a{color:var(--dim)}
-
-  @media (max-width:720px){
-    .modes,.cols{grid-template-columns:1fr}
-    nav .links a:not(.gh){display:none}
-    header{padding:52px 0 44px}
-    section{padding:44px 0}
-  }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -270,8 +138,8 @@
       <a href="#modes">Modes</a>
       <a href="#sentry">Sentry</a>
       <a href="#safety">Safety</a>
-      <a href="#cli">CLI</a>
       <a href="#faq">FAQ</a>
+      <a class="docs" href="docs.html">Docs</a>
       <a class="gh" href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
     </span>
   </div>
@@ -499,6 +367,8 @@
   <div class="wrap">
     <p class="kicker">Command line</p>
     <h2>Everything the window does, scriptable.</h2>
+    <p class="lead">Every flag, every ini key and every default is in the
+       <a href="docs.html">documentation</a>.</p>
 
     <div class="console" style="margin:22px 0 0">
       <div class="bar">
@@ -598,10 +468,11 @@ IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span
 <section id="download" style="text-align:center">
   <div class="wrap">
     <h2>Get your RAM back.</h2>
-    <p class="lead" style="margin:0 auto 26px">One file. No dependencies. Reversible by a reboot.</p>
+    <p class="lead" style="margin:0 auto 26px">One file. No dependencies. Reversible by a reboot.<br>
+       New to it? The <a href="docs.html#first-run">first-run walkthrough</a> takes two minutes.</p>
     <div class="cta" style="justify-content:center">
       <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">Download IdleMasterSetup.exe</a>
-      <a class="btn btn-ghost" href="https://github.com/Mild-Solvent/Iddle-Master#readme">Read the docs</a>
+      <a class="btn btn-ghost" href="docs.html">Read the docs</a>
     </div>
   </div>
 </section>

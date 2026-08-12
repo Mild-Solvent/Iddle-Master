@@ -13,6 +13,9 @@
 - Download: https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe
 - Source: https://github.com/Mild-Solvent/Iddle-Master
 - Site: https://mild-solvent.github.io/Iddle-Master/
+- Documentation: https://mild-solvent.github.io/Iddle-Master/docs.html — the full
+  manual: install, the two modes, the sentry, every idlemaster.ini setting with
+  its default, the command line, recovery steps.
 
 ## What it does
 

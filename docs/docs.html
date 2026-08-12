@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Idle Master documentation — install, modes, sentry, config reference</title>
+<meta name="description" content="The full Idle Master manual: installing and updating, what each mode closes, how the sentry works, every idlemaster.ini setting with its default, the command line, and how to get your desktop back if something goes wrong.">
+<link rel="canonical" href="https://mild-solvent.github.io/Iddle-Master/docs.html">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta property="og:title" content="Idle Master documentation">
+<meta property="og:description" content="Install, the two modes, the sentry, every idlemaster.ini key with its default, the CLI, and the recovery steps — the whole manual on one page.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/docs.html">
+<meta property="og:site_name" content="Idle Master">
+<meta property="og:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Idle Master — your RAM is full. You opened a third of it.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Idle Master documentation">
+<meta name="twitter:description" content="Install, modes, sentry, the full idlemaster.ini reference, the CLI, and recovery — the whole manual on one page.">
+<meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
+<meta name="theme-color" content="#111318">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M9 10.5h2.6v11H9zM14.4 10.5h4.2c3.6 0 5.9 2.1 5.9 5.5s-2.3 5.5-5.9 5.5h-4.2zm2.6 2.3v6.4h1.4c2.1 0 3.4-1.2 3.4-3.2s-1.3-3.2-3.4-3.2z' fill='%238fc1f0'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "@id": "https://mild-solvent.github.io/Iddle-Master/docs.html#doc",
+  "headline": "Idle Master documentation",
+  "name": "Idle Master documentation",
+  "description": "The full manual for Idle Master: installing and updating, what boost and absolute idle close, how the sentry keeps RAM freed, every idlemaster.ini setting with its default, the command line reference, and recovery steps.",
+  "url": "https://mild-solvent.github.io/Iddle-Master/docs.html",
+  "inLanguage": "en",
+  "proficiencyLevel": "Beginner",
+  "dependencies": "Windows 10 or Windows 11, x64",
+  "about": { "@id": "https://mild-solvent.github.io/Iddle-Master/#app" },
+  "isPartOf": { "@id": "https://mild-solvent.github.io/Iddle-Master/#website" },
+  "author": { "@type": "Person", "name": "Mild-Solvent", "url": "https://github.com/Mild-Solvent" },
+  "license": "https://github.com/Mild-Solvent/Iddle-Master/blob/main/LICENSE.md"
+}
+</script>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./">IDLE <span>MASTER</span></a>
+    <span class="links">
+      <a href="./#modes">Modes</a>
+      <a href="./#sentry">Sentry</a>
+      <a href="./#safety">Safety</a>
+      <a class="docs here" href="docs.html">Docs</a>
+      <a class="gh" href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
+    </span>
+  </div>
+</nav>
+
+<div class="doc">
+
+  <aside class="toc">
+    <b>Getting started</b>
+    <a href="#install">Install</a>
+    <a href="#first-run">First run</a>
+    <a href="#update">Updating &amp; uninstalling</a>
+    <b>Using it</b>
+    <a href="#modes">The two modes</a>
+    <a href="#restore">Restore</a>
+    <a href="#sentry">The sentry</a>
+    <a href="#asking">Being asked first</a>
+    <a href="#windows">The windows</a>
+    <a href="#cleanup">Disk cleanup</a>
+    <b>Reference</b>
+    <a href="#config">idlemaster.ini</a>
+    <a href="#settings">Every setting</a>
+    <a href="#lists">The lists</a>
+    <a href="#cli">Command line</a>
+    <a href="#files">Files &amp; paths</a>
+    <b>When it goes wrong</b>
+    <a href="#recovery">Recovery</a>
+    <a href="#trouble">Troubleshooting</a>
+    <b>Project</b>
+    <a href="#build">Build from source</a>
+    <a href="#license">License</a>
+  </aside>
+
+  <main class="docbody">
+
+    <p class="kicker">Documentation</p>
+    <h1>The manual</h1>
+    <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
+      Everything Idle Master does, what each setting changes, and how to undo any of it.
+      Written against v0.5.0. If you only read one section, make it
+      <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
+    </p>
+
+    <!-- ------------------------------------------------------------ install -->
+    <section id="install">
+      <h2>Install <a class="anchor" href="#install">#</a></h2>
+      <p>Download <code>IdleMasterSetup.exe</code> from
+        <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a> and run it.
+        One file, about 120 KB, with the app carried inside it as an embedded resource.</p>
+
+      <p>It installs to <code>%LOCALAPPDATA%\Programs\IdleMaster</code> — your own profile, so
+        <strong>installing needs no administrator</strong>. The app elevates itself when it runs,
+        which is where admin is actually needed: stopping a Windows service requires it. You get a
+        Start Menu shortcut, a normal entry in <em>Installed apps</em>, and the offer of a logon
+        task for the sentry.</p>
+
+      <h3>Silent, for scripts</h3>
+      <div class="console">
+        <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">IdleMasterSetup.exe</span></div>
+<pre>IdleMasterSetup.exe --silent                        <span class="d">install or update, no window</span>
+IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster <span class="d">somewhere else</span>
+IdleMasterSetup.exe --uninstall                     <span class="d">remove it, keep your config</span></pre>
+      </div>
+
+      <h3>Portable</h3>
+      <p>You do not have to install at all. <code>IdleMaster.exe</code> from
+        <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a> (or from
+        <code>dist\</code> if you built it) runs from any folder. It writes its config, log and
+        state file next to itself, so a copy on a USB stick stays entirely self-contained.</p>
+    </section>
+
+    <!-- ---------------------------------------------------------- first run -->
+    <section id="first-run">
+      <h2>First run <a class="anchor" href="#first-run">#</a></h2>
+      <ol class="steps">
+        <li><strong>Run <code>--report</code> before anything else.</strong> It touches nothing.
+          It prints every process and service that is costing you RAM and tags each one with the
+          mode that would close it, so you see the plan before anything dies.</li>
+        <li><strong>Read the rows tagged <span class="pill i">IDLE</span>.</strong> Those are the
+          ones that close your browser and your shell. If something there is precious, put it in
+          <code>[protect]</code> now — see <a href="#lists">the lists</a>.</li>
+        <li><strong>Press BOOST NOW.</strong> It takes about three seconds and leaves everything
+          you opened yourself alone.</li>
+        <li><strong>Try Restore desktop.</strong> Doing it once while you are awake and sitting in
+          front of the machine is worth more than reading about it.</li>
+      </ol>
+
+      <div class="console">
+        <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">IdleMaster.exe --report</span></div>
+<pre>IdleMaster.exe --report</pre>
+      </div>
+
+      <div class="tip">
+        <p><b>Untagged rows are left alone.</b> The report only tags what is on a list. If
+          something big is eating RAM and carries no tag, nothing will close it until you add it —
+          right-click it in <em>What's eating RAM?</em>, or write it into the ini by hand.</p>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------- update -->
+    <section id="update">
+      <h2>Updating and uninstalling <a class="anchor" href="#update">#</a></h2>
+      <p><strong>Updating is the same file.</strong> Run a newer setup and it replaces the exe in
+        place. Your <code>idlemaster.ini</code> is never overwritten.</p>
+      <p>Or let the app do it: <strong>Check for updates</strong> in the main window (also on the
+        tray menu) asks GitHub for the newest release, and the line beside it tells you where you
+        stand — <em>v0.5.0 is the newest</em>, or <em>v0.6.0-beta is available</em>. If there is
+        something newer it downloads that release's installer and hands over to it, pointed at the
+        folder this copy is running from — so a portable copy updates itself where it stands
+        instead of installing a second one somewhere else. <strong>Nothing downloads until you say
+        yes.</strong></p>
+      <p>Uninstall from <em>Installed apps</em> like any other program, or run
+        <code>IdleMasterSetup.exe --uninstall</code>. Either way it stands the sentry down first
+        and leaves your config file behind, in case you come back.</p>
+    </section>
+
+    <!-- -------------------------------------------------------------- modes -->
+    <section id="modes">
+      <h2>The two modes <a class="anchor" href="#modes">#</a></h2>
+      <p>Both work off the same lists in <code>idlemaster.ini</code>. Idle is applied
+        <em>on top of</em> boost — it runs both sets of lists, not a separate one.</p>
+
+      <div class="modes">
+        <div class="mode boost">
+          <span class="tag">BOOST NOW</span>
+          <h3>You are sitting there</h3>
+          <p>Closes <code>[boost.kill]</code> processes and stops <code>[boost.services]</code>:
+            updaters, launcher services, tray webviews, the search indexer. Then it trims working
+            sets and purges the standby list.</p>
+          <div class="keeps"><b>Survives:</b> your desktop, your browser, anything you opened
+            yourself, and — with <code>SkipOpenApps=1</code> — every process belonging to an app
+            with a window on screen.</div>
+        </div>
+        <div class="mode idle">
+          <span class="tag">ABSOLUTE IDLE</span>
+          <h3>Nobody is sitting there</h3>
+          <p>Everything boost does, plus <code>[idle.kill]</code> and
+            <code>[idle.services]</code>: browsers, chat apps, tray icons and — unless you set
+            <code>KillExplorer=0</code> — the Windows shell itself.</p>
+          <div class="keeps"><b>Survives:</b> <code>[protect]</code>,
+            <code>[protect.services]</code>, and networking. That is the entire exception.</div>
+        </div>
+      </div>
+
+      <p style="margin-top:20px">Idle mode ignores the foreground and open-window guards on
+        purpose. The premise of the mode is that nobody is there to lose work.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------ restore -->
+    <section id="restore">
+      <h2>Restore <a class="anchor" href="#restore">#</a></h2>
+      <p>Every run writes <code>idlemaster.state</code> with the exact list of what it stopped.
+        <strong>Restore desktop</strong> (or <code>--restore</code>) walks that list backwards:
+        it starts the services again, relaunches whatever is listed in
+        <code>[restore.launch]</code>, and brings back <code>explorer.exe</code> if idle mode
+        closed it.</p>
+      <p><strong>Restore disarms the sentry first.</strong> If it did not, the sentry would shoot
+        everything Restore just brought back on its next sweep, twenty seconds later.</p>
+      <p>The sentry appends to the same state file, so anything it re-stops hours later still gets
+        undone by a Restore you run tomorrow.</p>
+      <div class="tip">
+        <p><b>Rebooting is always a valid restore.</b> Services are <em>stopped</em>, never
+          disabled. A machine that reboots comes back exactly as Windows intended, even if you
+          never open Idle Master again.</p>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------- sentry -->
+    <section id="sentry">
+      <h2>The sentry <a class="anchor" href="#sentry">#</a></h2>
+      <p>A boost is a snapshot. Twenty minutes later WebView2 has respawned for a tray icon,
+        <code>WSearch</code> has trigger-started itself and Razer's launcher is back. The sentry
+        is a background thread that re-applies the <em>same lists</em> on a timer, so the RAM
+        stays where you put it.</p>
+
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th style="width:120px">Every</th><th>It does</th><th style="width:210px">Setting</th></tr></thead>
+          <tbody>
+            <tr><td class="n">20 s</td><td class="wrap-ok">sweeps processes against the active mode's kill lists</td><td class="n">SentrySeconds</td></tr>
+            <tr><td class="n">5 min</td><td class="wrap-ok">re-stops services from those lists that restarted themselves</td><td class="n">SentryServiceMinutes</td></tr>
+            <tr><td class="n">10 min</td><td class="wrap-ok">trims working sets and purges the standby list again</td><td class="n">SentryTrimMinutes</td></tr>
+            <tr><td class="n">5 min</td><td class="wrap-ok">checks your protected services are alive, restarts any that died</td><td class="n">SentryGuardMinutes</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>It enforces <strong>whichever mode ran last</strong> — the boost lists after Boost Now,
+        the full idle lists after Absolute Idle — and it stands down the instant you hit Restore.
+        In the window it is the <em>Sentry: keep hunting</em> checkbox with a live count of what
+        it has reaped; on the command line it is <code>--watch</code> and
+        <code>--unwatch</code>.</p>
+
+      <h3>Two brakes</h3>
+      <ul>
+        <li><b>Respawn backoff.</b> If one process name comes back <code>SentryRespawnLimit</code>
+          times (6 by default), the sentry stops fighting it for
+          <code>SentryBackoffMinutes</code> and writes a line saying so. Something on the machine
+          clearly wants that process alive, and an endless kill/respawn loop burns more CPU than
+          the process ever cost you in RAM. After the backoff it puts the name back and tries
+          again.</li>
+        <li><b>Open windows are sacred.</b> With <code>SkipOpenApps=1</code>, boost never touches
+          a process whose app has a window on the desktop — helper processes included. WhatsApp
+          and Discord do their real work in <code>msedgewebview2</code> workers, and killing those
+          crashes the app even though its own name is not on any list. Close the window and the
+          leftovers get reclaimed on the next sweep. <code>SentrySkipForeground=1</code> is the
+          narrower version: never kill the window you are actually looking at.</li>
+      </ul>
+
+      <h3>Two things worth knowing before you leave it on</h3>
+      <ul>
+        <li>The sentry <b>is</b> the thing that stops you re-opening apps on the kill list. If you
+          boost and then want Discord back, uncheck the box (or run <code>--unwatch</code>) first,
+          otherwise it dies within 20 seconds.</li>
+        <li><b>Only one sentry runs at a time.</b> A second one refuses the watch and says so.
+          Closing the window stops the thread but leaves the watch <em>armed</em>, so opening Idle
+          Master again picks it up where it left off.</li>
+      </ul>
+
+      <h3>Surviving a reboot</h3>
+      <p><code>--installtask</code> registers a logon scheduled task called
+        <em>IdleMaster Sentry</em>, running with highest privileges, so the watch comes back after
+        a restart. It is off unless you ask for it; <code>--removetask</code> deletes it.</p>
+
+      <p>Everything the sentry does goes to <code>idlemaster.log</code>, and only when it actually
+        acts — a quiet night leaves no lines at all.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------- asking -->
+    <section id="asking">
+      <h2>Being asked first <a class="anchor" href="#asking">#</a></h2>
+      <p>On its first sweep the sentry takes a census. Everything running <em>then</em> that
+        matches a list is the junk the mode was aimed at, and dies without a word. Anything that
+        appears <strong>after</strong> that is something you deliberately started, so it gets a
+        toast in the corner instead of a bullet.</p>
+
+      <div class="cols" style="margin-top:20px">
+        <div>
+          <ul>
+            <li><b>Keep it</b> — left alone for <code>SentryBackoffMinutes</code>, then asked
+              again.</li>
+            <li><b>Always keep</b> — written into <code>[protect]</code>, remembered forever.</li>
+            <li><b>Trash it</b> — closed now, and closed silently from then on.</li>
+          </ul>
+          <p>No answer in <code>AskTimeoutSeconds</code> counts as <em>keep it</em>. The tool
+            should never be the reason you lost work while you were away from the keyboard.</p>
+          <p>Set <code>AskAboveMb</code> and it also asks about newcomers that are on no list at
+            all but bigger than that — <em>Trash it</em> adds them to <code>[boost.kill]</code>,
+            so the lists learn from what you actually do. <strong>Idle mode never asks:</strong>
+            nobody is there.</p>
+        </div>
+        <div>
+          <div class="toast">
+            <p class="h">Docker Desktop just started</p>
+            <p class="b">4 processes, 512 MB. It is on your BOOST kill list, so the sentry
+              is about to close it.</p>
+            <div class="row"><span class="k">Keep it</span><span>Always keep</span><span class="t">Trash it</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------ windows -->
+    <section id="windows">
+      <h2>The windows <a class="anchor" href="#windows">#</a></h2>
+
+      <h3>What's eating RAM?</h3>
+      <p>The Master's own little task manager: a live table that refreshes every two seconds and
+        tags each row with the list it is on (<span class="pill b">BOOST</span>
+        <span class="pill i">IDLE</span> <code>KEEP</code>). Right-click any row for
+        <em>End it now</em>, <em>Close on every boost</em>, <em>Also close on absolute idle</em>,
+        or <em>Never touch</em>. Each choice is written straight into the ini, dated, and picked
+        up by a running sentry on its next sweep.</p>
+      <p>This is the fastest way to tune the lists, and it is the reason most people never open
+        the ini by hand.</p>
+
+      <h3>Settings, and Advanced settings</h3>
+      <p><strong>Settings</strong> holds the switches most people touch — sentry on/off,
+        ask-before-kill, tray, sweep interval, emergency trim — in plain words.
+        <strong>Advanced settings…</strong> behind it is the whole config: every switch as a
+        checkbox, every interval as a number, and each list as a checklist you can add to from
+        what is running right now, sorted by how much RAM it is costing (or, for services, by
+        display name).</p>
+      <p>Unchecking an entry <em>comments it out</em> rather than deleting it, so the suggestions
+        that ship commented-out are visible and one click from being live. Saving re-reads the
+        config immediately — no restart.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------ cleanup -->
+    <section id="cleanup">
+      <h2>Disk cleanup <a class="anchor" href="#cleanup">#</a></h2>
+      <p>Separate from anything to do with RAM, and deliberately timid. The cleanup window
+        <strong>only suggests</strong>. Nothing is deleted until you tick it and press Clean, and
+        everything ticked goes to the <strong>Recycle Bin</strong>, not into the void.</p>
+      <p>It scans for temp files, caches, Windows update leftovers, old installers sitting in
+        Downloads untouched for <code>CleanupInstallerDays</code>, big folders over
+        <code>CleanupBigDirMinMb</code>, and possible leftovers from uninstalled software. Rows
+        are marked <em>safe</em> or <em>review</em> — a big folder is a finding, not an
+        accusation.</p>
+      <p>Two exceptions to the Recycle Bin rule: emptying the Recycle Bin row itself is permanent
+        (that is what it means), and anything matching <code>[cleanup.protect]</code> is never
+        touched at all, whatever the scanner thinks. That section takes full paths, supports
+        <code>*</code>, and a path protects everything underneath it.</p>
+      <p><code>IdleMaster.exe --cleanup-report</code> prints the same findings to a console and
+        deletes nothing, ever.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------- config -->
+    <section id="config">
+      <h2>idlemaster.ini <a class="anchor" href="#config">#</a></h2>
+      <p>Written on first run, next to the exe. Plain text, edited line by line by the Settings
+        window so every comment in it survives being saved.</p>
+      <ul>
+        <li>One entry per line.</li>
+        <li><code>*</code> is a wildcard — <code>LenovoVantage-*</code>, <code>vmmem*</code>.</li>
+        <li><code>#</code> at the start of a line switches it off.</li>
+        <li>Process names are matched <b>without</b> <code>.exe</code> — writing
+          <code>.exe</code> is fine, it gets stripped.</li>
+        <li>Matching is case-insensitive.</li>
+      </ul>
+      <p>Two entries ship deliberately commented out, because they are the ones that can bite you
+        from bed:</p>
+      <ul>
+        <li><code>NvContainerLocalSystem</code> hosts the NVIDIA App. Some drivers get unhappy
+          about NVENC when it is gone, and a black stream is exactly what you cannot debug asleep.
+          Test a stream without it before enabling.</li>
+        <li><code>powershell</code> / <code>WindowsTerminal</code> in <code>[idle.kill]</code> —
+          enable only if you never leave a long job running overnight.</li>
+      </ul>
+      <div class="note">
+        <b>One more to test while awake.</b> <code>nordvpn-service</code> <em>is</em> stopped in
+        idle mode. If you have NordVPN's kill switch armed, stopping the service can take the whole
+        network with it. The network guard will catch that and scream in the log, but try it once
+        while you are sitting in front of the machine.
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- settings -->
+    <section id="settings">
+      <h2>Every setting <a class="anchor" href="#settings">#</a></h2>
+      <p>All of these live under <code>[settings]</code>. Booleans are <code>1</code> or
+        <code>0</code>.</p>
+
+      <h3>What a run does</h3>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="n">KillExplorer</td><td class="n">1</td><td class="wrap-ok">Absolute idle closes the Windows shell — explorer, start menu, search host. About 450 MB. Set to <code>0</code> and idle leaves your desktop alone.</td></tr>
+            <tr><td class="n">NetworkGuard</td><td class="n">1</td><td class="wrap-ok">After every destructive step, verify the protected services are alive and restart them if not.</td></tr>
+            <tr><td class="n">TrimWorkingSets</td><td class="n">1</td><td class="wrap-ok">Squeeze the working set of every surviving process.</td></tr>
+            <tr><td class="n">ClearStandbyList</td><td class="n">1</td><td class="wrap-ok">Purge the standby (cached) list, so Task Manager shows the memory as free.</td></tr>
+            <tr><td class="n">CloseBrowsersInBoost</td><td class="n">0</td><td class="wrap-ok">Off, because during a boost you are working. Turn it on and boost treats browsers like idle does.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>The sentry</h3>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="n">Sentry</td><td class="n">1</td><td class="wrap-ok">Keep sweeping after a mode has run. Off means a mode is a one-shot.</td></tr>
+            <tr><td class="n">SentrySeconds</td><td class="n">20</td><td class="wrap-ok">Seconds between process sweeps.</td></tr>
+            <tr><td class="n">SentryServiceMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between re-stopping services that trigger-started themselves.</td></tr>
+            <tr><td class="n">SentryTrimMinutes</td><td class="n">10</td><td class="wrap-ok">Minutes between working-set trims and standby purges.</td></tr>
+            <tr><td class="n">SentryGuardMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between protected-service health checks.</td></tr>
+            <tr><td class="n">SentryRespawnLimit</td><td class="n">6</td><td class="wrap-ok">Times one name may come back before the sentry stops fighting it.</td></tr>
+            <tr><td class="n">SentryBackoffMinutes</td><td class="n">30</td><td class="wrap-ok">How long that truce lasts — and how long <em>Keep it</em> buys an app.</td></tr>
+            <tr><td class="n">SentrySkipForeground</td><td class="n">1</td><td class="wrap-ok">Never kill the window you are actually using. Boost only; idle ignores it.</td></tr>
+            <tr><td class="n">SkipOpenApps</td><td class="n">1</td><td class="wrap-ok">Never kill <em>any</em> app that has a window open, helper processes included. Boost only.</td></tr>
+            <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. <code>0</code> = off.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Asking first</h3>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="n">AskBeforeKill</td><td class="n">1</td><td class="wrap-ok">Toast before closing anything that started after the sentry's census.</td></tr>
+            <tr><td class="n">AskTimeoutSeconds</td><td class="n">25</td><td class="wrap-ok">Silence for this long counts as <em>keep it</em>.</td></tr>
+            <tr><td class="n">AskAboveMb</td><td class="n">250</td><td class="wrap-ok">Also ask about newcomers on no list at all but bigger than this. <code>0</code> = only ask about listed processes.</td></tr>
+            <tr><td class="n">Tray</td><td class="n">1</td><td class="wrap-ok">Closing the window hides to the tray and keeps hunting. Exit from the tray menu to actually quit.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Disk cleanup</h3>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="n">CleanupInstallerDays</td><td class="n">90</td><td class="wrap-ok">Suggest installers sitting in Downloads untouched for this many days.</td></tr>
+            <tr><td class="n">CleanupBigDirMinMb</td><td class="n">500</td><td class="wrap-ok">Point at folders this big and bigger when weighing the drive.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- -------------------------------------------------------------- lists -->
+    <section id="lists">
+      <h2>The lists <a class="anchor" href="#lists">#</a></h2>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Section</th><th>What goes in it</th></tr></thead>
+          <tbody>
+            <tr><td class="n">[protect]</td><td class="wrap-ok">Process names never touched, whatever else any list says. Ships with the Windows core, Defender, the audio stack, the streaming stack, Docker and its WSL/Hyper-V backend, and Idle Master itself. <strong>This list wins over everything.</strong></td></tr>
+            <tr><td class="n">[protect.services]</td><td class="wrap-ok">Services that get the guard: checked before the run finishes and re-checked while idle mode runs. Put your remote-access stack here.</td></tr>
+            <tr><td class="n">[boost.kill]</td><td class="wrap-ok">Processes boost closes. Background clutter with no business running while you work.</td></tr>
+            <tr><td class="n">[boost.services]</td><td class="wrap-ok">Services boost stops — indexer, telemetry, update and launcher services.</td></tr>
+            <tr><td class="n">[idle.kill]</td><td class="wrap-ok">Processes absolute idle closes <em>on top of</em> the boost list: browsers, chat apps, tray icons, shell pieces.</td></tr>
+            <tr><td class="n">[idle.services]</td><td class="wrap-ok">Services absolute idle stops on top of the boost list.</td></tr>
+            <tr><td class="n">[restore.launch]</td><td class="wrap-ok">Programs relaunched by Restore. Deliberately short — restore gives you a working machine back, not the bloat back. <code>path|arguments</code> per line.</td></tr>
+            <tr><td class="n">[cleanup.protect]</td><td class="wrap-ok">Full paths disk cleanup must never touch. A path protects everything underneath it.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Why Docker is protected, not killed</h3>
+      <p>It used to be in <code>[idle.kill]</code>. It is in <code>[protect]</code> now: containers
+        you left running matter more than the ~700 MB the backend costs, and the engine costs
+        almost nothing once it is idle. Delete it from <code>[protect]</code> if you would rather
+        have the RAM.</p>
+    </section>
+
+    <!-- ---------------------------------------------------------------- cli -->
+    <section id="cli">
+      <h2>Command line <a class="anchor" href="#cli">#</a></h2>
+      <p>Everything the window does, scriptable. Running any mode needs administrator — the app
+        elevates itself.</p>
+      <div class="console">
+        <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">IdleMaster.exe</span></div>
+<pre>IdleMaster.exe                   <span class="d">open the window</span>
+IdleMaster.exe --boost           <span class="d">boost mode, no UI</span>
+IdleMaster.exe --idle            <span class="d">absolute idle, no UI</span>
+IdleMaster.exe --restore         <span class="d">undo the last run (also stops the sentry)</span>
+IdleMaster.exe --report          <span class="d">print what's eating RAM, and the plan</span>
+IdleMaster.exe --cleanup-report  <span class="d">scan the disk, print findings, delete nothing</span>
+IdleMaster.exe --boost --watch   <span class="d">boost, then keep hunting</span>
+IdleMaster.exe --watch           <span class="d">take up the watch for whichever mode ran last</span>
+IdleMaster.exe --unwatch         <span class="d">stop the sentry</span>
+IdleMaster.exe --installtask     <span class="d">run the sentry at every logon</span>
+IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
+      </div>
+      <p>A watch does not run as a console loop — it runs as a tray app, because it needs a
+        message pump to put the <em>something just started</em> dialog on screen. Starting a second
+        watch while one is running prints <em>a sentry is already on watch</em> and exits with
+        code 1.</p>
+    </section>
+
+    <!-- -------------------------------------------------------------- files -->
+    <section id="files">
+      <h2>Files and paths <a class="anchor" href="#files">#</a></h2>
+      <p>All four runtime files live <strong>next to the exe</strong> — for an installed copy,
+        <code>%LOCALAPPDATA%\Programs\IdleMaster</code>.</p>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>File</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~50 KB, no dependencies.</td></tr>
+            <tr><td class="n">idlemaster.ini</td><td class="wrap-ok">The lists and settings. Written on first run, never overwritten by an update.</td></tr>
+            <tr><td class="n">idlemaster.log</td><td class="wrap-ok">Append-only record, written only when something actually happens.</td></tr>
+            <tr><td class="n">idlemaster.state</td><td class="wrap-ok">Written by boost and idle, consumed by restore. The undo list.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>In the repository: <code>src/IdleMaster.cs</code> is the engine, config, sentry, updater
+        and CLI entry point; <code>src/Ui.cs</code> is every window; <code>src/Cleanup.cs</code>
+        is the disk scanner; <code>src/Theme.cs</code> is the palette;
+        <code>src/Setup.cs</code> is the installer, which carries the app as an embedded
+        resource.</p>
+    </section>
+
+    <!-- ----------------------------------------------------------- recovery -->
+    <section id="recovery">
+      <h2>Recovery <a class="anchor" href="#recovery">#</a></h2>
+
+      <h3>The desktop is gone — blank screen, no taskbar</h3>
+      <p>Expected, if absolute idle ran with <code>KillExplorer=1</code>. Task Manager is hosted by
+        winlogon, not explorer, so it still works with no shell running:</p>
+      <ol class="steps">
+        <li><b>Ctrl+Shift+Esc</b> to open Task Manager.</li>
+        <li><b>File → Run new task</b>.</li>
+        <li>Browse to <code>IdleMaster.exe</code> and run it, ticking <em>administrative
+          privileges</em>.</li>
+        <li>Press <b>Restore desktop</b>.</li>
+      </ol>
+      <p>In a hurry, <em>Run new task</em> → <code>explorer.exe</code> brings the shell straight
+        back — but use Restore afterwards so the stopped services come back too. And if you would
+        rather never see this screen, set <code>KillExplorer=0</code>.</p>
+
+      <h3>A reboot fixes everything</h3>
+      <p>Nothing is ever disabled, only stopped. If you cannot reach the machine any other way, a
+        power cycle returns it to normal — no Idle Master involvement required.</p>
+
+      <h3>Something keeps closing an app I want</h3>
+      <p>That is the sentry enforcing the last mode. Uncheck <em>Sentry: keep hunting</em>, or run
+        <code>IdleMaster.exe --unwatch</code>. To keep the app permanently, add it to
+        <code>[protect]</code> — via <em>Never touch</em> in <em>What's eating RAM?</em>, or by
+        hand. If you also registered the logon task, <code>--removetask</code> stops it coming
+        back tomorrow.</p>
+    </section>
+
+    <!-- -------------------------------------------------------------- trouble -->
+    <section id="trouble">
+      <h2>Troubleshooting <a class="anchor" href="#trouble">#</a></h2>
+
+      <h3>A service will not stop</h3>
+      <p>Defender is the usual one: tamper protection will normally refuse
+        <code>WinDefend</code>, whatever any list says. That refusal is Windows working correctly.
+        Some vendor services also restart themselves within seconds — that is what
+        <code>SentryServiceMinutes</code> is for.</p>
+
+      <h3>The same process keeps coming back</h3>
+      <p>After <code>SentryRespawnLimit</code> returns the sentry writes <em>respawned 6× —
+        backing off 30 min</em> and leaves it alone. Something on the machine wants it alive.
+        Either accept it (add it to <code>[protect]</code> and stop paying the CPU) or find what
+        starts it — usually a scheduled task or a tray helper you can disable at the source.</p>
+
+      <h3>The RAM number barely moved</h3>
+      <p>Run <code>--report</code> and look at what carries no tag. Idle Master only closes what is
+        on a list, and the shipped lists were written from one real machine. Yours has different
+        junk on it. Add rows from <em>What's eating RAM?</em> and the numbers change.</p>
+
+      <h3>My remote session dropped</h3>
+      <p>Put every piece of your remote-access stack in <code>[protect.services]</code> and its
+        processes in <code>[protect]</code>. The guard then checks that each service is running,
+        that its port is listening and that the adapter is up — before the run finishes, and
+        repeatedly during idle mode. The shipped example is a Sunshine + Tailscale pair because
+        this is a streaming host; swap in RDP, Parsec, Moonlight, SSH or your own VPN.</p>
+
+      <h3>Bad idlemaster.ini</h3>
+      <p>The app says so on startup and points at the line. The safe fix is to rename the file and
+        let it write a fresh default on the next run — you lose your customisations, not your
+        machine.</p>
+    </section>
+
+    <!-- -------------------------------------------------------------- build -->
+    <section id="build">
+      <h2>Build from source <a class="anchor" href="#build">#</a></h2>
+      <p>It compiles with the .NET Framework compiler that already ships inside Windows.
+        No SDK, no NuGet, no internet.</p>
+      <div class="console">
+        <div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">powershell</span></div>
+<pre>powershell -ExecutionPolicy Bypass -File build.ps1</pre>
+      </div>
+      <p>Outputs <code>dist\IdleMaster.exe</code> and <code>dist\IdleMasterSetup.exe</code>, the
+        app embedded in the installer.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------ license -->
+    <section id="license">
+      <h2>License <a class="anchor" href="#license">#</a></h2>
+      <p><a href="https://github.com/Mild-Solvent/Iddle-Master/blob/main/LICENSE.md">FSL-1.1-MIT</a>
+        — the Functional Source License, with an MIT future grant. Copyright 2026 Mild-Solvent.
+        In plain words, and the file is what actually counts:</p>
+      <ul>
+        <li><b>Use it however you like.</b> At home, at work, on one machine or five hundred.
+          Fork it, patch it, redistribute it, build on it. No fee, no permission needed.</li>
+        <li><b>Keep my name on it.</b> Redistribute it and the copyright notice goes with it.</li>
+        <li><b>Don't sell my tool as your product.</b> The one forbidden thing is a competing use —
+          packaging this into a commercial product or service that substitutes for it. If you want
+          to do that, ask; I'm reachable through GitHub and open to it.</li>
+        <li><b>It becomes MIT in two years.</b> Every release picks up a plain MIT license on the
+          second anniversary of its publication, automatically and irrevocably.</li>
+      </ul>
+
+      <div class="docfoot">
+        <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">Download IdleMasterSetup.exe</a>
+        <a class="btn btn-ghost" href="https://github.com/Mild-Solvent/Iddle-Master/issues">Something wrong? Open an issue</a>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>Idle Master — Windows 10/11, x64. © 2026 Mild-Solvent.</span>
+    <a href="./">Home</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master/issues">Issues</a>
+    <a href="https://github.com/Mild-Solvent/Iddle-Master/blob/main/LICENSE.md">FSL-1.1-MIT</a>
+  </div>
+</footer>
+
+</body>
+</html>
