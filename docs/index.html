@@ -3,12 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Idle Master — a 50 KB exe that keeps a streaming box quiet</title>
-<meta name="description" content="Two buttons that take a Windows machine from 11 GB of background clutter down to Windows vitals, and a sentry that keeps it there. Sunshine and Tailscale never move.">
-<meta property="og:title" content="Idle Master">
-<meta property="og:description" content="A single 50 KB exe for a machine that has to stay awake so Sunshine can stream it, but shouldn't be burning 11 GB of RAM doing nothing at 3am.">
+<title>Idle Master — get your RAM back, and keep it back</title>
+<meta name="description" content="Two buttons that take a Windows machine from 11 GB of background clutter down to Windows vitals, and a sentry that keeps it there. Whatever you reach the machine with never moves.">
+<meta property="og:title" content="Idle Master — get your RAM back, and keep it back">
+<meta property="og:description" content="A single 50 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/">
+<meta property="og:site_name" content="Idle Master">
+<meta property="og:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Idle Master — 11.4 GB in use. You opened three of them.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Idle Master — get your RAM back, and keep it back">
+<meta name="twitter:description" content="A 50 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
+<meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
+<meta name="theme-color" content="#111318">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M9 10.5h2.6v11H9zM14.4 10.5h4.2c3.6 0 5.9 2.1 5.9 5.5s-2.3 5.5-5.9 5.5h-4.2zm2.6 2.3v6.4h1.4c2.1 0 3.4-1.2 3.4-3.2s-1.3-3.2-3.4-3.2z' fill='%238fc1f0'/%3E%3C/svg%3E">
 
 <style>
@@ -162,10 +172,11 @@
 
 <header>
   <div class="wrap">
-    <h1>Your machine stays awake.<br>It doesn't have to stay <span class="hl">fat</span>.</h1>
+    <h1>11.4 GB in use.<br>You opened <span class="hl">three</span> of them.</h1>
     <p class="sub">
-      A single 50&nbsp;KB exe for a box that has to keep running so Sunshine can stream it,
-      but shouldn't be burning 11&nbsp;GB of RAM doing nothing at 3am.
+      A single 50&nbsp;KB exe that hunts down the updaters, launcher services and tray
+      webviews eating your RAM, frees 1.5–2&nbsp;GB in a click — and then keeps it free,
+      instead of letting it all drift back within the hour.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">
@@ -175,6 +186,7 @@
     </div>
     <p class="meta">
       ~120 KB installer, the app carried inside it · installs to your own profile, no admin ·
+      never disables anything, a reboot undoes it all ·
       <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">all releases</a>
     </p>
 
@@ -189,8 +201,9 @@
 <span class="d">23:41:03</span>  stopped service <span class="a">WSearch</span> <span class="d">(60 MB)</span>
 <span class="d">23:41:04</span>  <span class="a">WhatsApp.Root</span> has a window open <span class="d">- leaving it alone</span>
 <span class="d">23:41:05</span>  trimmed working sets, purged standby list
-<span class="d">23:41:05</span>  network guard: <span class="a">SunshineService</span> up, <span class="a">Tailscale</span> up
+<span class="d">23:41:05</span>  remote access guard: <span class="a">all protected services up</span>
 <span class="d">23:41:05</span>  <span class="a">1.9 GB freed.</span> sentry armed <span class="d">— sweeping every 20 s</span>
+<span class="d">00:07:19</span>  <span class="a">reaped 6 respawns</span> <span class="d">— still 1.9 GB down</span>
 <span class="d">03:12:44</span>  <span class="w">NvContainerLocalSystem respawned 6× — backing off 30 min</span></pre>
     </div>
   </div>
@@ -205,17 +218,17 @@
     <div class="modes">
       <div class="mode boost">
         <span class="tag">BOOST NOW</span>
-        <h3>Kill the clutter, keep working</h3>
-        <p>Updaters, launcher services, tray webviews, the search indexer — the processes
-           nobody opened on purpose. Frees roughly 1.5–2&nbsp;GB.</p>
+        <h3>Frees 1.5–2 GB, you keep working</h3>
+        <p>Updaters, launcher services, tray webviews, the search indexer — the RAM held by
+           software nobody opened on purpose. Runs in about three seconds.</p>
         <div class="keeps"><b>Survives:</b> your desktop, your browser, everything you opened yourself — and anything with a window on screen.</div>
       </div>
       <div class="mode idle">
         <span class="tag">ABSOLUTE IDLE</span>
-        <h3>Strip it to Windows vitals</h3>
-        <p>Browsers, chat apps, the shell itself. Lands the whole machine around
-           1.5–2&nbsp;GB in use — kernel, Defender, and your remote access.</p>
-        <div class="keeps"><b>Survives:</b> Sunshine, Tailscale, Defender, networking. Nothing else.</div>
+        <h3>Down to ~1.5–2 GB total</h3>
+        <p>For a machine nobody is sitting at. Browsers, chat apps, the shell itself — the
+           whole box drops to Windows kernel, Defender, and the things you told it to keep.</p>
+        <div class="keeps"><b>Survives:</b> your protected list, and networking. That is the entire exception.</div>
       </div>
     </div>
 
@@ -229,11 +242,12 @@
 <section id="sentry">
   <div class="wrap">
     <p class="kicker">The sentry</p>
-    <h2>Killing 2 GB once is easy.</h2>
+    <h2>Freeing 2 GB once is easy. Twenty minutes later it's back.</h2>
     <p class="lead">
-      Twenty minutes later WebView2 has respawned for a tray icon, <code>WSearch</code>
-      trigger-started itself, and Razer's launcher is back. A background thread re-applies
-      the <em>same lists</em> on a timer, so RAM stays where you put it.
+      WebView2 respawns for a tray icon, <code>WSearch</code> trigger-starts itself, Razer's
+      launcher returns. This is why every other RAM cleaner feels like a placebo. A background
+      thread re-applies the <em>same lists</em> on a timer, so the RAM stays where you put it
+      instead of drifting back up.
     </p>
 
     <div class="scroll">
@@ -243,7 +257,7 @@
           <tr><td class="n">20 s</td><td>sweeps processes against the active mode's kill lists</td></tr>
           <tr><td class="n">5 min</td><td>re-stops services from those lists that restarted themselves</td></tr>
           <tr><td class="n">10 min</td><td>trims working sets and purges the standby list again</td></tr>
-          <tr><td class="n">5 min</td><td>checks Sunshine + Tailscale, restarts them if they died</td></tr>
+          <tr><td class="n">5 min</td><td>checks your protected services are alive, restarts any that died</td></tr>
         </tbody>
       </table>
     </div>
@@ -289,10 +303,11 @@
 <section id="measured">
   <div class="wrap">
     <p class="kicker">Measured, not guessed</p>
-    <h2>What it found on one real machine</h2>
-    <p class="lead">15.9 GB total, 11.4 GB in use at the time of the scan. Run
-       <code>--report</code> first — it tags every process and service with the mode that
-       would close it, so you see the plan before anything dies.</p>
+    <h2>Where the RAM actually goes</h2>
+    <p class="lead">One real machine: 15.9 GB total, 11.4 GB in use at the time of the scan.
+       Not one line of this is an estimate — and <code>--report</code> prints the same table
+       for <em>your</em> machine, tagging every process and service with the mode that would
+       close it. You see the plan before anything dies.</p>
 
     <div class="scroll">
       <table class="tbl">
@@ -306,43 +321,63 @@
           <tr><td>Razer Cortex + Central + services</td><td class="n">305 MB</td><td><span class="pill b">BOOST</span></td></tr>
           <tr><td>NVIDIA overlay / ShadowPlay</td><td class="n">110 MB</td><td><span class="pill b">BOOST</span></td></tr>
           <tr><td>Lenovo Vantage + add-ins</td><td class="n">90 MB</td><td><span class="pill b">BOOST</span></td></tr>
-          <tr><td>Tailscale tray icon <em style="color:var(--dim)">(the daemon is untouched)</em></td><td class="n">68 MB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>Mesh-VPN tray icon <em style="color:var(--dim)">(the daemon itself is untouched)</em></td><td class="n">68 MB</td><td><span class="pill i">IDLE</span></td></tr>
           <tr><td>Windows Search indexer</td><td class="n">60 MB</td><td><span class="pill b">BOOST</span></td></tr>
         </tbody>
       </table>
     </div>
+
+    <p class="lead">
+      Boost takes the <span class="pill b">BOOST</span> rows and leaves you working —
+      about 1.5–2&nbsp;GB back. Absolute idle takes both columns and lands the machine near
+      1.5–2&nbsp;GB in use total; that floor is Windows kernel and Defender, and there is no
+      honest way below it.
+    </p>
   </div>
 </section>
 
 <section id="safety">
   <div class="wrap">
     <p class="kicker">The safety story</p>
-    <h2>Most of the code is about not stranding you.</h2>
-    <p class="lead">This kills processes on a machine you can only reach remotely. That fact
-       shapes everything.</p>
+    <h2>Freeing RAM is easy. Not stranding you is the hard part.</h2>
+    <p class="lead">A tool that kills processes can leave you locked out of a machine you
+       aren't sitting in front of. Most of the code is about making sure that never happens —
+       whether you reach the box over RDP, Parsec, Moonlight, SSH, a mesh VPN, or nothing at
+       all because it's the laptop in your lap.</p>
 
     <div class="cols">
       <div>
         <h3>Protected list wins over everything</h3>
-        <p class="lead"><code>[protect]</code> is checked before any kill, even if something is
-           also on a kill list. Sunshine, tailscaled, Defender, lsass, the audio stack, the
-           NVIDIA display container, Docker and its WSL backend — containers you left running
-           matter more than the RAM the backend costs.</p>
+        <p class="lead"><code>[protect]</code> is checked before any kill, even when something
+           is also on a kill list. Defender, lsass, the audio stack, the NVIDIA display
+           container, Docker and its WSL backend all ship protected — containers you left
+           running matter more than the RAM the backend costs. Add whatever you cannot afford
+           to lose; that list always wins.</p>
 
-        <h3>Network guard</h3>
-        <p class="lead">Before finishing, it verifies Sunshine and Tailscale are running, that
-           something is listening on a Sunshine port, and that the Tailscale adapter is up. If
-           a service died as collateral damage it restarts it and says so loudly.</p>
+        <h3>Never cut the branch you're sitting on</h3>
+        <p class="lead">Anything in <code>[protect.services]</code> gets a guard: before the
+           run finishes — and repeatedly, in idle mode — it checks those services are still
+           running, that the port is still listening and the adapter still up. If one died as
+           collateral damage, it restarts it and says so loudly in the log.</p>
+        <p class="lead">Put your remote-access stack in there and the machine cannot lock you
+           out. Mine is a streaming host, so it ships with a Sunshine + Tailscale pair as the
+           worked example — swap in yours and the same guard watches it.</p>
       </div>
       <div>
         <h3>Everything is reversible</h3>
         <p class="lead">Services are <em>stopped</em>, never disabled, so a reboot returns the
-           machine to normal on its own. Restore disarms the sentry <em>first</em> — otherwise
-           it would shoot everything Restore just brought back.</p>
+           machine to normal on its own — even if you never open the app again. Restore
+           disarms the sentry <em>first</em>, otherwise it would shoot everything Restore just
+           brought back.</p>
+
+        <h3>Nothing dies without a plan you saw</h3>
+        <p class="lead"><code>--report</code> prints the kill plan and touches nothing. The
+           sentry asks before closing anything you started yourself. Silence for 25 seconds
+           counts as <em>keep it</em> — the tool should never be the reason you lost work.</p>
 
         <div class="note">
           <b>The one scary part.</b> Absolute idle closes <code>explorer.exe</code> — your
-          taskbar and wallpaper disappear. If you stream in to a blank screen:
+          taskbar and wallpaper disappear. If you connect in to a blank screen:
           <b style="color:var(--fg)">Ctrl+Shift+Esc</b> → File → Run new task → browse to
           <code>IdleMaster.exe</code> → Restore desktop. Task Manager is handled by winlogon,
           so it works with no shell running. Or set <code>KillExplorer=0</code> and idle mode
@@ -405,7 +440,7 @@ IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span
 
 <section id="download" style="text-align:center">
   <div class="wrap">
-    <h2>Take the machine back.</h2>
+    <h2>Get the 2 GB back.</h2>
     <p class="lead" style="margin:0 auto 26px">One file. No dependencies. Reversible by a reboot.</p>
     <div class="cta" style="justify-content:center">
       <a class="btn btn-primary" href="https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe">Download IdleMasterSetup.exe</a>
