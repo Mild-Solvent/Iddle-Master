@@ -1,0 +1,99 @@
+# Idle Master
+
+> A 50 KB Windows utility that frees 1.5-2 GB of RAM by closing the background
+> updaters, launcher services and tray webviews nobody opened on purpose, then
+> keeps them from respawning. Services are stopped, never disabled, so a reboot
+> undoes everything.
+
+- Platform: Windows 10 and 11, x64. Free and open source.
+- Download: https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe
+- Source: https://github.com/Mild-Solvent/Iddle-Master
+- Site: https://mild-solvent.github.io/Iddle-Master/
+
+## What it does
+
+Two modes:
+
+- **BOOST NOW** frees roughly 1.5-2 GB and leaves your session intact. It closes
+  updaters, launcher services, tray webviews and the search indexer. Anything you
+  opened yourself survives, and any process whose window is on screen is skipped.
+- **ABSOLUTE IDLE** is for a machine nobody is sitting at. It also closes
+  browsers, chat apps and the Windows shell, landing the machine near 1.5-2 GB in
+  use total - the Windows kernel and Defender floor.
+
+**Restore desktop** puts back exactly what the last run took away.
+
+## Why it is different from other RAM cleaners
+
+Most memory optimizers free memory once and the software respawns within the
+hour. Idle Master runs a **sentry**: a background thread that re-applies the same
+kill lists every 20 seconds, re-stops services every 5 minutes, and trims working
+sets every 10 minutes. The RAM stays freed instead of drifting back up.
+
+It does not claim to "compress" or "defragment" memory. The mechanism is closing
+processes that should not have been running, and keeping them closed.
+
+## Measured results
+
+On a real machine with 15.9 GB total and 11.4 GB in use:
+
+| Software | RAM | Closed by |
+|---|---|---|
+| Brave, 28 processes | 5.0 GB | absolute idle |
+| Claude desktop, 17 processes | 3.0 GB | absolute idle |
+| VPN client UI, service and updater | 760 MB | boost + idle |
+| msedgewebview2, 17 tray and widget hosts | 540 MB | boost |
+| Windows shell (explorer, search host) | 490 MB | absolute idle |
+| Razer Cortex, Central and services | 305 MB | boost |
+| NVIDIA overlay and ShadowPlay | 110 MB | boost |
+| Lenovo Vantage and add-ins | 90 MB | boost |
+| Windows Search indexer | 60 MB | boost |
+
+`IdleMaster.exe --report` prints this table for the reader's own machine and
+changes nothing.
+
+## Safety design
+
+- **Protected list wins.** `[protect]` and `[protect.services]` are checked before
+  any kill, even if the same name is on a kill list.
+- **Remote access is guarded.** Whatever the user reaches the machine with - RDP,
+  Parsec, Moonlight, Sunshine, SSH, a mesh VPN like Tailscale - goes in
+  `[protect.services]`. Before finishing, and repeatedly in idle mode, the tool
+  verifies the service is running, a port is listening and the adapter is up, and
+  restarts it if it died. The machine cannot lock the user out.
+- **Nothing is disabled.** Services are stopped only, so a reboot restores the
+  machine with no further action.
+- **Every run is recorded** and can be undone with `--restore`.
+- **It asks first.** Anything started after the mode ran gets a prompt with Keep
+  it / Always keep / Trash it. No answer within 25 seconds counts as keep it.
+- **Open windows are never touched** in boost mode, including an app's background
+  worker processes, resolved by walking the parent chain.
+- **Respawn backoff.** If one process returns 6 times, the sentry stops fighting it
+  for 30 minutes rather than burning CPU in a kill loop.
+
+Absolute idle closes `explorer.exe`, which removes the taskbar and wallpaper. The
+recovery is Ctrl+Shift+Esc, File, Run new task, IdleMaster.exe, Restore desktop -
+Task Manager is hosted by winlogon so it works with no shell running. Setting
+`KillExplorer=0` disables this behaviour.
+
+## Install and use
+
+Installing needs no administrator; the app elevates itself at runtime because
+stopping services requires it. Install path is
+`%LOCALAPPDATA%\Programs\IdleMaster`. The config file `idlemaster.ini` is never
+overwritten by an update.
+
+```
+IdleMaster.exe               open the window
+IdleMaster.exe --boost       boost mode, no UI
+IdleMaster.exe --idle        absolute idle, no UI
+IdleMaster.exe --restore     undo, and stop the sentry
+IdleMaster.exe --report      print what is eating RAM, change nothing
+IdleMaster.exe --boost --watch   boost, then keep hunting
+IdleMaster.exe --unwatch     stop the sentry
+IdleMaster.exe --installtask run the sentry at every logon
+```
+
+Builds with the .NET Framework compiler already present in Windows:
+`powershell -ExecutionPolicy Bypass -File build.ps1`. No SDK, no NuGet, no
+internet access required.

@@ -3,9 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Idle Master — get your RAM back, and keep it back</title>
-<meta name="description" content="Two buttons that take a Windows machine from 11 GB of background clutter down to Windows vitals, and a sentry that keeps it there. Whatever you reach the machine with never moves.">
-<meta property="og:title" content="Idle Master — get your RAM back, and keep it back">
+<title>Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free</title>
+<meta name="description" content="Free RAM on Windows 10 and 11 by killing the updaters, launcher services and tray webviews you never opened — then a background sentry keeps them from coming back. Open-source, 50 KB, no install of a bloated suite, reversible by a reboot.">
+<link rel="canonical" href="https://mild-solvent.github.io/Iddle-Master/">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta property="og:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
 <meta property="og:description" content="A single 50 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/">
@@ -15,11 +17,112 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Idle Master — 11.4 GB in use. You opened three of them.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Idle Master — get your RAM back, and keep it back">
+<meta name="twitter:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
 <meta name="twitter:description" content="A 50 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
 <meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
 <meta name="theme-color" content="#111318">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M9 10.5h2.6v11H9zM14.4 10.5h4.2c3.6 0 5.9 2.1 5.9 5.5s-2.3 5.5-5.9 5.5h-4.2zm2.6 2.3v6.4h1.4c2.1 0 3.4-1.2 3.4-3.2s-1.3-3.2-3.4-3.2z' fill='%238fc1f0'/%3E%3C/svg%3E">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://mild-solvent.github.io/Iddle-Master/#app",
+      "name": "Idle Master",
+      "alternateName": "IdleMaster",
+      "applicationCategory": "UtilitiesApplication",
+      "applicationSubCategory": "Memory optimizer",
+      "operatingSystem": "Windows 10, Windows 11",
+      "processorRequirements": "x64",
+      "fileSize": "50KB",
+      "softwareVersion": "0.5.0",
+      "downloadUrl": "https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe",
+      "installUrl": "https://github.com/Mild-Solvent/Iddle-Master/releases/latest",
+      "softwareHelp": "https://github.com/Mild-Solvent/Iddle-Master#readme",
+      "codeRepository": "https://github.com/Mild-Solvent/Iddle-Master",
+      "programmingLanguage": "C#",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": "A 50 KB Windows utility that frees 1.5-2 GB of RAM by closing background updaters, launcher services and tray webviews, then runs a sentry that stops them respawning. Services are stopped, never disabled, so a reboot undoes everything.",
+      "featureList": [
+        "Boost mode: frees 1.5-2 GB without closing anything you opened",
+        "Absolute idle: drops the whole machine to about 1.5-2 GB in use",
+        "Sentry: re-applies the kill lists every 20 seconds so RAM does not drift back",
+        "Asks before closing anything you started yourself",
+        "Never touches a process whose window is open",
+        "Protected list guards remote access so the machine cannot lock you out",
+        "Fully reversible: services are stopped, never disabled"
+      ],
+      "screenshot": "https://mild-solvent.github.io/Iddle-Master/og.png",
+      "author": { "@type": "Person", "name": "Mild-Solvent", "url": "https://github.com/Mild-Solvent" }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://mild-solvent.github.io/Iddle-Master/#website",
+      "url": "https://mild-solvent.github.io/Iddle-Master/",
+      "name": "Idle Master",
+      "about": { "@id": "https://mild-solvent.github.io/Iddle-Master/#app" },
+      "inLanguage": "en"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://mild-solvent.github.io/Iddle-Master/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Do RAM cleaners actually work on Windows?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Most do not, because they free memory once and the software respawns within the hour. Idle Master closes the same processes on a 20-second timer, so the memory stays freed. It also trims working sets and purges the standby list, but the durable win comes from the processes never coming back, not from the trim."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How much RAM can Idle Master free?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "On a measured 15.9 GB machine running 11.4 GB in use, boost mode freed about 1.9 GB without closing anything the user had opened. Absolute idle brings the whole machine to roughly 1.5-2 GB in use, which is the Windows kernel and Defender floor."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is it safe to kill background processes to free RAM?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It is safe when the tool is reversible and conservative. Idle Master stops services rather than disabling them, so a reboot restores the machine even if you never open the app again. It writes down everything it stopped and can undo it, it refuses to touch a protected list, it never kills a process whose window is open during boost, and it asks before closing anything you started yourself."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Will it break my remote desktop or streaming connection?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Anything listed under protect.services is checked before any kill and re-checked after the run: the service must be running, the port listening and the adapter up, or the tool restarts it and logs it loudly. This works for RDP, Parsec, Moonlight, Sunshine, SSH or a mesh VPN such as Tailscale."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does Idle Master need administrator rights?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Installing does not: it installs into your own user profile at %LOCALAPPDATA%\\Programs\\IdleMaster. Running does, because stopping Windows services requires it, so the app elevates itself when it starts."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How do I undo what it closed?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Click Restore desktop, or run IdleMaster.exe --restore. Each run records exactly what it stopped and Restore walks that list backwards, disarming the sentry first so nothing gets closed again. Rebooting also returns the machine to normal, because nothing is ever disabled."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
 
 <style>
   :root{
@@ -165,6 +268,7 @@
       <a href="#sentry">Sentry</a>
       <a href="#safety">Safety</a>
       <a href="#cli">CLI</a>
+      <a href="#faq">FAQ</a>
       <a class="gh" href="https://github.com/Mild-Solvent/Iddle-Master">GitHub</a>
     </span>
   </div>
@@ -433,6 +537,56 @@ IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span
         </div>
         <p class="lead" style="margin-top:14px">Outputs <code>dist\IdleMaster.exe</code> and
            <code>dist\IdleMasterSetup.exe</code>, the app embedded in the installer.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <p class="kicker">Questions people actually ask</p>
+    <h2>Before you run something that kills processes.</h2>
+
+    <div class="cols" style="margin-top:26px">
+      <div>
+        <h3>Do RAM cleaners actually work on Windows?</h3>
+        <p class="lead">Most don't, and for one reason: they free memory once, and the software
+           respawns within the hour. Idle Master closes the same processes on a 20-second
+           timer, so the memory stays freed. It trims working sets and purges the standby list
+           too, but the durable win comes from things not coming back — not from the trim.</p>
+
+        <h3>How much RAM will it free?</h3>
+        <p class="lead">On the measured machine — 15.9 GB total, 11.4 GB in use — boost freed
+           about 1.9 GB without closing anything the user had opened. Absolute idle brings the
+           whole box to roughly 1.5–2 GB in use, which is the Windows kernel and Defender
+           floor. Run <code>--report</code> to get the same number for your machine before
+           installing anything.</p>
+
+        <h3>Is it safe to kill background processes?</h3>
+        <p class="lead">It is when the tool is reversible. Services are stopped, never
+           disabled, so a reboot restores the machine even if you never open the app again.
+           Every run writes down what it stopped; Restore walks that list backwards. The
+           protected list is checked before any kill, open windows are never touched in boost,
+           and anything you started yourself gets asked about first.</p>
+      </div>
+      <div>
+        <h3>Will it break my remote desktop or stream?</h3>
+        <p class="lead">No — that is the constraint the whole design is built around. Anything
+           in <code>[protect.services]</code> is checked before the run and again after: the
+           service running, the port listening, the adapter up. If one died as collateral
+           damage it is restarted and logged loudly. Works the same for RDP, Parsec,
+           Moonlight, Sunshine, SSH or a mesh VPN.</p>
+
+        <h3>Does Idle Master need administrator rights?</h3>
+        <p class="lead">Installing doesn't — it goes into your own profile at
+           <code>%LOCALAPPDATA%\Programs\IdleMaster</code>. Running does, because stopping
+           Windows services requires it, so the app elevates itself when it starts.</p>
+
+        <h3>How do I undo it?</h3>
+        <p class="lead"><b style="color:var(--fg)">Restore desktop</b> in the window, or
+           <code>IdleMaster.exe --restore</code>. It disarms the sentry first, then puts back
+           exactly what the last run took away. Rebooting works too, because nothing is ever
+           disabled in the first place.</p>
       </div>
     </div>
   </div>

@@ -1,0 +1,10 @@
+# NOTE: crawlers only read robots.txt at the host root, which for a project page
+# is https://mild-solvent.github.io/robots.txt - not this file. This copy exists
+# so it travels with the site if it ever moves to its own domain, where it WILL
+# be the live one. Until then, crawling is controlled by the <meta name="robots">
+# tag in index.html, which is honoured everywhere.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://mild-solvent.github.io/Iddle-Master/sitemap.xml
