@@ -262,3 +262,26 @@ dist/idlemaster.ini       the lists; edit in Settings or by hand
 dist/idlemaster.log       append-only record of every run
 dist/idlemaster.state     written by boost/idle, consumed by restore
 ```
+
+## License
+
+[FSL-1.1-MIT](LICENSE.md) — the Functional Source License, with an MIT future
+grant. Copyright 2026 Mild-Solvent.
+
+In plain words, and the file is what actually counts:
+
+- **Use it however you like.** At home, at work, on one machine or five hundred.
+  Fork it, patch it, redistribute it, build on it. No fee, no permission needed.
+- **Keep my name on it.** Redistribute it and the copyright notice goes with it.
+- **Don't sell my tool as your product.** The one forbidden thing is a *competing
+  use* — packaging this into a commercial product or service that substitutes for
+  it, or does substantially the same thing. If you want to do that, ask me; I'm
+  reachable through GitHub and open to it.
+- **It becomes MIT in two years.** Every release picks up a plain MIT license on
+  the second anniversary of its publication, automatically and irrevocably. The
+  restriction is a head start, not a permanent enclosure.
+
+This is source-available rather than OSI open source, and that is deliberate: the
+Windows utility world has a long history of free tools being rewrapped in an
+installer with a "Pro" tier attached. Everything else — reading, learning from,
+improving, and using this — is wide open.

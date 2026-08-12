@@ -5,7 +5,11 @@
 > keeps them from respawning. Services are stopped, never disabled, so a reboot
 > undoes everything.
 
-- Platform: Windows 10 and 11, x64. Free and open source.
+- Platform: Windows 10 and 11, x64. Free to use, source available.
+- License: FSL-1.1-MIT. Free for any use including commercial and internal
+  business use; the only prohibited use is selling a competing product or
+  service built on it. Each release converts to the MIT license two years after
+  publication. Copyright 2026 Mild-Solvent.
 - Download: https://github.com/Mild-Solvent/Iddle-Master/releases/latest/download/IdleMasterSetup.exe
 - Source: https://github.com/Mild-Solvent/Iddle-Master
 - Site: https://mild-solvent.github.io/Iddle-Master/
