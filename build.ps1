@@ -40,7 +40,7 @@ Get-ChildItem $dist -Filter '*.old-*' -ErrorAction SilentlyContinue | ForEach-Ob
 
 & $csc /nologo /target:winexe /platform:x64 /optimize+ `
   /win32manifest:"$root\src\app.manifest" `
-  /out:"$out" $refs "$root\src\IdleMaster.cs" "$root\src\Theme.cs" "$root\src\Ui.cs"
+  /out:"$out" $refs "$root\src\IdleMaster.cs" "$root\src\Theme.cs" "$root\src\Ui.cs" "$root\src\Cleanup.cs"
 if ($LASTEXITCODE -ne 0) { throw "app build failed ($LASTEXITCODE)" }
 
 # One argument, no embedded quotes - PowerShell quotes it as a whole because the

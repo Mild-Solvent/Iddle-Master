@@ -7,6 +7,7 @@
 //   QuickSettingsForm : the handful of switches most people actually touch.
 //   ConfigForm        : the whole config - reached via "Advanced settings".
 //   EatersForm        : the live task manager behind "What's eating RAM?".
+//   CleanupForm       : the disk scanner and review table behind "Disk cleanup".
 //   MainForm          : gauge, mode buttons, and the log console front and centre.
 //
 // Same compiler rules as the rest: C# 5, in-box .NET Framework csc.
@@ -460,6 +461,8 @@ namespace IdleMaster
             new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "25" },
             new string[] { "AskAboveMb",           "Ask about unlisted newcomers bigger than (MB, 0 = off)", "0", "99999", "250" },
             new string[] { "TrimWhenFreeBelowMb",  "Emergency trim when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
+            new string[] { "CleanupInstallerDays", "Suggest Downloads installers older than (days)",  "7",  "3650",   "90" },
+            new string[] { "CleanupBigDirMinMb",   "Big-folder suggestions start at (MB)",            "50", "999999", "500" },
         };
 
         public static string[] Number(string key)
@@ -642,6 +645,8 @@ namespace IdleMaster
                                                     "idle.services", "Also stopped by Absolute Idle"));
             tabs.TabPages.Add(Single("Restore", "restore.launch",
                 "Relaunched by Restore desktop  (full path, optional |arguments)"));
+            tabs.TabPages.Add(Single("Cleanup", "cleanup.protect",
+                "Paths disk cleanup must never touch  (full path, '*' works)"));
 
             Label hint = Theme.Hint("Unchecked entries stay in the file, commented out. Nothing here can "
                 + "override 'Never touch'.");
@@ -705,7 +710,12 @@ namespace IdleMaster
 
             y += 8;
             y = Header(page, "Asking && safety", y);
-            for (int i = 6; i < SettingSpec.Numbers.Length; i++)
+            for (int i = 6; i < 9; i++)
+                y = NumberRow(page, SettingSpec.Numbers[i], y);
+
+            y += 8;
+            y = Header(page, "Disk cleanup", y);
+            for (int i = 9; i < SettingSpec.Numbers.Length; i++)
                 y = NumberRow(page, SettingSpec.Numbers[i], y);
 
             return page;
@@ -795,11 +805,12 @@ namespace IdleMaster
 
     // ------------------------------------------------------------ task manager
 
-    // ListView is the only stock control that can show the eaters table, and the
-    // only way to reach its protected DoubleBuffered is to inherit it.
-    internal sealed class EaterListView : ListView
+    // ListView is the only stock control that can show these tables, and the
+    // only way to reach its protected DoubleBuffered is to inherit it. Shared
+    // by the task manager and the disk cleanup window.
+    internal sealed class BufferedListView : ListView
     {
-        public EaterListView() { DoubleBuffered = true; }
+        public BufferedListView() { DoubleBuffered = true; }
     }
 
     // The Master's task manager: what's eating RAM, live, with the verdicts one
@@ -813,7 +824,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly Action<string> log;
         private readonly Func<bool> sentryAlive;
-        private readonly EaterListView eaters;
+        private readonly BufferedListView eaters;
         private readonly ColumnHeader colName, colCount, colMem, colTag;
         private readonly ToolStripMenuItem miKill, miBoost, miIdle, miProtect;
         private readonly System.Windows.Forms.Timer timer;
@@ -844,7 +855,7 @@ namespace IdleMaster
             hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(hint);
 
-            eaters = new EaterListView();
+            eaters = new BufferedListView();
             eaters.View = View.Details;
             eaters.FullRowSelect = true;
             eaters.MultiSelect = false;
@@ -1062,6 +1073,464 @@ namespace IdleMaster
         }
     }
 
+    // ----------------------------------------------------------- disk cleanup
+
+    // The review table behind "Disk cleanup". Scan fills it on a worker thread,
+    // you tick what goes, Clean sends the ticked rows to the Recycle Bin.
+    // Nothing is deleted on its own, and nothing is deleted anywhere else.
+    internal sealed class CleanupForm : Form
+    {
+        // Fixed order so the table reads top-down from "obviously junk" to
+        // "you decide": the same journey the scanner itself takes.
+        private static readonly string[] CategoryOrder = new string[]
+        {
+            "Temp files", "Caches", "Crash dumps", "Windows update",
+            "Old installers", "Recycle bin", "Possible leftovers", "Big folders",
+        };
+
+        private readonly Config cfg;
+        private readonly Action<string> log;
+        private readonly BufferedListView list;
+        private readonly ColumnHeader colName, colCat, colWhere, colSize, colClass;
+        private readonly Button btnScan, btnStop, btnClean;
+        private readonly Label progress;
+        private readonly System.Windows.Forms.Timer timer;
+        private readonly ToolStripMenuItem miOpen, miCleanOne, miProtect, miCopy;
+
+        // The worker drops findings here; a 200 ms timer drains them onto the
+        // UI thread in batches, so a fast scan cannot flood BeginInvoke.
+        private readonly List<CleanupItem> arrived = new List<CleanupItem>();
+        private readonly object gate = new object();
+        private string phase = "";
+        private CleanupScanner scanner;
+        private bool working;
+        private bool filling;
+
+        public CleanupForm(Config c, Action<string> logger)
+        {
+            cfg = c;
+            log = logger;
+
+            Theme.Form(this);
+            Text = "IDLE MASTER - disk cleanup";
+            Size = new Size(760, 620);
+            MinimumSize = new Size(620, 420);
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+
+            Label cap = Theme.Caption("DISK CLEANUP");
+            cap.SetBounds(16, 12, 180, 18);
+            Controls.Add(cap);
+
+            Label hint = Theme.Hint("scan, tick what goes - Clean sends it to the Recycle Bin");
+            hint.Font = Theme.Small();
+            hint.TextAlign = ContentAlignment.MiddleRight;
+            hint.SetBounds(200, 12, 528, 18);
+            hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(hint);
+
+            list = new BufferedListView();
+            list.View = View.Details;
+            list.CheckBoxes = true;
+            list.FullRowSelect = true;
+            list.MultiSelect = false;
+            list.HideSelection = false;
+            list.ShowItemToolTips = true;
+            list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            list.BorderStyle = BorderStyle.FixedSingle;
+            list.BackColor = Theme.Input;
+            list.ForeColor = Theme.Fg;
+            list.OwnerDraw = true;
+            list.DrawColumnHeader += DrawHeader;
+            list.DrawItem += delegate(object s, DrawListViewItemEventArgs a) { a.DrawDefault = true; };
+            list.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs a) { a.DrawDefault = true; };
+            colName = list.Columns.Add("Item", 236);
+            colCat = list.Columns.Add("Category", 108);
+            colWhere = list.Columns.Add("Where", 200);
+            colSize = list.Columns.Add("Size", 88, HorizontalAlignment.Right);
+            colClass = list.Columns.Add("Class", 64);
+            list.SetBounds(16, 36, 712, 488);
+            list.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            list.Resize += delegate { SizeColumns(); };
+            list.ItemChecked += delegate { if (!filling) UpdateCleanButton(); };
+            Controls.Add(list);
+            SizeColumns();
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+            Theme.Menu(menu);
+            miOpen = new ToolStripMenuItem("Open in Explorer");
+            miOpen.Click += delegate { OpenSelected(); };
+            miCleanOne = new ToolStripMenuItem("Clean just this one");
+            miCleanOne.Click += delegate { CleanSelectedOnly(); };
+            miProtect = new ToolStripMenuItem("Never touch this path (protect)");
+            miProtect.Click += delegate { ProtectSelected(); };
+            miCopy = new ToolStripMenuItem("Copy path");
+            miCopy.Click += delegate { CopySelected(); };
+            menu.Items.Add(miOpen);
+            menu.Items.Add(miCleanOne);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miProtect);
+            menu.Items.Add(miCopy);
+            menu.Opening += MenuOpening;
+            list.ContextMenuStrip = menu;
+
+            btnScan = Theme.Action("Scan");
+            btnScan.SetBounds(16, 536, 100, 30);
+            btnScan.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnScan.Click += delegate { StartScan(); };
+            Controls.Add(btnScan);
+
+            btnStop = Theme.Quiet("Stop scan");
+            btnStop.SetBounds(124, 536, 100, 30);
+            btnStop.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnStop.Visible = false;
+            btnStop.Click += delegate { if (scanner != null) scanner.Cancel(); };
+            Controls.Add(btnStop);
+
+            progress = Theme.Hint("no scan yet");
+            progress.Font = Theme.Small();
+            progress.SetBounds(232, 541, 220, 20);
+            progress.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(progress);
+
+            btnClean = Theme.Dangerous("Clean checked");
+            btnClean.SetBounds(460, 536, 268, 30);
+            btnClean.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnClean.Enabled = false;
+            btnClean.Click += delegate { Clean(Checked()); };
+            Controls.Add(btnClean);
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 200;
+            timer.Tick += delegate { Drain(); };
+            timer.Start();
+        }
+
+        private void SizeColumns()
+        {
+            int rest = colName.Width + colCat.Width + colSize.Width + colClass.Width;
+            int w = list.ClientSize.Width - rest - 4;
+            if (w > 80) colWhere.Width = w;
+        }
+
+        private void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Theme.Panel))
+                e.Graphics.FillRectangle(b, e.Bounds);
+            TextFormatFlags align = e.ColumnIndex == 3
+                ? TextFormatFlags.Right : TextFormatFlags.Left;
+            Rectangle r = e.Bounds;
+            r.Inflate(-6, 0);
+            TextRenderer.DrawText(e.Graphics, e.Header.Text, list.Font, r, Theme.Dim,
+                align | TextFormatFlags.VerticalCenter);
+        }
+
+        // ---- scanning
+
+        public void StartScan()
+        {
+            if (working) return;
+            working = true;
+            scanner = new CleanupScanner(cfg);
+
+            filling = true;
+            list.Items.Clear();
+            filling = false;
+            lock (gate) { arrived.Clear(); phase = "starting..."; }
+
+            btnScan.Enabled = false;
+            btnStop.Visible = true;
+            UpdateCleanButton();
+            log("-- disk cleanup scan");
+
+            CleanupScanner mine = scanner;
+            Thread t = new Thread(delegate()
+            {
+                List<CleanupItem> all = null;
+                try
+                {
+                    all = mine.Scan(
+                        delegate(string where) { lock (gate) { phase = where; } },
+                        delegate(CleanupItem it) { lock (gate) { arrived.Add(it); } });
+                }
+                catch (Exception ex) { log("   ! cleanup scan failed: " + ex.Message); }
+                try { BeginInvoke((Action)delegate { ScanDone(all); }); }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void Drain()
+        {
+            List<CleanupItem> take = null;
+            string where;
+            lock (gate)
+            {
+                where = phase;
+                if (arrived.Count > 0)
+                {
+                    take = new List<CleanupItem>(arrived);
+                    arrived.Clear();
+                }
+            }
+            if (working) progress.Text = where;
+            if (take == null) return;
+
+            filling = true;
+            list.BeginUpdate();
+            try { foreach (CleanupItem it in take) AddRow(it); }
+            finally { list.EndUpdate(); filling = false; }
+            UpdateCleanButton();
+        }
+
+        private void ScanDone(List<CleanupItem> all)
+        {
+            Drain();
+            working = false;
+            btnScan.Enabled = true;
+            btnStop.Visible = false;
+
+            long junk = 0;
+            foreach (ListViewItem row in list.Items)
+            {
+                CleanupItem it = (CleanupItem)row.Tag;
+                if (it.Safe) junk += it.Bytes;
+            }
+            bool cancelled = scanner != null && scanner.Cancelled;
+            progress.Text = (cancelled ? "cancelled - " : "")
+                + list.Items.Count + " findings, " + CleanupScanner.Nice(junk) + " known junk";
+            log("   = scan " + (cancelled ? "cancelled" : "finished") + ": "
+                + list.Items.Count + " findings, " + CleanupScanner.Nice(junk)
+                + " of known junk pre-ticked.");
+            UpdateCleanButton();
+        }
+
+        private void AddRow(CleanupItem it)
+        {
+            if (list.Items.ContainsKey(it.Key)) return;
+
+            ListViewItem row = new ListViewItem(it.Name);
+            row.Name = it.Key;
+            row.Tag = it;
+            row.UseItemStyleForSubItems = false;
+            row.SubItems.Add(it.Category);
+            row.SubItems.Add(it.IsRecycleBin ? "(all drives)" : it.Path);
+            row.SubItems.Add(CleanupScanner.Nice(it.Bytes));
+            row.SubItems.Add(it.Safe ? "safe" : "review");
+            row.SubItems[1].ForeColor = Theme.Dim;
+            row.SubItems[2].ForeColor = Theme.Dim;
+            row.SubItems[4].ForeColor = it.Safe ? Theme.Accent : Theme.Warn;
+            row.ToolTipText = it.Note;
+            list.Items.Insert(InsertAt(it), row);
+            row.Checked = it.Safe;      // known junk arrives ticked, the rest is your call
+                                        // (set after the insert - a detached row forgets it)
+        }
+
+        // Rows stay sorted by category, then by appetite, without groups - the
+        // ListView's own group headers ignore the theme and cannot be recoloured.
+        private int InsertAt(CleanupItem it)
+        {
+            int mine = Rank(it.Category);
+            for (int i = 0; i < list.Items.Count; i++)
+            {
+                CleanupItem other = (CleanupItem)list.Items[i].Tag;
+                int r = Rank(other.Category);
+                if (r > mine) return i;
+                if (r == mine && other.Bytes < it.Bytes) return i;
+            }
+            return list.Items.Count;
+        }
+
+        private static int Rank(string category)
+        {
+            for (int i = 0; i < CategoryOrder.Length; i++)
+                if (CategoryOrder[i] == category) return i;
+            return CategoryOrder.Length;
+        }
+
+        // ---- cleaning
+
+        private List<CleanupItem> Checked()
+        {
+            List<CleanupItem> picked = new List<CleanupItem>();
+            foreach (ListViewItem row in list.Items)
+                if (row.Checked) picked.Add((CleanupItem)row.Tag);
+            return picked;
+        }
+
+        private void UpdateCleanButton()
+        {
+            long bytes = 0;
+            int n = 0;
+            foreach (ListViewItem row in list.Items)
+            {
+                if (!row.Checked) continue;
+                bytes += ((CleanupItem)row.Tag).Bytes;
+                n++;
+            }
+            btnClean.Enabled = n > 0 && !working;
+            btnClean.Text = n == 0
+                ? "Clean checked"
+                : "Clean checked  (" + n + " items, " + CleanupScanner.Nice(bytes) + ")";
+        }
+
+        private void Clean(List<CleanupItem> picked)
+        {
+            if (working || picked.Count == 0) return;
+
+            long bytes = 0;
+            bool bin = false;
+            foreach (CleanupItem it in picked)
+            {
+                bytes += it.Bytes;
+                if (it.IsRecycleBin) bin = true;
+            }
+
+            string msg = "Send " + picked.Count + " item(s) - " + CleanupScanner.Nice(bytes)
+                + " - to the Recycle Bin?\n\nEverything can be restored from the bin afterwards."
+                + (bin ? "\n\nEXCEPT: the Recycle Bin row itself is ticked. Emptying the bin"
+                       + " is permanent. It is done last, after everything else has arrived."
+                       : "");
+            if (MessageBox.Show(this, msg, "Disk cleanup", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            working = true;
+            btnScan.Enabled = false;
+            UpdateCleanButton();
+            progress.Text = "cleaning...";
+            log("-- disk cleanup");
+
+            // The bin is emptied LAST: it is where everything else is headed,
+            // and emptying it first would burn the undo for this very batch.
+            picked.Sort(delegate(CleanupItem a, CleanupItem b)
+                { return (a.IsRecycleBin ? 1 : 0) - (b.IsRecycleBin ? 1 : 0); });
+
+            CleanupScanner guard = scanner != null ? scanner : new CleanupScanner(cfg);
+            Thread t = new Thread(delegate()
+            {
+                long freed = 0;
+                List<string> gone = new List<string>();
+                foreach (CleanupItem it in picked)
+                {
+                    if (!CleanupActions.Recycle(it, guard, log)) continue;
+                    freed += it.Bytes;
+                    gone.Add(it.Key);
+                }
+                log("   = " + CleanupScanner.Nice(freed) + " reclaimed ("
+                    + gone.Count + " of " + picked.Count + " items).");
+                try { BeginInvoke((Action)delegate { CleanDone(gone, picked.Count); }); }
+                catch (Exception) { }
+            });
+            t.SetApartmentState(ApartmentState.STA);    // the shell is happier there
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void CleanDone(List<string> gone, int asked)
+        {
+            filling = true;
+            foreach (string key in gone)
+            {
+                int at = list.Items.IndexOfKey(key);
+                if (at >= 0) list.Items.RemoveAt(at);
+            }
+            filling = false;
+            working = false;
+            btnScan.Enabled = true;
+            progress.Text = gone.Count == asked
+                ? "cleaned - check the Recycle Bin"
+                : "partly cleaned - what refused is still listed";
+            UpdateCleanButton();
+        }
+
+        // ---- the right-click verdicts
+
+        private CleanupItem Selected()
+        {
+            if (list.SelectedItems.Count == 0) return null;
+            return (CleanupItem)list.SelectedItems[0].Tag;
+        }
+
+        private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            CleanupItem it = Selected();
+            if (it == null) { e.Cancel = true; return; }
+            miOpen.Enabled = true;
+            miCleanOne.Enabled = !working;
+            miCleanOne.Text = it.IsRecycleBin
+                ? "Empty the Recycle Bin (permanent)"
+                : "Clean just this one  (" + CleanupScanner.Nice(it.Bytes) + ")";
+            miProtect.Enabled = !it.IsRecycleBin;
+            miCopy.Enabled = !it.IsRecycleBin;
+        }
+
+        private void OpenSelected()
+        {
+            CleanupItem it = Selected();
+            if (it == null) return;
+            try
+            {
+                if (it.IsRecycleBin)
+                    Process.Start(new ProcessStartInfo("explorer.exe", "shell:RecycleBinFolder")
+                        { UseShellExecute = true });
+                else
+                    Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + it.Path + "\"")
+                        { UseShellExecute = true });
+            }
+            catch (Exception) { }
+        }
+
+        private void CleanSelectedOnly()
+        {
+            CleanupItem it = Selected();
+            if (it == null) return;
+            List<CleanupItem> one = new List<CleanupItem>();
+            one.Add(it);
+            Clean(one);
+        }
+
+        // The same recipe the task manager uses for "Never touch": write the
+        // decision into the ini, reload the running config, drop the row.
+        private void ProtectSelected()
+        {
+            CleanupItem it = Selected();
+            if (it == null || it.IsRecycleBin) return;
+
+            if (!Config.Append("cleanup.protect", it.Path))
+            {
+                log("   ! could not write " + it.Path + " into [cleanup.protect].");
+                return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                log(it.Path + " added to [cleanup.protect] - cleanup will never touch it.");
+            }
+            catch (Exception ex) { log("   ! could not reload the config: " + ex.Message); }
+
+            int at = list.Items.IndexOfKey(it.Key);
+            if (at >= 0) list.Items.RemoveAt(at);
+            UpdateCleanButton();
+        }
+
+        private void CopySelected()
+        {
+            CleanupItem it = Selected();
+            if (it == null || it.IsRecycleBin) return;
+            try { Clipboard.SetText(it.Path); }
+            catch (Exception) { }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            timer.Stop();
+            if (scanner != null) scanner.Cancel();
+            base.OnFormClosed(e);
+        }
+    }
+
     // ------------------------------------------------------------------- gui
 
     internal sealed class MainForm : Form
@@ -1070,7 +1539,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup;
         private readonly CheckBox chkSentry;
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
@@ -1078,6 +1547,7 @@ namespace IdleMaster
         private Sentry sentry;
         private NotifyIcon tray;
         private EatersForm eatersWin;
+        private CleanupForm cleanupWin;
         private bool reallyExit;
         private bool startHidden;
         private bool watchMode;
@@ -1119,22 +1589,25 @@ namespace IdleMaster
                 "Strip to Windows vitals + Sunshine + Tailscale. For sleep.", Theme.Danger, 218);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
-            btnRestore = SmallButton("Restore desktop", 22);
+            btnRestore = SmallButton("Restore desktop", 22, 306);
             btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = SmallButton("What's eating RAM?", 182);
+            btnEaters = SmallButton("What's eating RAM?", 182, 306);
             btnEaters.Click += delegate { OpenEaters(); };
-            btnTrim = SmallButton("Trim RAM now", 342);
+            btnTrim = SmallButton("Trim RAM now", 342, 306);
             btnTrim.Click += delegate { Run("trim"); };
-            btnConfig = SmallButton("Settings", 502);
+            btnConfig = SmallButton("Settings", 502, 306);
             btnConfig.Click += delegate { EditConfig(); };
 
+            btnCleanup = SmallButton("Disk cleanup", 22, 342);
+            btnCleanup.Click += delegate { OpenCleanup(); };
+
             btnUpdate = Theme.Quiet("Check for updates");
-            btnUpdate.SetBounds(22, 342, 152, 30);
+            btnUpdate.SetBounds(182, 342, 152, 30);
             btnUpdate.Click += delegate { CheckUpdates(); };
             Controls.Add(btnUpdate);
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(182, 348, 480, 20);
+            updateLabel.SetBounds(342, 348, 320, 20);
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
 
@@ -1200,6 +1673,20 @@ namespace IdleMaster
             eatersWin.Show(this);
         }
 
+        // One cleanup window, reused if it is already open - same deal as the
+        // task manager above.
+        private void OpenCleanup()
+        {
+            if (cleanupWin != null && !cleanupWin.IsDisposed)
+            {
+                cleanupWin.Activate();
+                return;
+            }
+            cleanupWin = new CleanupForm(cfg, AppendLog);
+            cleanupWin.Location = new Point(Location.X + Width - 40, Location.Y + 80);
+            cleanupWin.Show(this);
+        }
+
         // Started by --watch: no window, just the tray icon and the sentry.
         public void HideOnStart(string enforce)
         {
@@ -1246,6 +1733,7 @@ namespace IdleMaster
                 StopSentry();
             });
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Disk cleanup...", null, delegate { ShowWindow(); OpenCleanup(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
             menu.Items.Add("Exit", null, delegate { reallyExit = true; Close(); });
@@ -1497,10 +1985,10 @@ namespace IdleMaster
             return b;
         }
 
-        private Button SmallButton(string text, int x)
+        private Button SmallButton(string text, int x, int y)
         {
             Button b = Theme.Quiet(text);
-            b.SetBounds(x, 306, 152, 30);
+            b.SetBounds(x, y, 152, 30);
             Controls.Add(b);
             return b;
         }

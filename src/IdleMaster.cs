@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.3.0.0")]
-[assembly: AssemblyFileVersion("0.3.0.0")]
+[assembly: AssemblyVersion("0.4.0.0")]
+[assembly: AssemblyFileVersion("0.4.0.0")]
 
 namespace IdleMaster
 {
@@ -141,6 +141,57 @@ namespace IdleMaster
             }
             finally { Marshal.FreeHGlobal(p); }
         }
+
+        // ---- shell delete / recycle bin
+        //
+        // The shell delete is the only delete disk cleanup does: everything goes
+        // to the Recycle Bin, so a wrong rule costs a restore, not the data.
+        // Sequential layout matches the x64 headers; the build is /platform:x64
+        // only (build.ps1), so the x86 Pack=1 quirk does not apply here.
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        internal struct SHFILEOPSTRUCT
+        {
+            public IntPtr hwnd;
+            public uint wFunc;
+            public string pFrom;        // double-null-terminated list; build it as
+            public string pTo;          // string.Join("\0", paths) + "\0" - the
+                                        // marshaler supplies the final terminator.
+            public ushort fFlags;
+            [MarshalAs(UnmanagedType.Bool)] public bool fAnyOperationsAborted;
+            public IntPtr hNameMappings;
+            public string lpszProgressTitle;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        internal static extern int SHFileOperation(ref SHFILEOPSTRUCT op);
+
+        internal const uint FO_DELETE = 0x0003;
+        internal const ushort FOF_SILENT          = 0x0004;
+        internal const ushort FOF_NOCONFIRMATION  = 0x0010;
+        internal const ushort FOF_ALLOWUNDO       = 0x0040;
+        internal const ushort FOF_NOERRORUI       = 0x0400;
+        // Without this, NOCONFIRMATION lets the shell permanently nuke anything
+        // too big for the bin without a word. This restores exactly that warning.
+        internal const ushort FOF_WANTNUKEWARNING = 0x4000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct SHQUERYRBINFO
+        {
+            public uint cbSize;
+            public long i64Size;
+            public long i64NumItems;
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        internal static extern int SHQueryRecycleBin(string pszRootPath, ref SHQUERYRBINFO info);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        internal static extern int SHEmptyRecycleBin(IntPtr hwnd, string pszRootPath, uint flags);
+
+        internal const uint SHERB_NOCONFIRMATION = 0x1;
+        internal const uint SHERB_NOPROGRESSUI   = 0x2;
+        internal const uint SHERB_NOSOUND        = 0x4;
     }
 
     // ---------------------------------------------------------------- config
@@ -171,6 +222,10 @@ namespace IdleMaster
                                                     // that are on no list at all. 0 = off.
         public bool Tray = true;                    // tray icon; closing the window hides to it
 
+        // --- disk cleanup: the scanner only suggests, these tune the suggestions
+        public int CleanupInstallerDays = 90;       // Downloads installers older than this
+        public int CleanupBigDirMinMb = 500;        // big-folder suggestions start here
+
         public readonly List<string> Protect = new List<string>();
         public readonly List<string> ProtectServices = new List<string>();
         public readonly List<string> BoostKill = new List<string>();
@@ -178,6 +233,7 @@ namespace IdleMaster
         public readonly List<string> IdleKill = new List<string>();
         public readonly List<string> IdleServices = new List<string>();
         public readonly List<string> RestoreLaunch = new List<string>();
+        public readonly List<string> CleanupProtect = new List<string>();
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
 
@@ -225,6 +281,8 @@ namespace IdleMaster
                         case "tray": c.Tray = b; break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
+                        case "cleanupinstallerdays": c.CleanupInstallerDays = Int(v, c.CleanupInstallerDays, 7); break;
+                        case "cleanupbigdirminmb": c.CleanupBigDirMinMb = Int(v, c.CleanupBigDirMinMb, 50); break;
                     }
                     continue;
                 }
@@ -238,6 +296,8 @@ namespace IdleMaster
                     case "idle.kill": c.IdleKill.Add(item); break;
                     case "idle.services": c.IdleServices.Add(line); break;
                     case "restore.launch": c.RestoreLaunch.Add(line); break;
+                    // Paths, not process names - StripExe must not touch these.
+                    case "cleanup.protect": c.CleanupProtect.Add(line); break;
                 }
             }
             return c;
@@ -269,11 +329,14 @@ namespace IdleMaster
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
             AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
+            CleanupInstallerDays = o.CleanupInstallerDays;
+            CleanupBigDirMinMb = o.CleanupBigDirMinMb;
 
             Swap(Protect, o.Protect); Swap(ProtectServices, o.ProtectServices);
             Swap(BoostKill, o.BoostKill); Swap(BoostServices, o.BoostServices);
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
+            Swap(CleanupProtect, o.CleanupProtect);
         }
 
         private static void Swap(List<string> mine, List<string> theirs)
@@ -386,6 +449,14 @@ AskAboveMb=250
 # Tray icon. Closing the window hides to the tray and keeps hunting; exit from
 # the tray menu when you actually want it gone.
 Tray=1
+
+# --- DISK CLEANUP -----------------------------------------------------------
+# The cleanup window only suggests. Nothing is deleted until you tick it and
+# press Clean, and everything ticked goes to the Recycle Bin, not into the void.
+# Suggest installers sitting in Downloads untouched for this many days.
+CleanupInstallerDays=90
+# Point at folders this big and bigger when weighing the whole drive.
+CleanupBigDirMinMb=500
 
 # ---------------------------------------------------------------------------
 # NEVER touched, whatever else any list says. This is the safety net.
@@ -628,6 +699,15 @@ LanmanServer
 C:\Program Files\Tailscale\tailscale-ipn.exe
 #C:\Program Files\NordVPN\NordVPN.exe|--auto-start
 #C:\Program Files (x86)\Razer\Razer Cortex\RazerCortex.exe|-autorun
+
+# ---------------------------------------------------------------------------
+# Paths disk cleanup must NEVER touch, whatever the scanner thinks. Full paths,
+# '*' works, and a path protects everything underneath it. This is the same
+# safety net [protect] is for processes.
+# ---------------------------------------------------------------------------
+[cleanup.protect]
+#C:\Users\*\Documents
+#D:\backups
 ";
     }
 
@@ -1939,7 +2019,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             {
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "boost" || s == "idle" || s == "restore" || s == "report" || s == "help"
-                    || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask")
+                    || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask"
+                    || s == "cleanup-report")
                     mode = s;
                 else if (s == "watch" || s == "hunt")
                     watch = true;
@@ -1976,6 +2057,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 case "idle": eng.RunIdle(); break;
                 case "restore": eng.RunRestore(); break;
                 case "report": eng.Report(); break;
+                case "cleanup-report": CleanupReport(cfg, logger); break;
                 case "watch": break;          // no mode run, just take up the watch
                 case "unwatch":
                 case "stopwatch":
@@ -1987,10 +2069,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 case "removetask": return Task_(false);
                 default:
                     Console.WriteLine("IdleMaster.exe [--boost | --idle | --restore | --report]");
-                    Console.WriteLine("  --watch        keep hunting after the mode, until --unwatch");
-                    Console.WriteLine("  --unwatch      stop the sentry");
-                    Console.WriteLine("  --installtask  run the sentry at every logon (scheduled task)");
-                    Console.WriteLine("  --removetask   undo that");
+                    Console.WriteLine("  --watch           keep hunting after the mode, until --unwatch");
+                    Console.WriteLine("  --unwatch         stop the sentry");
+                    Console.WriteLine("  --installtask     run the sentry at every logon (scheduled task)");
+                    Console.WriteLine("  --removetask      undo that");
+                    Console.WriteLine("  --cleanup-report  scan the disk for junk and print what was found");
                     Console.WriteLine("  no arguments = open the window");
                     return 0;
             }
@@ -2021,6 +2104,52 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 Application.Run(form);
             }
             return 0;
+        }
+
+        // The console twin of the cleanup window: same scanner, same findings,
+        // but strictly read-only - the CLI never deletes anything.
+        private static void CleanupReport(Config cfg, Action<string> log)
+        {
+            log("-- disk cleanup scan (report only - nothing is deleted)");
+            CleanupScanner scanner = new CleanupScanner(cfg);
+            List<CleanupItem> found = scanner.Scan(
+                delegate(string where) { },
+                delegate(CleanupItem it) { });
+
+            List<string> order = new List<string>();
+            Dictionary<string, List<CleanupItem>> groups =
+                new Dictionary<string, List<CleanupItem>>();
+            foreach (CleanupItem it in found)
+            {
+                List<CleanupItem> g;
+                if (!groups.TryGetValue(it.Category, out g))
+                {
+                    g = new List<CleanupItem>();
+                    groups[it.Category] = g;
+                    order.Add(it.Category);
+                }
+                g.Add(it);
+            }
+
+            long junk = 0;
+            foreach (string cat in order)
+            {
+                log("-- " + cat);
+                foreach (CleanupItem it in groups[cat])
+                {
+                    if (it.Safe) junk += it.Bytes;
+                    // Suggestions carry their path - two folders can share a
+                    // name ("Docker", "Blackmagic Design") and only the path
+                    // says which is which.
+                    bool wherePlease = cat == "Big folders" || cat == "Possible leftovers";
+                    log("   " + (it.Safe ? "safe   " : "review ")
+                        + CleanupScanner.Nice(it.Bytes).PadLeft(9) + "  " + it.Name
+                        + (wherePlease ? "  - " + it.Path : "")
+                        + (it.Note.Length > 0 ? "  (" + it.Note + ")" : ""));
+                }
+            }
+            log("   = " + found.Count + " findings; " + CleanupScanner.Nice(junk)
+                + " of known junk. The window ('Disk cleanup') does the actual cleaning.");
         }
 
         // Optional: a logon task so the watch survives a reboot. Nothing calls this
