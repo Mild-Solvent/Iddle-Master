@@ -16,6 +16,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -25,8 +27,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master Setup")]
 [assembly: AssemblyDescription("Installer for Idle Master")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.4.0.0")]
-[assembly: AssemblyFileVersion("0.4.0.0")]
+[assembly: AssemblyVersion("0.5.0.0")]
+[assembly: AssemblyFileVersion("0.5.0.0")]
 
 namespace IdleMasterSetup
 {
@@ -62,6 +64,56 @@ namespace IdleMasterSetup
                 }
             }
             catch (Exception) { return null; }
+        }
+
+        // The v0.1 releases were a bare exe - no installer, no registry entry.
+        // The only trace of such a copy is the process itself, so ask a running
+        // one where it lives and offer to update it in place instead of quietly
+        // planting a second install next to it.
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool QueryFullProcessImageName(
+            IntPtr h, uint flags, StringBuilder name, ref int size);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr h);
+
+        // PROCESS_QUERY_LIMITED_INFORMATION - the one right an ordinary process
+        // still has on an elevated one, which the app always is.
+        private const uint QueryLimited = 0x1000;
+
+        public static string RunningCopyDir()
+        {
+            foreach (Process p in Process.GetProcessesByName("IdleMaster"))
+            {
+                try
+                {
+                    IntPtr h = OpenProcess(QueryLimited, false, p.Id);
+                    if (h == IntPtr.Zero) continue;
+                    try
+                    {
+                        StringBuilder sb = new StringBuilder(1024);
+                        int len = sb.Capacity;
+                        if (!QueryFullProcessImageName(h, 0, sb, ref len)) continue;
+                        string dir = Path.GetDirectoryName(sb.ToString());
+                        if (dir != null && File.Exists(Path.Combine(dir, ExeName)))
+                            return dir;
+                    }
+                    finally { CloseHandle(h); }
+                }
+                catch (Exception) { }
+                finally { try { p.Dispose(); } catch (Exception) { } }
+            }
+            return null;
+        }
+
+        public static bool AppRunning()
+        {
+            Process[] live = Process.GetProcessesByName("IdleMaster");
+            foreach (Process p in live) { try { p.Dispose(); } catch (Exception) { } }
+            return live.Length > 0;
         }
 
         public static string VersionOf(string exe)
@@ -187,6 +239,19 @@ namespace IdleMasterSetup
                 catch (Exception ex) { say("! logon task refused: " + ex.Message.Split('\n')[0]); }
             }
 
+            // Anyone updating by hand from v0.1/v0.2 (no update button back then)
+            // very likely still has the old copy running - it survived the rename
+            // and is still hunting with the old code. Launching the new one next
+            // to it would just mean two tray icons and a sentry that cannot take
+            // the watch, so say what is actually going on instead.
+            if (AppRunning())
+            {
+                say("! the OLD version is still running - right-click its tray icon,");
+                say("  choose Exit, then start Idle Master from the Start menu.");
+                if (launch) say("  (not launching the new one until then)");
+                return;
+            }
+
             if (launch)
             {
                 try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true }); }
@@ -200,6 +265,7 @@ namespace IdleMasterSetup
         {
             string exe = Path.Combine(dir, ExeName);
             if (!File.Exists(exe)) return;
+            if (!AppRunning()) return;
             try
             {
                 Process p = Process.Start(new ProcessStartInfo(exe, "--unwatch")
@@ -207,7 +273,21 @@ namespace IdleMasterSetup
                 if (p != null) p.WaitForExit(8000);
                 say("asked the running copy to stand down");
             }
-            catch (Exception) { }
+            catch (Exception)
+            {
+                // The app requires administrator and this setup does not, so the
+                // quiet start dies with "elevation required" (it has since v0.1).
+                // Retry through the shell, where UAC can ask; declining is fine -
+                // the rename path below still gets the binary replaced.
+                try
+                {
+                    Process p = Process.Start(new ProcessStartInfo(exe, "--unwatch")
+                    { UseShellExecute = true, Verb = "runas" });
+                    if (p != null) p.WaitForExit(8000);
+                    say("asked the running copy to stand down");
+                }
+                catch (Exception) { }
+            }
         }
 
         // When the app updates itself it launches this and then closes, so give it
@@ -241,10 +321,17 @@ namespace IdleMasterSetup
         {
             try
             {
+                // Two park styles exist in the wild: this setup's
+                // "IdleMaster.old-*.exe" and build.ps1's "IdleMaster.exe.old-*".
                 foreach (string old in Directory.GetFiles(dir, "IdleMaster.old*.exe"))
                 {
                     try { File.Delete(old); }
                     catch (Exception) { }   // still running; next time
+                }
+                foreach (string old in Directory.GetFiles(dir, "IdleMaster.exe.old*"))
+                {
+                    try { File.Delete(old); }
+                    catch (Exception) { }
                 }
             }
             catch (Exception) { }
@@ -377,7 +464,8 @@ namespace IdleMasterSetup
                 try
                 {
                     if (uninstall) Uninstall(say, true);
-                    else Install(dir != null ? dir : (InstalledDir() != null ? InstalledDir() : DefaultDir),
+                    else Install(dir != null ? dir
+                            : (InstalledDir() ?? RunningCopyDir() ?? DefaultDir),
                                  false, false, false, say);
                     return 0;
                 }
@@ -408,9 +496,17 @@ namespace IdleMasterSetup
 
         public SetupForm(string preset)
         {
-            // Either a registered install, or the app pointing us at its own folder
-            // to update a portable copy in place.
+            // Either a registered install, the app pointing us at its own folder
+            // to update a portable copy in place, or - for the v0.1 bare-exe
+            // releases that never touched the registry - wherever a running copy
+            // says it lives.
             string already = Setup.InstalledDir();
+            bool foundRunning = false;
+            if (already == null)
+            {
+                already = Setup.RunningCopyDir();
+                foundRunning = already != null;
+            }
             if (preset != null && File.Exists(Path.Combine(preset, Setup.ExeName)))
                 already = preset;
             bool updating = already != null && Directory.Exists(already)
@@ -507,7 +603,9 @@ namespace IdleMasterSetup
             CancelButton = close;
 
             Say(updating
-                ? "Found an install in " + already
+                ? (foundRunning
+                    ? "Found a running copy in " + already + " - updating it in place."
+                    : "Found an install in " + already)
                 : "Ready to install.");
         }
 

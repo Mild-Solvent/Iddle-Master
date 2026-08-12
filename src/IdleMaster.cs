@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.4.0.0")]
-[assembly: AssemblyFileVersion("0.4.0.0")]
+[assembly: AssemblyVersion("0.5.0.0")]
+[assembly: AssemblyFileVersion("0.5.0.0")]
 
 namespace IdleMaster
 {
@@ -87,6 +87,51 @@ namespace IdleMaster
             }
             catch (Exception) { return 0; }
         }
+
+        internal delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        internal static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        internal static extern bool IsWindowVisible(IntPtr hWnd);
+
+        // "Visible" is not enough: suspended UWP hosts keep a visible-but-cloaked
+        // window forever. DWM knows the difference.
+        [DllImport("dwmapi.dll")]
+        internal static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
+
+        internal const int DWMWA_CLOAKED = 14;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        internal struct PROCESSENTRY32W
+        {
+            public uint dwSize;
+            public uint cntUsage;
+            public uint th32ProcessID;
+            public IntPtr th32DefaultHeapID;
+            public uint th32ModuleID;
+            public uint cntThreads;
+            public uint th32ParentProcessID;
+            public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szExeFile;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern bool Process32FirstW(IntPtr snapshot, ref PROCESSENTRY32W entry);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern bool Process32NextW(IntPtr snapshot, ref PROCESSENTRY32W entry);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern bool CloseHandle(IntPtr handle);
+
+        internal const uint TH32CS_SNAPPROCESS = 0x2;
 
         [DllImport("advapi32.dll", SetLastError = true)]
         internal static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
@@ -213,6 +258,7 @@ namespace IdleMaster
         public int SentryRespawnLimit = 6;          // kills of one name before it gives up on it
         public int SentryBackoffMinutes = 30;       // ...and for how long it leaves it alone
         public bool SentrySkipForeground = true;    // never kill what you are actively looking at
+        public bool SkipOpenApps = true;            // never kill any app with a window open (boost only)
         public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
 
         // --- ask first: anything that shows up AFTER the mode ran gets a dialog
@@ -270,6 +316,7 @@ namespace IdleMaster
                         case "closebrowsersinboost": c.CloseBrowsersInBoost = b; break;
                         case "sentry": c.Sentry = b; break;
                         case "sentryskipforeground": c.SentrySkipForeground = b; break;
+                        case "skipopenapps": c.SkipOpenApps = b; break;
                         case "sentryseconds": c.SentrySeconds = Int(v, c.SentrySeconds, 5); break;
                         case "sentryserviceminutes": c.SentryServiceMinutes = Int(v, c.SentryServiceMinutes, 1); break;
                         case "sentrytrimminutes": c.SentryTrimMinutes = Int(v, c.SentryTrimMinutes, 1); break;
@@ -326,6 +373,7 @@ namespace IdleMaster
             SentryGuardMinutes = o.SentryGuardMinutes; SentryRespawnLimit = o.SentryRespawnLimit;
             SentryBackoffMinutes = o.SentryBackoffMinutes;
             SentrySkipForeground = o.SentrySkipForeground;
+            SkipOpenApps = o.SkipOpenApps;
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
             AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
@@ -431,6 +479,11 @@ SentryRespawnLimit=6
 SentryBackoffMinutes=30
 # Never kill the window you are actually using (boost only; idle ignores this).
 SentrySkipForeground=1
+# Never kill ANY app with a window open on the desktop, helper processes
+# included - WhatsApp and Discord do their real work in msedgewebview2 workers,
+# and killing those crashes the app even though its own name is not listed.
+# Boost only; ABSOLUTE IDLE still closes everything.
+SkipOpenApps=1
 # Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
 TrimWhenFreeBelowMb=0
 
@@ -585,6 +638,10 @@ NVIDIA Web Helper
 nvsphelper64
 # WebView2 hosts for widgets/tray apps (~536 MB) - they respawn on demand
 msedgewebview2
+# WhatsApp lingers in RAM after its window closes (host runs as WhatsApp.Root).
+# SkipOpenApps spares the whole tree while the window is on screen; closed, it
+# is background residue like the rest.
+WhatsApp*
 # Windows widgets & phone link junk
 Widgets
 WidgetService
@@ -949,6 +1006,115 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public string Key { get { return Name.ToLowerInvariant(); } }
     }
 
+    // One snapshot of "what does the user have open on the desktop": every
+    // process owning a visible, non-cloaked top-level window, plus the whole
+    // process tree, captured together so one sweep judges everything against
+    // the same instant. A pid is spared when it - or any ancestor - owns a
+    // window. The ancestor walk is what keeps a WebView2/Electron app alive:
+    // its helper processes carry a different name (msedgewebview2), so the
+    // per-name lists hit them even while the app's window is on screen, but
+    // the window belongs to their parent.
+    //
+    // The shell is deliberately blind here: explorer owns the desktop and the
+    // taskbar, and it is also the ancestor of everything launched from them -
+    // counting its windows would spare the whole session.
+    internal sealed class WindowGuard
+    {
+        private readonly HashSet<int> windowPids = new HashSet<int>();
+        private readonly Dictionary<int, int> parentOf = new Dictionary<int, int>();
+
+        // Names Spares() actually saved, so callers can log each once.
+        public readonly HashSet<string> SparedNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static WindowGuard Snapshot()
+        {
+            WindowGuard g = new WindowGuard();
+
+            HashSet<int> shell = new HashSet<int>();
+            IntPtr snap = IntPtr.Zero;
+            try
+            {
+                snap = Native.CreateToolhelp32Snapshot(Native.TH32CS_SNAPPROCESS, 0);
+                if (snap != IntPtr.Zero && snap != (IntPtr)(-1))
+                {
+                    Native.PROCESSENTRY32W e = new Native.PROCESSENTRY32W();
+                    e.dwSize = (uint)Marshal.SizeOf(typeof(Native.PROCESSENTRY32W));
+                    if (Native.Process32FirstW(snap, ref e))
+                    {
+                        do
+                        {
+                            g.parentOf[(int)e.th32ProcessID] = (int)e.th32ParentProcessID;
+                            if (string.Equals(e.szExeFile, "explorer.exe",
+                                    StringComparison.OrdinalIgnoreCase))
+                                shell.Add((int)e.th32ProcessID);
+                        }
+                        while (Native.Process32NextW(snap, ref e));
+                    }
+                }
+            }
+            catch (Exception) { }
+            finally
+            {
+                if (snap != IntPtr.Zero && snap != (IntPtr)(-1))
+                    try { Native.CloseHandle(snap); } catch (Exception) { }
+            }
+
+            try
+            {
+                Native.EnumWindows(delegate(IntPtr h, IntPtr _)
+                {
+                    if (Native.IsWindowVisible(h) && !Cloaked(h))
+                    {
+                        uint pid;
+                        Native.GetWindowThreadProcessId(h, out pid);
+                        if (pid != 0 && !shell.Contains((int)pid))
+                            g.windowPids.Add((int)pid);
+                    }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch (Exception) { }
+
+            return g;
+        }
+
+        private static bool Cloaked(IntPtr h)
+        {
+            try
+            {
+                int cloaked;
+                if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED,
+                        out cloaked, sizeof(int)) != 0)
+                    return false;    // no DWM answer = assume a real window
+                return cloaked != 0;
+            }
+            catch (Exception) { return false; }
+        }
+
+        // True when the pid, or any ancestor still in the tree, owns a window.
+        // Capped and cycle-guarded: parent pids can be reused after the parent
+        // dies, and a stale link must not turn the walk into a loop. A rare
+        // false spare from pid reuse just postpones a kill to the next sweep.
+        public bool Spares(int pid, string name)
+        {
+            int cur = pid;
+            HashSet<int> seen = new HashSet<int>();
+            for (int hops = 0; hops < 64 && cur > 4 && seen.Add(cur); hops++)
+            {
+                if (windowPids.Contains(cur))
+                {
+                    if (name != null) SparedNames.Add(name);
+                    return true;
+                }
+                int up;
+                if (!parentOf.TryGetValue(cur, out up)) break;
+                cur = up;
+            }
+            return false;
+        }
+    }
+
     internal enum Verdict { Keep, KeepAlways, Kill, NoAnswer }
 
     // What the sentry wants to know about one newcomer.
@@ -1009,8 +1175,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // One census of what is running, grouped by name, so the sentry can ask
         // about an app once instead of once per process. Nothing is killed here.
-        // 'skip' holds names in respawn backoff; 'sparePid' is the foreground app.
-        public List<Candidate> Census(ICollection<string> skip, int sparePid)
+        // 'skip' holds names in respawn backoff; 'sparePid' is the foreground app;
+        // 'guard' (may be null) drops every pid belonging to an open app.
+        public List<Candidate> Census(ICollection<string> skip, int sparePid, WindowGuard guard)
         {
             Dictionary<string, Candidate> byName = new Dictionary<string, Candidate>();
             int me = Process.GetCurrentProcess().Id;
@@ -1029,6 +1196,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     string key = name.ToLowerInvariant();
                     if (skip != null && skip.Contains(key)) continue;
                     if (IsProtectedProcess(name)) continue;
+                    if (guard != null && guard.Spares(pid, name)) continue;
 
                     Candidate c;
                     if (!byName.TryGetValue(key, out c))
@@ -1106,8 +1274,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         }
 
         // Kills everything a Candidate covers. Returns only what actually died -
-        // a process can exit or refuse between the census and here.
-        public List<KillHit> Reap(Candidate c)
+        // a process can exit or refuse between the census and here, and a window
+        // can open in that gap too, so the guard is re-checked per pid.
+        public List<KillHit> Reap(Candidate c, WindowGuard guard = null)
         {
             List<KillHit> hits = new List<KillHit>();
             foreach (int pid in c.Pids)
@@ -1118,6 +1287,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     p = Process.GetProcessById(pid);
                     long ws = p.WorkingSet64;
                     if (IsProtectedProcess(p.ProcessName)) continue;
+                    if (guard != null && guard.Spares(pid, p.ProcessName)) continue;
                     p.Kill();
                     p.WaitForExit(3000);
                     hits.Add(new KillHit(c.Name, ws));
@@ -1140,7 +1310,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // ---- process killing
 
-        public void KillList(IEnumerable<string> patterns, string label)
+        public void KillList(IEnumerable<string> patterns, string label, WindowGuard guard = null)
         {
             List<string> pats = new List<string>(patterns);
             if (pats.Count == 0) return;
@@ -1166,6 +1336,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     if (Match(pat, name)) { hit = true; break; }
                 if (!hit) continue;
 
+                if (guard != null && guard.Spares(p.Id, name)) continue;
+
                 try
                 {
                     p.Kill();
@@ -1182,6 +1354,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             foreach (KeyValuePair<string, long> kv in perName)
                 log("   x " + kv.Key + "  " + Mb(kv.Value));
+            if (guard != null)
+                foreach (string spared in guard.SparedNames)
+                    log("   . " + spared + " - window open, left alone");
             if (count == 0) log("   (nothing running)");
             else log("   = " + count + " processes, " + Mb(freed) + " released");
             freedBytes += freed;
@@ -1410,7 +1585,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             StateFile state = StateFile.Load();
             state.Mode = "boost";
 
-            KillList(cfg.BoostKill, "killing background clutter");
+            // Browsers are exempt from the guard: CloseBrowsersInBoost is an
+            // explicit "yes, even though they are open".
+            KillList(cfg.BoostKill, "killing background clutter",
+                cfg.SkipOpenApps ? WindowGuard.Snapshot() : null);
             if (cfg.CloseBrowsersInBoost)
                 KillList(Browsers, "closing browsers");
             StopServices(cfg.BoostServices, state, "stopping non-essential services");
@@ -1650,6 +1828,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly Dictionary<string, DateTime> cooling = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, int> tally = new Dictionary<string, int>();
 
+        // Kill-list names the window guard already announced, so "leaving it
+        // alone" is said once per open window, not every 20 seconds.
+        private readonly HashSet<string> sparedAnnounced =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // Everything running when the watch began. Those are the ones the mode was
         // aimed at, so they die quietly. Anything not in here arrived afterwards,
         // which means you started it, which means it gets a dialog.
@@ -1730,6 +1913,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             Since = DateTime.Now;
             cooling.Clear();
             tally.Clear();
+            sparedAnnounced.Clear();
 
             thread = new Thread(Loop);
             thread.IsBackground = true;
@@ -1847,7 +2031,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             int spare = 0;
             if (mode == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
 
-            List<Candidate> all = engine.Census(skip, spare);
+            WindowGuard guard = null;
+            if (mode == "boost" && cfg.SkipOpenApps) guard = WindowGuard.Snapshot();
+
+            List<Candidate> all = engine.Census(skip, spare, guard);
             List<KillHit> hits = new List<KillHit>();
 
             foreach (Candidate c in all)
@@ -1858,7 +2045,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 {
                     // Opening census: everything present now is what the mode was for.
                     census.Add(c.Key);
-                    if (listed) hits.AddRange(engine.Reap(c));
+                    if (listed) hits.AddRange(engine.Reap(c, guard));
                     continue;
                 }
 
@@ -1872,12 +2059,12 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 }
 
                 // Something already known to be junk, respawning: no question.
-                if (listed && !newcomer) { hits.AddRange(engine.Reap(c)); continue; }
+                if (listed && !newcomer) { hits.AddRange(engine.Reap(c, guard)); continue; }
 
                 switch (Consult(c, listed))
                 {
                     case Verdict.Kill:
-                        hits.AddRange(engine.Reap(c));
+                        hits.AddRange(engine.Reap(c, guard));
                         census.Add(c.Key);                          // silent from now on
                         if (!listed && Config.Append("boost.kill", c.Name))
                         {
@@ -1903,6 +2090,21 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             }
 
             firstSweep = false;
+
+            if (guard != null)
+            {
+                // Only genuine saves get a line: names the lists would have
+                // killed. Announced once; closing the window drops the name
+                // here, so reopening it later earns a fresh line.
+                foreach (string name in guard.SparedNames)
+                {
+                    if (!engine.OnList(patterns, name)) continue;
+                    if (!sparedAnnounced.Add(name)) continue;
+                    log("[sentry] " + name + " has a window open - leaving it alone");
+                }
+                sparedAnnounced.IntersectWith(guard.SparedNames);
+            }
+
             if (hits.Count == 0) return;
 
             Dictionary<string, int> byName = new Dictionary<string, int>();

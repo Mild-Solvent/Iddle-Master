@@ -441,6 +441,7 @@ namespace IdleMaster
             new string[] { "Sentry",               "Keep hunting after a mode has run" },
             new string[] { "AskBeforeKill",        "Ask before killing anything that started after the boost" },
             new string[] { "SentrySkipForeground", "Never kill the window you are using (boost only)" },
+            new string[] { "SkipOpenApps",         "Never kill an app with a window open (boost only)" },
             new string[] { "Tray",                 "Tray icon - closing the window hides to it" },
             new string[] { "KillExplorer",         "Absolute idle also closes the shell (taskbar, desktop)" },
             new string[] { "NetworkGuard",         "Check Sunshine + Tailscale, restart them if they die" },
