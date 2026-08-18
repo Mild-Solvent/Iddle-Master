@@ -97,6 +97,10 @@ apps.json in winget-import format, and files\. Building a kit changes nothing.
 
 ## Install and use
 
+The app checks GitHub for a newer release every 6 hours (UpdateCheckHours) and
+offers a one-click in-place update from a tray toast or the main window; the
+config file is never touched by an update.
+
 Installing needs no administrator; the app elevates itself at runtime because
 stopping services requires it. Install path is
 `%LOCALAPPDATA%\Programs\IdleMaster`. The config file `idlemaster.ini` is never

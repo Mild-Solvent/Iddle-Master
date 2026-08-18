@@ -33,13 +33,15 @@ logon task for you.
 **Updating is the same file.** Run a newer setup and it replaces the exe in
 place, keeping `idlemaster.ini` exactly as you left it.
 
-Or let the app do it: **Check for updates** in the main window (also on the tray
-menu) asks GitHub for the newest release, and the line beside it tells you where
-you stand — *v0.2.1 is the newest*, or *v0.3.0-beta is available*. If there is
-something newer it downloads that release's installer and hands over to it,
-pointed at the folder this copy is running from, so a portable copy updates
-itself where it stands instead of installing a second one somewhere else.
-Nothing is downloaded until you say yes.
+Or let the app do it. It **asks GitHub on its own** — a minute after start, then
+every `UpdateCheckHours` (6; 0 turns it off) — and if there is something newer
+you get a tray toast, the button turns into **Update to vX**, and the tray menu
+grows an *Update now*. **One click** downloads that release's installer, hands
+over to it silently, pointed at the folder this copy is running from (so a
+portable copy updates where it stands), and Idle Master comes back on its own
+with your `idlemaster.ini` untouched. **Check for updates** still asks right now
+and tells you where you stand — *v0.6.1 is the newest*, or *v0.7.0 is available*.
+Nothing is downloaded until you click.
 
 Silent, for scripts:
 
@@ -47,6 +49,7 @@ Silent, for scripts:
 IdleMasterSetup.exe --silent            install or update, no window
 IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster
 IdleMasterSetup.exe --silent --desktop  ...and a desktop shortcut too
+IdleMasterSetup.exe --silent --relaunch ...and start Idle Master when done (the one-click update uses this)
 IdleMasterSetup.exe --uninstall         removes it, keeps your config
 ```
 

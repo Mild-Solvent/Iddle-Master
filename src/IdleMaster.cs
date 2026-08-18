@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.6.1.0")]
-[assembly: AssemblyFileVersion("0.6.1.0")]
+[assembly: AssemblyVersion("0.6.2.0")]
+[assembly: AssemblyFileVersion("0.6.2.0")]
 
 namespace IdleMaster
 {
@@ -270,6 +270,7 @@ namespace IdleMaster
         public int AskAboveMb = 250;                // also ask about newcomers this big
                                                     // that are on no list at all. 0 = off.
         public bool Tray = true;                    // tray icon; closing the window hides to it
+        public int UpdateCheckHours = 6;            // ask GitHub for a newer release this often. 0 = only by hand
 
         // --- disk cleanup: the scanner only suggests, these tune the suggestions
         public int CleanupInstallerDays = 90;       // Downloads installers older than this
@@ -337,6 +338,7 @@ namespace IdleMaster
                             break;
                         }
                         case "tray": c.Tray = b; break;
+                        case "updatecheckhours": c.UpdateCheckHours = Int(v, c.UpdateCheckHours, 0); break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
                         case "cleanupinstallerdays": c.CleanupInstallerDays = Int(v, c.CleanupInstallerDays, 7); break;
@@ -391,6 +393,7 @@ namespace IdleMaster
             AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
             AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
+            UpdateCheckHours = o.UpdateCheckHours;
             CleanupInstallerDays = o.CleanupInstallerDays;
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
 
@@ -527,6 +530,11 @@ AskAboveMb=250
 # Tray icon. Closing the window hides to the tray and keeps hunting; exit from
 # the tray menu when you actually want it gone.
 Tray=1
+# Ask GitHub for a newer release this many hours apart (first check a minute
+# after start). Something newer = a tray toast and an ""Update to vX"" button;
+# one click downloads it, installs it in place and brings Idle Master back.
+# Your idlemaster.ini is never touched. 0 = only when you press the button.
+UpdateCheckHours=6
 
 # --- DISK CLEANUP -----------------------------------------------------------
 # The cleanup window only suggests. Nothing is deleted until you tick it and

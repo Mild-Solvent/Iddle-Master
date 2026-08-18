@@ -27,8 +27,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master Setup")]
 [assembly: AssemblyDescription("Installer for Idle Master")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.6.1.0")]
-[assembly: AssemblyFileVersion("0.6.1.0")]
+[assembly: AssemblyVersion("0.6.2.0")]
+[assembly: AssemblyFileVersion("0.6.2.0")]
 
 namespace IdleMasterSetup
 {
@@ -457,31 +457,39 @@ namespace IdleMasterSetup
         [STAThread]
         public static int Main(string[] argv)
         {
-            bool silent = false, uninstall = false, desktop = false;
+            bool silent = false, uninstall = false, desktop = false, relaunch = false, quiet = false;
             string dir = null;
             for (int i = 0; i < argv.Length; i++)
             {
                 string a = argv[i].TrimStart('-', '/').ToLowerInvariant();
-                if (a == "s" || a == "silent" || a == "quiet") silent = true;
+                if (a == "s" || a == "silent") silent = true;
+                else if (a == "quiet") { silent = true; quiet = true; }  // ...and no error box either
                 else if (a == "uninstall" || a == "remove") uninstall = true;
                 else if (a == "desktop") desktop = true;   // silent + a desktop shortcut too
+                else if (a == "relaunch") relaunch = true; // silent + start the app when done
                 else if ((a == "dir" || a == "d") && i + 1 < argv.Length) dir = argv[++i];
             }
 
             if (silent || uninstall)
             {
-                Action<string> say = delegate(string s) { Console.WriteLine(s); };
+                StringBuilder said = new StringBuilder();
+                Action<string> say = delegate(string s) { Console.WriteLine(s); said.AppendLine(s); };
                 try
                 {
                     if (uninstall) Uninstall(say, true);
                     else Install(dir != null ? dir
                             : (InstalledDir() ?? RunningCopyDir() ?? DefaultDir),
-                                 desktop, false, false, say);
+                                 desktop, false, relaunch, say);
                     return 0;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine("failed: " + ex.Message);
+                    // The one-click update from inside the app runs this way, and
+                    // a winexe has no console - so a failure must still be seen.
+                    if (!quiet)
+                        MessageBox.Show(said + "\r\nfailed: " + ex.Message, "Idle Master Setup",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return 1;
                 }
             }

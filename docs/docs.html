@@ -93,7 +93,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.6.1. If you only read one section, make it
+      Written against v0.6.2. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -117,6 +117,7 @@
 <pre>IdleMasterSetup.exe --silent                        <span class="d">install or update, no window</span>
 IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster <span class="d">somewhere else</span>
 IdleMasterSetup.exe --silent --desktop              <span class="d">...and a desktop shortcut too</span>
+IdleMasterSetup.exe --silent --relaunch             <span class="d">...and start Idle Master when done</span>
 IdleMasterSetup.exe --uninstall                     <span class="d">remove it, keep your config</span></pre>
       </div>
 
@@ -161,13 +162,16 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
       <h2>Updating and uninstalling <a class="anchor" href="#update">#</a></h2>
       <p><strong>Updating is the same file.</strong> Run a newer setup and it replaces the exe in
         place. Your <code>idlemaster.ini</code> is never overwritten.</p>
-      <p>Or let the app do it: <strong>Check for updates</strong> in the main window (also on the
-        tray menu) asks GitHub for the newest release, and the line beside it tells you where you
-        stand — <em>v0.5.0 is the newest</em>, or <em>v0.6.0-beta is available</em>. If there is
-        something newer it downloads that release's installer and hands over to it, pointed at the
-        folder this copy is running from — so a portable copy updates itself where it stands
-        instead of installing a second one somewhere else. <strong>Nothing downloads until you say
-        yes.</strong></p>
+      <p>Or let the app do it. It <strong>asks GitHub on its own</strong> — a minute after start,
+        then every <code>UpdateCheckHours</code> (6 by default; 0 turns it off) — and if there is
+        something newer you get a tray toast, the <em>Check for updates</em> button turns into
+        <strong>Update to vX</strong>, and the tray menu grows an <em>Update now</em>.
+        <strong>One click</strong> downloads that release's installer, hands over to it silently,
+        pointed at the folder this copy is running from — so a portable copy updates itself where
+        it stands — and Idle Master comes back on its own with your <code>idlemaster.ini</code>
+        untouched. <em>Check for updates</em> still asks right now and tells you where you stand —
+        <em>v0.6.1 is the newest</em>, or <em>v0.7.0 is available</em>. <strong>Nothing downloads
+        until you click.</strong></p>
       <p>Uninstall from <em>Installed apps</em> like any other program, or run
         <code>IdleMasterSetup.exe --uninstall</code>. Either way it stands the sentry down first
         and leaves your config file behind, in case you come back.</p>
@@ -494,6 +498,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <tbody>
             <tr><td class="n">AskBeforeKill</td><td class="n">1</td><td class="wrap-ok">Toast before closing anything that started after the sentry's census.</td></tr>
             <tr><td class="n">AskTimeoutSeconds</td><td class="n">47</td><td class="wrap-ok">Silence for this long counts as <code>AskTimeoutAction</code>.</td></tr>
+            <tr><td class="n">UpdateCheckHours</td><td class="n">6</td><td class="wrap-ok">Ask GitHub for a newer release this many hours apart; something newer = a toast and a one-click <em>Update to vX</em> button. <code>0</code> = only when you press the button.</td></tr>
             <tr><td class="n">AskTimeoutAction</td><td class="n">trash</td><td class="wrap-ok"><code>trash</code> = trash once, <code>keep</code> = leave it alone, <code>always</code> = always trash.</td></tr>
             <tr><td class="n">AskAboveMb</td><td class="n">250</td><td class="wrap-ok">Also ask about newcomers on no list at all but bigger than this. <code>0</code> = only ask about listed processes.</td></tr>
             <tr><td class="n">Tray</td><td class="n">1</td><td class="wrap-ok">Closing the window hides to the tray and keeps hunting. Exit from the tray menu to actually quit.</td></tr>

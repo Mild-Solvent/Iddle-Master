@@ -549,13 +549,14 @@ namespace IdleMaster
             new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "47" },
             new string[] { "AskAboveMb",           "Ask about unlisted newcomers bigger than (MB, 0 = off)", "0", "99999", "250" },
             new string[] { "TrimWhenFreeBelowMb",  "Emergency trim when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
+            new string[] { "UpdateCheckHours",     "Look for a newer release every (hours, 0 = only by hand)", "0", "720", "6" },
             new string[] { "CleanupInstallerDays", "Suggest Downloads installers older than (days)",  "7",  "3650",   "90" },
             new string[] { "CleanupBigDirMinMb",   "Big-folder suggestions start at (MB)",            "50", "999999", "500" },
         };
 
         // How the Numbers table splits into headings in the advanced window.
         public const int SentryCount = 8;
-        public const int AskCount = 3;
+        public const int AskCount = 4;
 
         // key, label, choices (value|label)
         public static readonly string[] TimeoutAction = new string[]
@@ -1894,8 +1895,12 @@ namespace IdleMaster
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
+        private readonly System.Windows.Forms.Timer updateTimer;
         private Sentry sentry;
         private NotifyIcon tray;
+        private ToolStripMenuItem trayUpdate;
+        private Updater.Release pending;        // a newer release we know about
+        private DateTime nextUpdateCheck;
         private EatersForm eatersWin;
         private CleanupForm cleanupWin;
         private BackupForm backupWin;
@@ -2003,6 +2008,15 @@ namespace IdleMaster
             timer.Start();
             UpdateMemory();
             UpdateSentry();
+
+            // The quiet update check: a minute after start, then every
+            // UpdateCheckHours. Finding something only changes the button, the
+            // tray, and one line here - installing is still your click.
+            nextUpdateCheck = DateTime.Now.AddMinutes(1);
+            updateTimer = new System.Windows.Forms.Timer();
+            updateTimer.Interval = 30000;
+            updateTimer.Tick += delegate { QuietCheckTick(); };
+            updateTimer.Start();
 
             AppendLog("Ready. Config: " + Config.Path_);
             StateFile st = StateFile.Load();
@@ -2138,8 +2152,14 @@ namespace IdleMaster
             menu.Items.Add("Sentry lists && timers...", null, delegate { ShowWindow(); OpenSentry(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
+            trayUpdate = new ToolStripMenuItem("Update now");
+            trayUpdate.Visible = false;
+            trayUpdate.Click += delegate { InstallPending(); };
+            menu.Items.Add(trayUpdate);
             menu.Items.Add("Exit", null, delegate { reallyExit = true; Close(); });
             tray.ContextMenuStrip = menu;
+            tray.BalloonTipClicked += delegate { if (pending != null) InstallPending(); };
+            if (pending != null) Announce(pending, false);
         }
 
         private void ShowWindow()
@@ -2265,10 +2285,15 @@ namespace IdleMaster
         // say so, and the installer that arrives is the one you publish.
         private void CheckUpdates()
         {
+            if (pending != null) { InstallPending(); return; }
             btnUpdate.Enabled = false;
             Status("asking GitHub...", Theme.Dim);
             AppendLog("Checking " + Updater.Repo + " for releases newer than " + App.Version + "...");
+            Ask_(true);
+        }
 
+        private void Ask_(bool loud)
+        {
             Thread t = new Thread(delegate()
             {
                 Updater.Release r = null;
@@ -2276,11 +2301,85 @@ namespace IdleMaster
                 try { r = Updater.Latest(); }
                 catch (Exception ex) { failure = ex.Message.Split('\n')[0]; }
 
-                try { BeginInvoke((Action)delegate { Finish(r, failure); }); }
+                try { BeginInvoke((Action)delegate { if (loud) Finish(r, failure); else Quiet(r, failure); }); }
                 catch (Exception) { }
             });
             t.IsBackground = true;
             t.Start();
+        }
+
+        // Every 30 s: is it time? UpdateCheckHours = 0 turns it off; a check
+        // already announced is not repeated for the same tag.
+        private void QuietCheckTick()
+        {
+            if (cfg.UpdateCheckHours <= 0 || pending != null) return;
+            if (DateTime.Now < nextUpdateCheck) return;
+            nextUpdateCheck = DateTime.Now.AddHours(cfg.UpdateCheckHours);
+            Ask_(false);
+        }
+
+        // The automatic check says nothing unless there is something to say.
+        private void Quiet(Updater.Release r, string failure)
+        {
+            if (failure != null || r == null || r.Tag.Length == 0 || !r.Newer || r.Url.Length == 0) return;
+            Announce(r, true);
+        }
+
+        // A newer release is known: the button becomes the update, the tray
+        // says so once, and one click on either does the whole thing.
+        private void Announce(Updater.Release r, bool toast)
+        {
+            pending = r;
+            btnUpdate.Text = "Update to " + r.Tag;
+            btnUpdate.BackColor = Theme.Good;
+            btnUpdate.ForeColor = Color.White;
+            btnUpdate.FlatAppearance.MouseOverBackColor = Theme.Lift(Theme.Good, 18);
+            btnUpdate.FlatAppearance.MouseDownBackColor = Theme.Lift(Theme.Good, -12);
+            btnUpdate.Enabled = true;
+            Status(r.Tag + " is available - one click installs it and brings Idle Master back", Theme.Accent);
+            if (toast) AppendLog(r.Tag + " is available (you are on " + App.Version + "). "
+                + "'Update to " + r.Tag + "' does it in one click; your idlemaster.ini is kept.");
+            if (trayUpdate != null)
+            {
+                trayUpdate.Text = "Update to " + r.Tag + " now";
+                trayUpdate.Visible = true;
+            }
+            if (toast && tray != null)
+            {
+                try
+                {
+                    tray.ShowBalloonTip(10000, "Idle Master " + r.Tag + " is out",
+                        "Click here to update in place. Your config is kept and Idle Master "
+                        + "comes back on its own.", ToolTipIcon.Info);
+                }
+                catch (Exception) { }
+            }
+        }
+
+        // The one click: download, hand over to the installer silently, pointed
+        // at this folder and told to relaunch, and get out of its way.
+        private void InstallPending()
+        {
+            Updater.Release r = pending;
+            if (r == null) return;
+            btnUpdate.Enabled = false;
+            try
+            {
+                AppendLog("Downloading " + r.Tag + "...");
+                Status("downloading " + r.Tag + "...", Theme.Accent);
+                string setup = Updater.Fetch(r);
+                AppendLog("Handing over to " + setup + " - Idle Master closes and comes back as " + r.Tag + ".");
+                Process.Start(new ProcessStartInfo(setup,
+                    "--silent --relaunch --dir \"" + App.Dir + "\"") { UseShellExecute = true });
+                reallyExit = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                btnUpdate.Enabled = true;
+                Status("update failed - " + ex.Message.Split('\n')[0], Theme.Warn);
+                AppendLog("! update failed: " + ex.Message.Split('\n')[0]);
+            }
         }
 
         private void Finish(Updater.Release r, string failure)
@@ -2311,39 +2410,20 @@ namespace IdleMaster
                 return;
             }
 
-            Status(r.Tag + " is available", Theme.Accent);
+            Announce(r, false);
             if (MessageBox.Show(this,
                 r.Tag + " is out - you are on " + App.Version + "."
-                + "\n\nDownload it and update this copy in " + App.Dir + "?"
-                + "\n\nYour idlemaster.ini is kept exactly as it is. Idle Master will close "
-                + "while the installer replaces it.",
+                + "\n\nUpdate this copy in " + App.Dir + " now?"
+                + "\n\nYour idlemaster.ini is kept exactly as it is. Idle Master closes while "
+                + "the installer replaces it, and comes back on its own.",
                 "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                 != DialogResult.Yes)
             {
-                AppendLog("Update available (" + r.Tag + ") - not installed, your call.");
+                AppendLog("Update available (" + r.Tag + ") - not installed; the button stays "
+                    + "'Update to " + r.Tag + "' whenever you want it.");
                 return;
             }
-
-            try
-            {
-                AppendLog("Downloading " + r.Tag + "...");
-                Status("downloading " + r.Tag + "...", Theme.Accent);
-                string setup = Updater.Fetch(r);
-                AppendLog("Handing over to " + setup);
-
-                // Point the installer at THIS copy, so updating a portable exe
-                // updates it where it stands instead of installing a second one.
-                Process.Start(new ProcessStartInfo(setup, "--dir \"" + App.Dir + "\"")
-                { UseShellExecute = true });
-
-                reallyExit = true;
-                Close();
-            }
-            catch (Exception ex)
-            {
-                Status("update failed", Theme.Warn);
-                AppendLog("! update failed: " + ex.Message.Split('\n')[0]);
-            }
+            InstallPending();
         }
 
         private void Status(string text, Color color)
