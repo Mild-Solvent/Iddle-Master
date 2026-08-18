@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.6.0.0")]
-[assembly: AssemblyFileVersion("0.6.0.0")]
+[assembly: AssemblyVersion("0.6.1.0")]
+[assembly: AssemblyFileVersion("0.6.1.0")]
 
 namespace IdleMaster
 {
@@ -260,10 +260,13 @@ namespace IdleMaster
         public bool SentrySkipForeground = true;    // never kill what you are actively looking at
         public bool SkipOpenApps = true;            // never kill any app with a window open (boost only)
         public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
+        public int SentryFullPassMinutes = 0;       // a whole boost pass (services + trim + guard) every N min. 0 = off
+        public int BoostWhenFreeBelowMb = 0;        // ...and one right now when free RAM drops under this. 0 = off
 
         // --- ask first: anything that shows up AFTER the mode ran gets a dialog
         public bool AskBeforeKill = true;
-        public int AskTimeoutSeconds = 25;          // no answer = keep it, and ask again later
+        public int AskTimeoutSeconds = 47;          // no answer = AskTimeoutAction
+        public string AskTimeoutAction = "trash";   // trash (once) | keep | always
         public int AskAboveMb = 250;                // also ask about newcomers this big
                                                     // that are on no list at all. 0 = off.
         public bool Tray = true;                    // tray icon; closing the window hides to it
@@ -324,7 +327,15 @@ namespace IdleMaster
                         case "sentryrespawnlimit": c.SentryRespawnLimit = Int(v, c.SentryRespawnLimit, 1); break;
                         case "sentrybackoffminutes": c.SentryBackoffMinutes = Int(v, c.SentryBackoffMinutes, 1); break;
                         case "trimwhenfreebelowmb": c.TrimWhenFreeBelowMb = Int(v, c.TrimWhenFreeBelowMb, 0); break;
+                        case "sentryfullpassminutes": c.SentryFullPassMinutes = Int(v, c.SentryFullPassMinutes, 0); break;
+                        case "boostwhenfreebelowmb": c.BoostWhenFreeBelowMb = Int(v, c.BoostWhenFreeBelowMb, 0); break;
                         case "askbeforekill": c.AskBeforeKill = b; break;
+                        case "asktimeoutaction":
+                        {
+                            string a = v.ToLowerInvariant();
+                            c.AskTimeoutAction = (a == "keep" || a == "always") ? a : "trash";
+                            break;
+                        }
                         case "tray": c.Tray = b; break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
@@ -375,7 +386,10 @@ namespace IdleMaster
             SentrySkipForeground = o.SentrySkipForeground;
             SkipOpenApps = o.SkipOpenApps;
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
+            SentryFullPassMinutes = o.SentryFullPassMinutes;
+            BoostWhenFreeBelowMb = o.BoostWhenFreeBelowMb;
             AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
+            AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
             CleanupInstallerDays = o.CleanupInstallerDays;
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
@@ -486,18 +500,29 @@ SentrySkipForeground=1
 SkipOpenApps=1
 # Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
 TrimWhenFreeBelowMb=0
+# Repeated boost: every N minutes do a WHOLE pass at once - re-stop services,
+# trim, purge, check the stream stack - not just the 20-second process sweep.
+# 0 = each on its own timer above only.
+SentryFullPassMinutes=0
+# Dynamic boost: do that whole pass right now when free RAM drops under this
+# many MB (at most once per 5 minutes). 0 = off.
+BoostWhenFreeBelowMb=0
 
 # --- ASK FIRST --------------------------------------------------------------
 # The sentry takes a census on its first sweep. Everything already running that
 # matches a list is junk you asked it to clear, and dies without a word. Anything
 # that shows up AFTER that is something YOU started, so it gets a dialog instead:
-# Keep it / Always keep / Trash it. ""Always keep"" writes the name into [protect]
-# below, so it is remembered forever.
+#   Keep it      - left alone for SentryBackoffMinutes, then asked again
+#   Always keep  - written into [protect] below, remembered forever
+#   Trash once   - closed now; if it comes back you are asked again
+#   Always trash - closed now and every time (unlisted names go into [boost.kill])
 AskBeforeKill=1
-# No answer in this many seconds = keep it, and ask again in SentryBackoffMinutes.
-AskTimeoutSeconds=25
+# No answer in this many seconds = AskTimeoutAction.
+AskTimeoutSeconds=47
+# What no answer means: trash (= trash once), keep, or always (= always trash).
+AskTimeoutAction=trash
 # Also ask about newcomers that are on NO list at all but bigger than this many MB
-# ('Trash it' adds them to [boost.kill]). 0 = only ask about listed processes.
+# ('Always trash' adds them to [boost.kill]). 0 = only ask about listed processes.
 AskAboveMb=250
 # Tray icon. Closing the window hides to the tray and keeps hunting; exit from
 # the tray menu when you actually want it gone.
@@ -841,9 +866,33 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 string bare = Bare(lines[i]);
                 if (bare.Length == 0) continue;                 // blank or pure prose comment
                 if (bare.IndexOf('=') >= 0 && section == "settings") continue;
+                if (Disabled(lines[i]) && IsProse(lines[i], bare)) continue;
                 found.Add(new Entry(bare, !Disabled(lines[i])));
             }
             return found;
+        }
+
+        // A commented-out line is either an entry switched off ("#Steam" - the
+        // way this file and the windows write them, no space after the '#') or
+        // a sentence somebody wrote for the reader ("# the streaming stack
+        // itself"). The space is the first tell; for lines that do have one,
+        // a few shapes only prose has decide the rest, so a hand-typed "# Steam"
+        // still shows up as an entry.
+        private static bool IsProse(string raw, string bare)
+        {
+            string t = raw.TrimStart();
+            if (t.Length > 1 && !char.IsWhiteSpace(t[1])) return false;    // "#Steam"
+            if (bare.IndexOf(":\\") >= 0) return false;                     // a path is a path
+            if (bare.StartsWith("-")) return true;                            // "# ------ banner"
+            if (bare.IndexOf('(') >= 0 || bare.IndexOf('"') >= 0) return true;
+            if (bare.EndsWith(".") || bare.EndsWith(":") || bare.IndexOf(", ") >= 0) return true;
+            string[] words = bare.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length >= 4) return true;
+            if (words.Length == 1) return bare.Length <= 3;                   // "# us"
+            foreach (string w in words)
+                foreach (char c in w)
+                    if (char.IsUpper(c) || char.IsDigit(c) || c == '.' || c == '*') return false;
+            return true;                                                      // "# search indexer helpers"
         }
 
         private int LineOf(string section, string text)
@@ -1115,7 +1164,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         }
     }
 
-    internal enum Verdict { Keep, KeepAlways, Kill, NoAnswer }
+    // Kill = close it now and every time it comes back (an unlisted name is
+    // written into [boost.kill]); KillOnce = close it now, ask again if it
+    // returns, nothing written anywhere.
+    internal enum Verdict { Keep, KeepAlways, KillOnce, Kill, NoAnswer }
 
     // What the sentry wants to know about one newcomer.
     internal sealed class Question
@@ -1819,6 +1871,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public int Reaped;
         public long Reclaimed;
         public int Restopped;
+        public int FullPasses;
         public DateTime Since;
         public DateTime LastHit;
         public bool Alive { get { return thread != null && thread.IsAlive; } }
@@ -1909,7 +1962,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             catch (Exception) { stopFlag = new EventWaitHandle(false, EventResetMode.ManualReset); }
 
             stopping = false;
-            Reaped = 0; Reclaimed = 0; Restopped = 0;
+            Reaped = 0; Reclaimed = 0; Restopped = 0; FullPasses = 0;
             Since = DateTime.Now;
             cooling.Clear();
             tally.Clear();
@@ -1970,6 +2023,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             DateTime nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
             DateTime nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
             DateTime nextGuard = DateTime.Now.AddMinutes(cfg.SentryGuardMinutes);
+            DateTime nextFull = DateTime.Now.AddMinutes(Math.Max(1, cfg.SentryFullPassMinutes));
+            DateTime lastPressure = DateTime.MinValue;
 
             while (!stopping)
             {
@@ -1978,6 +2033,38 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     // Rebuilt every sweep, so edits made in the config window take
                     // effect without restarting the watch.
                     SweepProcesses(engine.PatternsFor(mode));
+
+                    // The "boost again" timers: a whole pass in one go, on a
+                    // schedule and/or when RAM runs low. The processes were
+                    // just swept above; this is the rest of what BOOST does.
+                    string why = null;
+                    if (cfg.SentryFullPassMinutes > 0 && DateTime.Now >= nextFull)
+                        why = "scheduled, every " + cfg.SentryFullPassMinutes + " min";
+                    if (cfg.BoostWhenFreeBelowMb > 0
+                        && (DateTime.Now - lastPressure).TotalMinutes >= 5)
+                    {
+                        ulong t0, f0;
+                        Engine.ReadMemory(out t0, out f0);
+                        if (f0 < (ulong)cfg.BoostWhenFreeBelowMb)
+                        {
+                            why = "free RAM is down to " + f0 + " MB";
+                            lastPressure = DateTime.Now;
+                        }
+                    }
+                    if (why != null)
+                    {
+                        log("[sentry] full pass - " + why);
+                        SweepServices(engine.ServicesFor(mode));
+                        long pushed = engine.TrimAll(false);
+                        engine.NetworkGuard(false);
+                        log("[sentry] full pass done - " + Engine.Size(pushed) + " pushed out");
+                        nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
+                        nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
+                        nextGuard = DateTime.Now.AddMinutes(cfg.SentryGuardMinutes);
+                        FullPasses++;
+                    }
+                    if (cfg.SentryFullPassMinutes > 0 && DateTime.Now >= nextFull)
+                        nextFull = DateTime.Now.AddMinutes(cfg.SentryFullPassMinutes);
 
                     if (DateTime.Now >= nextService)
                     {
@@ -2061,8 +2148,28 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 // Something already known to be junk, respawning: no question.
                 if (listed && !newcomer) { hits.AddRange(engine.Reap(c, guard)); continue; }
 
-                switch (Consult(c, listed))
+                Verdict v = Consult(c, listed);
+                if (v == Verdict.NoAnswer)
                 {
+                    // Nobody answered: the ini says what that means.
+                    if (cfg.AskTimeoutAction == "always") v = Verdict.Kill;
+                    else if (cfg.AskTimeoutAction == "keep") v = Verdict.Keep;
+                    else v = Verdict.KillOnce;
+                    log("[sentry] no answer about " + c.Name + " - "
+                        + (v == Verdict.Kill ? "trashing it, and every time"
+                         : v == Verdict.Keep ? "leaving it alone" : "trashing it once"));
+                }
+
+                switch (v)
+                {
+                    case Verdict.KillOnce:
+                        // Gone now; not on the census, so if it comes back after
+                        // the backoff it is a newcomer again and you are asked again.
+                        hits.AddRange(engine.Reap(c, guard));
+                        cooling[c.Key] = DateTime.Now.AddMinutes(cfg.SentryBackoffMinutes);
+                        log("[sentry] " + c.Name + " closed once - asking again if it returns");
+                        break;
+
                     case Verdict.Kill:
                         hits.AddRange(engine.Reap(c, guard));
                         census.Add(c.Key);                          // silent from now on

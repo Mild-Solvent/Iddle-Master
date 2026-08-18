@@ -21,7 +21,7 @@
 <meta name="twitter:description" content="Install, modes, sentry, the full idlemaster.ini reference, the CLI, and recovery — the whole manual on one page.">
 <meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
 <meta name="theme-color" content="#111318">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M9 10.5h2.6v11H9zM14.4 10.5h4.2c3.6 0 5.9 2.1 5.9 5.5s-2.3 5.5-5.9 5.5h-4.2zm2.6 2.3v6.4h1.4c2.1 0 3.4-1.2 3.4-3.2s-1.3-3.2-3.4-3.2z' fill='%238fc1f0'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Crect x='.6' y='.6' width='30.8' height='30.8' rx='6.4' fill='none' stroke='%238fc1f0' stroke-opacity='.3' stroke-width='.7'/%3E%3Cpath d='M6.5 8.5h3.2v14H6.5zM12.5 22.5V8.5h3.2l3.55 7.1 3.55-7.1H26v14h-3v-8.6l-2.8 5.5h-1.9l-2.8-5.5v8.6z' fill='%238fc1f0'/%3E%3Cpath d='M7 25h3v1.6H7zM11.5 25h3v1.6h-3zM16 25h3v1.6h-3zM20.5 25h3v1.6h-3z' fill='%238fc1f0' fill-opacity='.55'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 
 <script type="application/ld+json">
@@ -93,7 +93,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.6.0. If you only read one section, make it
+      Written against v0.6.1. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -295,25 +295,31 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
 
       <div class="cols" style="margin-top:20px">
         <div>
+          <p>The toast shows the app's own icon, the description and company its maker put in
+            the exe, and the path — so <em>Update.exe, 300 MB</em> reads as <em>Discord Inc.</em>
+            before you decide.</p>
           <ul>
             <li><b>Keep it</b> — left alone for <code>SentryBackoffMinutes</code>, then asked
               again.</li>
             <li><b>Always keep</b> — written into <code>[protect]</code>, remembered forever.</li>
-            <li><b>Trash it</b> — closed now, and closed silently from then on.</li>
+            <li><b>Trash once</b> — closed now; nothing written anywhere. If it comes back
+              after the backoff you are asked again.</li>
+            <li><b>Always trash</b> — closed now and every time it returns. An unlisted name is
+              written into <code>[boost.kill]</code>, so the lists learn from what you do.</li>
           </ul>
-          <p>No answer in <code>AskTimeoutSeconds</code> counts as <em>keep it</em>. The tool
-            should never be the reason you lost work while you were away from the keyboard.</p>
+          <p>No answer in <code>AskTimeoutSeconds</code> (47 by default) means whatever
+            <code>AskTimeoutAction</code> says — <em>trash once</em> out of the box, or
+            <em>keep</em> / <em>always</em> if you would rather. The toast's last line tells you
+            which.</p>
           <p>Set <code>AskAboveMb</code> and it also asks about newcomers that are on no list at
-            all but bigger than that — <em>Trash it</em> adds them to <code>[boost.kill]</code>,
-            so the lists learn from what you actually do. <strong>Idle mode never asks:</strong>
-            nobody is there.</p>
+            all but bigger than that. <strong>Idle mode never asks:</strong> nobody is there.</p>
         </div>
         <div>
           <div class="toast">
-            <p class="h">Docker Desktop just started</p>
-            <p class="b">4 processes, 512 MB. It is on your BOOST kill list, so the sentry
-              is about to close it.</p>
-            <div class="row"><span class="k">Keep it</span><span>Always keep</span><span class="t">Trash it</span></div>
+            <p class="h">Docker Desktop</p>
+            <p class="b">Docker Desktop — Docker Inc.<br>4 processes, 512 MB. It is on your BOOST kill list, so the sentry
+              is about to close it.<br><small>no answer in 47 s = trashed once</small></p>
+            <div class="row"><span class="k">Keep it</span><span>Always keep</span><span class="t">Trash once</span><span class="t">Always trash</span></div>
           </div>
         </div>
       </div>
@@ -322,6 +328,13 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
     <!-- ------------------------------------------------------------ windows -->
     <section id="windows">
       <h2>The windows <a class="anchor" href="#windows">#</a></h2>
+      <p><strong>Sentry lists &amp; timers</strong> (button on the sentry row, and on the tray menu)
+        is the sentry's own page: the active mode's kill list and service list as checklists —
+        add from what is running, type a name, remove, untick to comment out — plus every timer
+        it runs on and the two <em>boost again</em> knobs: a whole pass every N minutes
+        (<code>SentryFullPassMinutes</code>) and a whole pass the moment free RAM drops under a
+        line (<code>BoostWhenFreeBelowMb</code>). Save re-reads the config; a running sentry uses
+        the new lists on its next sweep.</p>
 
       <h3>What's eating RAM?</h3>
       <p>The Master's own little task manager: a live table that refreshes every two seconds and
@@ -468,6 +481,8 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">SentrySkipForeground</td><td class="n">1</td><td class="wrap-ok">Never kill the window you are actually using. Boost only; idle ignores it.</td></tr>
             <tr><td class="n">SkipOpenApps</td><td class="n">1</td><td class="wrap-ok">Never kill <em>any</em> app that has a window open, helper processes included. Boost only.</td></tr>
             <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. <code>0</code> = off.</td></tr>
+            <tr><td class="n">SentryFullPassMinutes</td><td class="n">0</td><td class="wrap-ok">Repeat a <em>whole</em> boost pass — re-stop services, trim, purge, check the stream stack — every this many minutes, on top of the 20-second sweep. 0 = off.</td></tr>
+            <tr><td class="n">BoostWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">…and do one right now when free RAM drops under this many MB (at most once per 5 minutes). 0 = off.</td></tr>
           </tbody>
         </table>
       </div>
@@ -478,7 +493,8 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
           <tbody>
             <tr><td class="n">AskBeforeKill</td><td class="n">1</td><td class="wrap-ok">Toast before closing anything that started after the sentry's census.</td></tr>
-            <tr><td class="n">AskTimeoutSeconds</td><td class="n">25</td><td class="wrap-ok">Silence for this long counts as <em>keep it</em>.</td></tr>
+            <tr><td class="n">AskTimeoutSeconds</td><td class="n">47</td><td class="wrap-ok">Silence for this long counts as <code>AskTimeoutAction</code>.</td></tr>
+            <tr><td class="n">AskTimeoutAction</td><td class="n">trash</td><td class="wrap-ok"><code>trash</code> = trash once, <code>keep</code> = leave it alone, <code>always</code> = always trash.</td></tr>
             <tr><td class="n">AskAboveMb</td><td class="n">250</td><td class="wrap-ok">Also ask about newcomers on no list at all but bigger than this. <code>0</code> = only ask about listed processes.</td></tr>
             <tr><td class="n">Tray</td><td class="n">1</td><td class="wrap-ok">Closing the window hides to the tray and keeps hunting. Exit from the tray menu to actually quit.</td></tr>
           </tbody>

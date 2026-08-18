@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="72" align="right" alt="Idle Master">
+
 # Idle Master
 
 A single small exe for a machine that has to stay awake so Sunshine can stream it,
@@ -133,18 +135,22 @@ gets a toast in the corner instead:
 
 > **Docker Desktop** just started — 4 processes, 512 MB.
 > It is on your BOOST kill list, so the sentry is about to close it.
-> `Keep it` · `Always keep` · `Trash it`
+> `Keep it` · `Always keep` · `Trash once` · `Always trash`
+
+The toast shows the app's own icon, the description and company from the exe, and
+the path — so *Update.exe, 300 MB* reads as *Discord Inc.* before you decide.
 
 - **Keep it** — left alone for 30 minutes, then asked again.
 - **Always keep** — written into `[protect]`, remembered forever.
-- **Trash it** — closed now, and closed silently from then on.
+- **Trash once** — closed now, nothing written; if it comes back you are asked again.
+- **Always trash** — closed now and every time it returns (an unlisted name goes
+  into `[boost.kill]`, so the lists learn from what you actually do).
 
-No answer in 25 seconds counts as *keep it*. The tool should never be the reason
-you lost work while you were away from the keyboard.
+No answer in 47 seconds means whatever `AskTimeoutAction` says — *trash once* by
+default, or `keep` / `always` if you prefer; the toast's last line tells you which.
 
 Set `AskAboveMb` and it also asks about newcomers that are on no list at all but
-bigger than that (250 MB by default) — *Trash it* adds them to `[boost.kill]`, so
-the lists learn from what you actually do. Idle mode never asks: nobody is there.
+bigger than that (250 MB by default). Idle mode never asks: nobody is there.
 
 ### Two brakes
 
@@ -172,6 +178,13 @@ Two things worth knowing before you leave it on:
 - Only one sentry runs at a time — a second one refuses the watch and says so.
   Closing the window stops the thread but leaves the watch *armed*, so opening
   Idle Master again picks it back up where it left off.
+
+**Sentry lists & timers** (button on the sentry row, tray menu) is the sentry's
+own page: the active mode's kill list and service list as checklists — add from
+what is running, type a name, remove, untick to comment out — plus every timer,
+and two *boost again* knobs: `SentryFullPassMinutes` repeats a *whole* pass
+(services, trim, purge, stream check) every N minutes on top of the 20-second
+sweep, and `BoostWhenFreeBelowMb` does one the moment free RAM drops under a line.
 
 `--installtask` registers a logon scheduled task (`IdleMaster Sentry`, highest
 privileges) so the watch survives a reboot. It is off unless you ask for it, and

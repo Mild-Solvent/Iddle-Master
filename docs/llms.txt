@@ -71,8 +71,9 @@ changes nothing.
 - **Nothing is disabled.** Services are stopped only, so a reboot restores the
   machine with no further action.
 - **Every run is recorded** and can be undone with `--restore`.
-- **It asks first.** Anything started after the mode ran gets a prompt with Keep
-  it / Always keep / Trash it. No answer within 25 seconds counts as keep it.
+- **It asks first.** Anything started after the mode ran gets a prompt showing the
+  app's icon and description, with Keep it / Always keep / Trash once / Always
+  trash. No answer within 47 seconds means "trash once" by default (configurable).
 - **Open windows are never touched** in boost mode, including an app's background
   worker processes, resolved by walking the parent chain.
 - **Respawn backoff.** If one process returns 6 times, the sentry stops fighting it

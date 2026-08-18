@@ -27,21 +27,25 @@ namespace IdleMaster
     // ------------------------------------------------------------------ dialog
 
     // The toast that appears when something you started lands on a kill list.
-    // Bottom-right, always on top, counts down, and defaults to leaving it alone -
-    // the tool should never be the reason you lost work you were in the middle of.
+    // Bottom-right, always on top, shows the app's own icon and what it is, and
+    // counts down. Four answers, two of them "trash": once, or every time.
+    // No answer means whatever AskTimeoutAction says (trash once, by default).
     internal sealed class AskForm : Form
     {
         private static readonly List<AskForm> Open = new List<AskForm>();
 
         private readonly System.Windows.Forms.Timer countdown;
         private readonly Label ticker;
+        private readonly string onTimeout;
         private int left;
 
         public Verdict Choice = Verdict.NoAnswer;
 
-        public AskForm(Question q, int seconds)
+        public AskForm(Question q, int seconds, string timeoutAction)
         {
             left = seconds;
+            onTimeout = timeoutAction == "always" ? "trashed for good"
+                      : timeoutAction == "keep" ? "left alone" : "trashed once";
 
             Theme.Form(this);
             Text = "Idle Master";
@@ -50,42 +54,97 @@ namespace IdleMaster
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
             TopMost = true;
-            ClientSize = new Size(430, 176);
+            ClientSize = new Size(480, 240);
 
             Rectangle area = Screen.PrimaryScreen.WorkingArea;
             Location = new Point(area.Right - Width - 16, area.Bottom - Height - 16);
+
+            // Who is this, really: the exe's own icon and the description its
+            // maker put in it. "Update.exe, 300 MB" says nothing; "Discord Inc."
+            // does.
+            string exe = ExePath(q.What);
+            string desc = null, company = null;
+            if (exe != null)
+            {
+                try
+                {
+                    FileVersionInfo fv = FileVersionInfo.GetVersionInfo(exe);
+                    desc = Clean(fv.FileDescription);
+                    company = Clean(fv.CompanyName);
+                }
+                catch (Exception) { }
+            }
+
+            PictureBox pic = new PictureBox();
+            pic.SetBounds(16, 16, 32, 32);
+            pic.SizeMode = PictureBoxSizeMode.CenterImage;
+            try
+            {
+                Icon ic = exe != null ? Icon.ExtractAssociatedIcon(exe) : null;
+                pic.Image = (ic != null ? ic : App.Icon).ToBitmap();
+            }
+            catch (Exception) { try { pic.Image = App.Icon.ToBitmap(); } catch (Exception) { } }
+            Controls.Add(pic);
 
             Label head = new Label();
             head.Text = q.What.Name;
             head.Font = Theme.Big();
             head.ForeColor = Theme.Accent;
-            head.SetBounds(16, 14, 400, 26);
+            head.AutoEllipsis = true;
+            head.SetBounds(60, 10, 404, 26);
             Controls.Add(head);
+
+            string who = desc != null && company != null && !desc.Equals(company, StringComparison.OrdinalIgnoreCase)
+                ? desc + "  -  " + company
+                : (desc ?? company ?? "no description in the exe");
+            Label whoL = new Label();
+            whoL.Text = who;
+            whoL.ForeColor = Theme.Fg;
+            whoL.AutoEllipsis = true;
+            whoL.SetBounds(60, 36, 404, 18);
+            Controls.Add(whoL);
+
+            Label where = Theme.Hint(exe ?? "(path not readable)");
+            where.Font = Theme.Small();
+            where.AutoEllipsis = true;
+            where.SetBounds(60, 54, 404, 16);
+            Controls.Add(where);
 
             string size = Engine.Size(q.What.Bytes);
             string many = q.What.Pids.Count > 1 ? q.What.Pids.Count + " processes, " : "";
             Label body = new Label();
             body.Text = q.OnKillList
-                ? "just started - " + many + size + ".\n\nIt is on your "
+                ? "Just started - " + many + size + ". It is on your "
                   + q.Mode.ToUpperInvariant() + " kill list, so the sentry is about to close it."
-                : "just started - " + many + size + ".\n\nIt is on no list, but it is big enough "
+                : "Just started - " + many + size + ". It is on no list, but it is big enough "
                   + "to be worth asking about.";
-            body.SetBounds(16, 44, 400, 56);
+            body.SetBounds(16, 80, 448, 36);
             Controls.Add(body);
 
+            Label legend = Theme.Hint(
+                "Keep it = leave it, ask again later        Always keep = protect it forever\n"
+                + "Trash once = close it, ask if it returns        Always trash = close it every time"
+                + (q.OnKillList ? "" : ", via the BOOST list"));
+            legend.Font = Theme.Small();
+            legend.SetBounds(16, 122, 448, 32);
+            Controls.Add(legend);
+
             ticker = new Label();
-            ticker.SetBounds(16, 104, 400, 18);
-            ticker.ForeColor = Theme.Dim;
+            ticker.SetBounds(16, 160, 448, 18);
+            ticker.ForeColor = Theme.Warn;
             Controls.Add(ticker);
             Tick();
 
             Button keep = Btn(Theme.Quiet("Keep it"), 16);
             keep.Click += delegate { Answer(Verdict.Keep); };
 
-            Button always = Btn(Theme.Action("Always keep"), 122);
+            Button always = Btn(Theme.Action("Always keep"), 130);
             always.Click += delegate { Answer(Verdict.KeepAlways); };
 
-            Button kill = Btn(Theme.Dangerous("Trash it"), 300);
+            Button once = Btn(Theme.Button("Trash once", Theme.Lift(Theme.Danger, -30), Color.White), 244);
+            once.Click += delegate { Answer(Verdict.KillOnce); };
+
+            Button kill = Btn(Theme.Dangerous("Always trash"), 358);
             kill.Click += delegate { Answer(Verdict.Kill); };
 
             AcceptButton = keep;
@@ -104,14 +163,36 @@ namespace IdleMaster
             lock (Open) Open.Add(this);
         }
 
+        private static string Clean(string s)
+        {
+            if (s == null) return null;
+            s = s.Trim();
+            return s.Length == 0 ? null : s;
+        }
+
+        // The first pid whose image path we are allowed to read.
+        private static string ExePath(Candidate c)
+        {
+            foreach (int pid in c.Pids)
+            {
+                try
+                {
+                    using (Process p = Process.GetProcessById(pid))
+                        return p.MainModule.FileName;
+                }
+                catch (Exception) { }
+            }
+            return null;
+        }
+
         private void Tick()
         {
-            ticker.Text = "no answer in " + left + "s = left alone, and asked again later";
+            ticker.Text = "no answer in " + left + " s = " + onTimeout + "  (Settings changes this)";
         }
 
         private Button Btn(Button b, int x)
         {
-            b.SetBounds(x, 132, 100, 30);
+            b.SetBounds(x, 194, 106, 30);
             Controls.Add(b);
             return b;
         }
@@ -130,13 +211,14 @@ namespace IdleMaster
         }
 
         // Called when the sentry is told to stand down while a dialog is still up.
+        // Standing down means nothing gets killed, so this is a Keep, not a timeout.
         public static void CloseAll()
         {
             List<AskForm> copy;
             lock (Open) copy = new List<AskForm>(Open);
             foreach (AskForm f in copy)
             {
-                try { if (!f.IsDisposed) f.Answer(Verdict.NoAnswer); }
+                try { if (!f.IsDisposed) f.Answer(Verdict.Keep); }
                 catch (Exception) { }
             }
         }
@@ -311,12 +393,15 @@ namespace IdleMaster
 
             BackColor = Theme.Panel;
             ForeColor = Theme.Fg;
+            // The children are laid out for this size; whoever hosts the pane
+            // resizes it afterwards, and the anchors take it from there.
+            Size = new Size(366, 372);
 
             Label head = Theme.Caption(caption);
             head.SetBounds(6, 6, 340, 18);
             Controls.Add(head);
 
-            box.SetBounds(6, 28, 320, 300);
+            box.SetBounds(6, 28, 354, 300);
             box.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             box.Font = Theme.Mono();
             box.CheckOnClick = true;
@@ -459,12 +544,48 @@ namespace IdleMaster
             new string[] { "SentryGuardMinutes",   "Check the stream stack every (minutes)",        "1", "1440", "5" },
             new string[] { "SentryRespawnLimit",   "Give up on a process after this many respawns", "1", "100",  "6" },
             new string[] { "SentryBackoffMinutes", "...and leave it alone for (minutes)",           "1", "1440", "30" },
-            new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "25" },
+            new string[] { "SentryFullPassMinutes","Repeat a whole boost pass (services, trim, guard) every (minutes, 0 = off)", "0", "1440", "0" },
+            new string[] { "BoostWhenFreeBelowMb", "...and do one now when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
+            new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "47" },
             new string[] { "AskAboveMb",           "Ask about unlisted newcomers bigger than (MB, 0 = off)", "0", "99999", "250" },
             new string[] { "TrimWhenFreeBelowMb",  "Emergency trim when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
             new string[] { "CleanupInstallerDays", "Suggest Downloads installers older than (days)",  "7",  "3650",   "90" },
             new string[] { "CleanupBigDirMinMb",   "Big-folder suggestions start at (MB)",            "50", "999999", "500" },
         };
+
+        // How the Numbers table splits into headings in the advanced window.
+        public const int SentryCount = 8;
+        public const int AskCount = 3;
+
+        // key, label, choices (value|label)
+        public static readonly string[] TimeoutAction = new string[]
+        {
+            "trash|trash it once", "keep|leave it alone", "always|trash it every time",
+        };
+
+        public static ComboBox Choice(string current)
+        {
+            ComboBox c = new ComboBox();
+            c.DropDownStyle = ComboBoxStyle.DropDownList;
+            c.FlatStyle = FlatStyle.Flat;
+            c.BackColor = Theme.Input;
+            c.ForeColor = Theme.Fg;
+            int sel = 0;
+            for (int i = 0; i < TimeoutAction.Length; i++)
+            {
+                string[] kv = TimeoutAction[i].Split('|');
+                c.Items.Add(kv[1]);
+                if (current != null && kv[0].Equals(current.Trim(), StringComparison.OrdinalIgnoreCase)) sel = i;
+            }
+            c.SelectedIndex = sel;
+            return c;
+        }
+
+        public static string ChoiceValue(ComboBox c)
+        {
+            int i = c.SelectedIndex < 0 ? 0 : c.SelectedIndex;
+            return TimeoutAction[i].Split('|')[0];
+        }
 
         public static string[] Number(string key)
         {
@@ -500,6 +621,7 @@ namespace IdleMaster
         private readonly IniFile ini = new IniFile();
         private readonly Dictionary<string, CheckBox> flags = new Dictionary<string, CheckBox>();
         private readonly Dictionary<string, NumericUpDown> numbers = new Dictionary<string, NumericUpDown>();
+        private ComboBox timeoutAction;
 
         public bool Saved;
 
@@ -510,32 +632,41 @@ namespace IdleMaster
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = MaximizeBox = false;
-            ClientSize = new Size(460, 360);
+            ClientSize = new Size(460, 424);
 
             int y = 16;
             y = Flag("Sentry", "Keep hunting after a boost",
                 "Re-applies your kill lists on a timer until you hit Restore.", y);
             y = Flag("AskBeforeKill", "Ask before killing anything new",
-                "A small countdown toast appears; no answer means it is left alone.", y);
+                "A toast with the app's icon and four answers; no answer = the choice below.", y);
             y = Flag("Tray", "Keep running in the tray",
                 "Closing the window hides Idle Master instead of quitting it.", y);
 
             y += 8;
+            y = Number("AskTimeoutSeconds", y);
+            Label tl = new Label();
+            tl.Text = "No answer means";
+            tl.SetBounds(20, y + 3, 330, 20);
+            Controls.Add(tl);
+            timeoutAction = SettingSpec.Choice(ini.GetSetting("AskTimeoutAction"));
+            timeoutAction.SetBounds(290, y, 150, 22);
+            Controls.Add(timeoutAction);
+            y += 32;
             y = Number("SentrySeconds", y);
             y = Number("TrimWhenFreeBelowMb", y);
 
             Button advanced = Theme.Quiet("Advanced settings...");
-            advanced.SetBounds(20, 312, 150, 30);
+            advanced.SetBounds(20, 376, 150, 30);
             advanced.Click += delegate { OpenAdvanced(); };
             Controls.Add(advanced);
 
             Button save = Theme.Action("Save");
-            save.SetBounds(252, 312, 90, 30);
+            save.SetBounds(252, 376, 90, 30);
             save.Click += delegate { Persist(); };
             Controls.Add(save);
 
             Button cancel = Theme.Quiet("Cancel");
-            cancel.SetBounds(350, 312, 90, 30);
+            cancel.SetBounds(350, 376, 90, 30);
             cancel.Click += delegate { Close(); };
             Controls.Add(cancel);
             CancelButton = cancel;
@@ -598,6 +729,7 @@ namespace IdleMaster
                     ini.SetSetting(kv.Key, kv.Value.Checked ? "1" : "0");
                 foreach (KeyValuePair<string, NumericUpDown> kv in numbers)
                     ini.SetSetting(kv.Key, ((int)kv.Value.Value).ToString(CultureInfo.InvariantCulture));
+                ini.SetSetting("AskTimeoutAction", SettingSpec.ChoiceValue(timeoutAction));
                 ini.Save();
                 Saved = true;
                 Close();
@@ -617,6 +749,7 @@ namespace IdleMaster
         private readonly Dictionary<string, CheckBox> flags = new Dictionary<string, CheckBox>();
         private readonly Dictionary<string, NumericUpDown> numbers = new Dictionary<string, NumericUpDown>();
         private readonly List<ListPane> panes = new List<ListPane>();
+        private ComboBox timeoutAction;
 
         public bool Saved;
 
@@ -707,16 +840,25 @@ namespace IdleMaster
 
             y += 8;
             y = Header(page, "Sentry timing", y);
-            for (int i = 0; i < 6; i++) y = NumberRow(page, SettingSpec.Numbers[i], y);
+            for (int i = 0; i < SettingSpec.SentryCount; i++) y = NumberRow(page, SettingSpec.Numbers[i], y);
 
             y += 8;
             y = Header(page, "Asking && safety", y);
-            for (int i = 6; i < 9; i++)
+            for (int i = SettingSpec.SentryCount; i < SettingSpec.SentryCount + SettingSpec.AskCount; i++)
                 y = NumberRow(page, SettingSpec.Numbers[i], y);
+
+            Label tl = new Label();
+            tl.Text = "No answer to the dialog means";
+            tl.SetBounds(16, y + 4, 480, 20);
+            page.Controls.Add(tl);
+            timeoutAction = SettingSpec.Choice(ini.GetSetting("AskTimeoutAction"));
+            timeoutAction.SetBounds(504, y, 150, 22);
+            page.Controls.Add(timeoutAction);
+            y += 28;
 
             y += 8;
             y = Header(page, "Disk cleanup", y);
-            for (int i = 9; i < SettingSpec.Numbers.Length; i++)
+            for (int i = SettingSpec.SentryCount + SettingSpec.AskCount; i < SettingSpec.Numbers.Length; i++)
                 y = NumberRow(page, SettingSpec.Numbers[i], y);
 
             return page;
@@ -754,15 +896,20 @@ namespace IdleMaster
             TabPage page = new TabPage(title);
             page.BackColor = Theme.Panel;
 
+            // A TabPage is 200x100 until the TabControl sizes it, so anchoring
+            // to its bottom here would send the panes' buttons off the page.
+            // Lay them out by hand on every resize instead.
             ListPane left = new ListPane(ini, leftSection, leftCaption, false);
-            left.SetBounds(4, 4, 366, 510);
-            left.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
             page.Controls.Add(left);
-
             ListPane right = new ListPane(ini, rightSection, rightCaption, true);
-            right.SetBounds(376, 4, 366, 510);
-            right.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             page.Controls.Add(right);
+            page.Resize += delegate
+            {
+                int h = page.ClientSize.Height - 8;
+                int half = (page.ClientSize.Width - 12) / 2;
+                left.SetBounds(4, 4, half, h);
+                right.SetBounds(8 + half, 4, half, h);
+            };
 
             panes.Add(left);
             panes.Add(right);
@@ -775,9 +922,11 @@ namespace IdleMaster
             page.BackColor = Theme.Panel;
 
             ListPane pane = new ListPane(ini, section, caption, false);
-            pane.SetBounds(4, 4, 738, 510);
-            pane.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             page.Controls.Add(pane);
+            page.Resize += delegate
+            {
+                pane.SetBounds(4, 4, page.ClientSize.Width - 8, page.ClientSize.Height - 8);
+            };
 
             panes.Add(pane);
             return page;
@@ -791,6 +940,7 @@ namespace IdleMaster
                     ini.SetSetting(kv.Key, kv.Value.Checked ? "1" : "0");
                 foreach (KeyValuePair<string, NumericUpDown> kv in numbers)
                     ini.SetSetting(kv.Key, ((int)kv.Value.Value).ToString(CultureInfo.InvariantCulture));
+                ini.SetSetting("AskTimeoutAction", SettingSpec.ChoiceValue(timeoutAction));
                 foreach (ListPane p in panes) p.Save(ini);
                 ini.Save();
                 Saved = true;
@@ -1532,6 +1682,205 @@ namespace IdleMaster
         }
     }
 
+    // ------------------------------------------------------------------ sentry
+
+    // What the sentry hunts and how often, in one place: the active mode's kill
+    // lists as checklists (add from what is running, type, remove, untick to
+    // comment out), the timers, and the two "boost again" knobs. Saving
+    // re-reads the config; a running sentry uses the new lists on its next sweep.
+    internal sealed class SentryForm : Form
+    {
+        private readonly IniFile ini = new IniFile();
+        private readonly List<ListPane> panes = new List<ListPane>();
+        private readonly Dictionary<string, NumericUpDown> numbers = new Dictionary<string, NumericUpDown>();
+        private readonly ComboBox timeoutAction;
+        private readonly Label status;
+        private readonly Func<Sentry> live;
+        private readonly System.Windows.Forms.Timer timer;
+
+        public bool Saved;
+
+        public SentryForm(Func<Sentry> liveSentry, string armedMode)
+        {
+            live = liveSentry;
+
+            Theme.Form(this);
+            Text = "IDLE MASTER - sentry";
+            Size = new Size(820, 660);
+            MinimumSize = new Size(720, 560);
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+
+            Sentry now = live();
+            string mode = now != null && now.Alive ? now.Mode : armedMode;
+            if (mode != "idle") mode = "boost";
+
+            Label cap = Theme.Caption("SENTRY  -  " + mode.ToUpperInvariant());
+            cap.SetBounds(16, 12, 300, 18);
+            Controls.Add(cap);
+
+            status = Theme.Hint("");
+            status.Font = Theme.Small();
+            status.TextAlign = ContentAlignment.MiddleRight;
+            status.SetBounds(320, 12, 468, 18);
+            status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(status);
+
+            Label hint = Theme.Hint(mode == "idle"
+                ? "Absolute idle enforces these ON TOP of the boost lists (Settings > Advanced > Boost now)."
+                : "Untick = commented out, not deleted. 'Never touch' still wins over anything here.");
+            hint.Font = Theme.Small();
+            hint.SetBounds(16, 32, 780, 16);
+            Controls.Add(hint);
+
+            ListPane left = new ListPane(ini, mode + ".kill",
+                "Processes it hunts  [" + mode + ".kill]", false);
+            left.SetBounds(12, 52, 388, 340);
+            left.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(left);
+            panes.Add(left);
+
+            ListPane right = new ListPane(ini, mode + ".services",
+                "Services it re-stops  [" + mode + ".services]", true);
+            right.SetBounds(408, 52, 388, 340);
+            right.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(right);
+            panes.Add(right);
+
+            // ---- the timers, two columns
+            int y0 = 660 - 250;
+            Label t1 = Theme.Caption("How often");
+            t1.SetBounds(16, y0, 200, 18);
+            t1.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(t1);
+            int y = y0 + 24;
+            y = Num("SentrySeconds", 16, y);
+            y = Num("SentryServiceMinutes", 16, y);
+            y = Num("SentryTrimMinutes", 16, y);
+            y = Num("SentryBackoffMinutes", 16, y);
+
+            Label t2 = Theme.Caption("Boost again, and asking");
+            t2.SetBounds(412, y0, 300, 18);
+            t2.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(t2);
+            y = y0 + 24;
+            y = Num("SentryFullPassMinutes", 412, y);
+            y = Num("BoostWhenFreeBelowMb", 412, y);
+            y = Num("AskAboveMb", 412, y);
+            y = Num("AskTimeoutSeconds", 412, y);
+
+            Label tl = new Label();
+            tl.Text = "no answer means";
+            tl.SetBounds(412, y + 3, 200, 20);
+            tl.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(tl);
+            timeoutAction = SettingSpec.Choice(ini.GetSetting("AskTimeoutAction"));
+            timeoutAction.SetBounds(640, y, 150, 22);
+            timeoutAction.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(timeoutAction);
+
+            Button save = Theme.Action("Save");
+            save.SetBounds(796 - 208, 660 - 76, 100, 30);
+            save.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            save.Click += delegate { Persist(); };
+            Controls.Add(save);
+
+            Button cancel = Theme.Quiet("Close");
+            cancel.SetBounds(796 - 100, 660 - 76, 100, 30);
+            cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            cancel.Click += delegate { Close(); };
+            Controls.Add(cancel);
+            CancelButton = cancel;
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 2000;
+            timer.Tick += delegate { Refresh_(); };
+            timer.Start();
+            Refresh_();
+        }
+
+        private int Num(string key, int x, int y)
+        {
+            string[] spec = SettingSpec.Number(key);
+            Label l = new Label();
+            l.Text = Short(spec[1]);
+            l.SetBounds(x, y + 3, 300, 20);
+            l.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(l);
+
+            NumericUpDown u = new NumericUpDown();
+            u.Minimum = decimal.Parse(spec[2], CultureInfo.InvariantCulture);
+            u.Maximum = decimal.Parse(spec[3], CultureInfo.InvariantCulture);
+            u.Value = SettingSpec.Clamp(u, ini.GetSetting(key), spec[4]);
+            u.SetBounds(x + 300, y, 80, 22);
+            u.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Theme.Input_(u);
+            Controls.Add(u);
+            numbers[key] = u;
+            return y + 28;
+        }
+
+        // The advanced window has room for the long labels; this one does not.
+        private static string Short(string label)
+        {
+            switch (label)
+            {
+                case "Sweep for new junk every (seconds)": return "sweep processes every (s)";
+                case "Re-stop restarted services every (minutes)": return "re-stop services every (min)";
+                case "Re-trim RAM every (minutes)": return "re-trim RAM every (min)";
+                case "...and leave it alone for (minutes)": return "'Keep it' / backoff lasts (min)";
+                case "Ask about unlisted newcomers bigger than (MB, 0 = off)": return "also ask about anything new over (MB, 0 = off)";
+                case "Dialog answers itself after (seconds)": return "dialog answers itself after (s)";
+            }
+            if (label.StartsWith("Repeat a whole boost pass")) return "whole boost pass every (min, 0 = off)";
+            if (label.StartsWith("...and do one now")) return "...and one now when free RAM < (MB, 0 = off)";
+            return label;
+        }
+
+        private void Refresh_()
+        {
+            Sentry s = live();
+            if (s != null && s.Alive)
+            {
+                status.Text = "on watch since " + s.Since.ToString("HH:mm") + "  -  " + s.Reaped
+                    + " reaped, " + Engine.Size(s.Reclaimed) + " held off"
+                    + (s.Restopped > 0 ? ", " + s.Restopped + " services re-stopped" : "")
+                    + (s.FullPasses > 0 ? ", " + s.FullPasses + " full passes" : "");
+                status.ForeColor = Theme.Accent;
+            }
+            else
+            {
+                status.Text = "not on watch right now - these lists apply the moment it is";
+                status.ForeColor = Theme.Dim;
+            }
+        }
+
+        private void Persist()
+        {
+            try
+            {
+                foreach (KeyValuePair<string, NumericUpDown> kv in numbers)
+                    ini.SetSetting(kv.Key, ((int)kv.Value.Value).ToString(CultureInfo.InvariantCulture));
+                ini.SetSetting("AskTimeoutAction", SettingSpec.ChoiceValue(timeoutAction));
+                foreach (ListPane p in panes) p.Save(ini);
+                ini.Save();
+                Saved = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the config:\n\n" + ex.Message,
+                    "Idle Master", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            timer.Stop();
+            base.OnFormClosed(e);
+        }
+    }
+
     // ------------------------------------------------------------------- gui
 
     internal sealed class MainForm : Form
@@ -1540,7 +1889,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry;
         private readonly CheckBox chkSentry;
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
@@ -1625,9 +1974,16 @@ namespace IdleMaster
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 420, 442, 20);
+            sentryLabel.SetBounds(220, 420, 300, 20);
+            sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
+
+            btnSentry = Theme.Quiet("Sentry lists && timers");
+            btnSentry.SetBounds(510, 414, 152, 30);
+            btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnSentry.Click += delegate { OpenSentry(); };
+            Controls.Add(btnSentry);
 
             logBox = new TextBox();
             logBox.Multiline = true;
@@ -1689,6 +2045,31 @@ namespace IdleMaster
             cleanupWin = new CleanupForm(cfg, AppendLog);
             cleanupWin.Location = new Point(Location.X + Width - 40, Location.Y + 80);
             cleanupWin.Show(this);
+        }
+
+        // The sentry's own window: its lists and timers, saved straight to the ini.
+        private void OpenSentry()
+        {
+            string armed = StateFile.Load().Mode;
+            using (SentryForm f = new SentryForm(delegate { return sentry; }, armed))
+            {
+                f.Location = new Point(Location.X + Width - 40, Location.Y + 60);
+                f.ShowDialog(this);
+                if (!f.Saved) return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                AppendLog("Sentry lists saved. " + cfg.BoostKill.Count + " on the boost list, "
+                    + cfg.IdleKill.Count + " more on the idle list"
+                    + (cfg.SentryFullPassMinutes > 0 ? "; whole pass every " + cfg.SentryFullPassMinutes + " min" : "")
+                    + (cfg.BoostWhenFreeBelowMb > 0 ? "; whole pass when free RAM < " + cfg.BoostWhenFreeBelowMb + " MB" : "")
+                    + ".");
+                if (sentry != null && sentry.Alive)
+                    AppendLog("The sentry is using the new lists from its next sweep.");
+                if (eatersWin != null && !eatersWin.IsDisposed) eatersWin.RefreshNow();
+            }
+            catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
         }
 
         // One backup window, same rule.
@@ -1754,6 +2135,7 @@ namespace IdleMaster
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Disk cleanup...", null, delegate { ShowWindow(); OpenCleanup(); });
             menu.Items.Add("Backup kit...", null, delegate { ShowWindow(); OpenBackup(); });
+            menu.Items.Add("Sentry lists && timers...", null, delegate { ShowWindow(); OpenSentry(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
             menu.Items.Add("Exit", null, delegate { reallyExit = true; Close(); });
@@ -1807,7 +2189,7 @@ namespace IdleMaster
                 try { return (Verdict)Invoke((Func<Question, Verdict>)AskOnUiThread, q); }
                 catch (Exception) { return Verdict.Keep; }
             }
-            using (AskForm f = new AskForm(q, cfg.AskTimeoutSeconds))
+            using (AskForm f = new AskForm(q, cfg.AskTimeoutSeconds, cfg.AskTimeoutAction))
             {
                 f.ShowDialog();
                 return f.Choice;

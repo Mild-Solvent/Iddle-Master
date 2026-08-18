@@ -1,5 +1,8 @@
-# Draws src\idlemaster.ico - the same mark the site uses for its favicon
-# (dark rounded square, "ID" in Ice blue) - at every size Explorer asks for.
+# Draws src\idlemaster.ico - the "IM" mark, the same one the site uses for its
+# favicon - at every size Explorer asks for.
+#
+#   dark rounded square with a faint Ice bezel, "I" and "M" cut as geometric
+#   blocks in a top-lit blue, and a row of RAM-stick contacts along the foot.
 #
 # Run it once when the design changes; the .ico is committed, so build.ps1
 # never needs this. In-box System.Drawing only, like everything else here.
@@ -10,6 +13,16 @@ Add-Type -AssemblyName System.Drawing
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $out  = Join-Path $root 'src\idlemaster.ico'
 
+function Rounded([float]$x, [float]$y, [float]$w, [float]$h, [float]$r) {
+  $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $p.AddArc($x, $y, 2*$r, 2*$r, 180, 90)
+  $p.AddArc($x + $w - 2*$r, $y, 2*$r, 2*$r, 270, 90)
+  $p.AddArc($x + $w - 2*$r, $y + $h - 2*$r, 2*$r, 2*$r, 0, 90)
+  $p.AddArc($x, $y + $h - 2*$r, 2*$r, 2*$r, 90, 90)
+  $p.CloseFigure()
+  return $p
+}
+
 function Draw-Mark([int]$size) {
   $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -18,33 +31,48 @@ function Draw-Mark([int]$size) {
   $g.Clear([System.Drawing.Color]::Transparent)
   $k = $size / 32.0
 
-  # rounded square, rx = 7/32 of the side
-  $r = 7 * $k
-  $bg = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $bg.AddArc(0, 0, 2*$r, 2*$r, 180, 90)
-  $bg.AddArc($size - 2*$r, 0, 2*$r, 2*$r, 270, 90)
-  $bg.AddArc($size - 2*$r, $size - 2*$r, 2*$r, 2*$r, 0, 90)
-  $bg.AddArc(0, $size - 2*$r, 2*$r, 2*$r, 90, 90)
-  $bg.CloseFigure()
-  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(0x11,0x13,0x18))), $bg)
+  # plate: top-lit dark gradient
+  $plate = Rounded 0 0 $size $size (7*$k)
+  $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush `
+    (New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 0, $size), `
+    ([System.Drawing.Color]::FromArgb(0x1c,0x21,0x2c)), ([System.Drawing.Color]::FromArgb(0x0c,0x0e,0x13))
+  $g.FillPath($bgBrush, $plate)
 
-  # "I" then "D" - the site's SVG path, scaled. Alternate fill cuts the D's hole.
+  # bezel: a hair of Ice just inside the edge (skipped where it would be a smear)
+  if ($size -ge 24) {
+    $inset = 0.6 * $k
+    $bezel = Rounded $inset $inset ($size - 2*$inset) ($size - 2*$inset) (6.4*$k)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, 0x8f,0xc1,0xf0)), ([Math]::Max(1.0, 0.7*$k))
+    $g.DrawPath($pen, $bezel)
+  }
+
+  # letters, lit from the top
+  $ink = New-Object System.Drawing.Drawing2D.LinearGradientBrush `
+    (New-Object System.Drawing.PointF 0, (8*$k)), (New-Object System.Drawing.PointF 0, (23*$k)), `
+    ([System.Drawing.Color]::FromArgb(0xbf,0xe0,0xfb)), ([System.Drawing.Color]::FromArgb(0x6a,0xab,0xe6))
+
   $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $p.FillMode = 'Alternate'
-  $p.AddRectangle((New-Object System.Drawing.RectangleF (9*$k), (10.5*$k), (2.6*$k), (11*$k)))
+  # I
+  $p.AddRectangle((New-Object System.Drawing.RectangleF (6.5*$k), (8.5*$k), (3.2*$k), (14*$k)))
+  # M
+  $m = @(
+    @(12.5, 22.5), @(12.5, 8.5), @(15.7, 8.5), @(19.25, 15.6), @(22.8, 8.5), @(26.0, 8.5),
+    @(26.0, 22.5), @(23.0, 22.5), @(23.0, 13.9), @(20.2, 19.4), @(18.3, 19.4), @(15.5, 13.9),
+    @(15.5, 22.5)
+  )
+  $pts = New-Object 'System.Drawing.PointF[]' $m.Count
+  for ($i = 0; $i -lt $m.Count; $i++) { $pts[$i] = New-Object System.Drawing.PointF ($m[$i][0]*$k), ($m[$i][1]*$k) }
   $p.StartFigure()
-  $p.AddLine(14.4*$k, 10.5*$k, 18.6*$k, 10.5*$k)
-  $p.AddBezier(18.6*$k, 10.5*$k, 22.2*$k, 10.5*$k, 24.5*$k, 12.6*$k, 24.5*$k, 16.0*$k)
-  $p.AddBezier(24.5*$k, 16.0*$k, 24.5*$k, 19.4*$k, 22.2*$k, 21.5*$k, 18.6*$k, 21.5*$k)
-  $p.AddLine(18.6*$k, 21.5*$k, 14.4*$k, 21.5*$k)
-  $p.CloseFigure()
-  $p.StartFigure()
-  $p.AddLine(17.0*$k, 12.8*$k, 17.0*$k, 19.2*$k)
-  $p.AddLine(17.0*$k, 19.2*$k, 18.4*$k, 19.2*$k)
-  $p.AddBezier(18.4*$k, 19.2*$k, 20.5*$k, 19.2*$k, 21.8*$k, 18.0*$k, 21.8*$k, 16.0*$k)
-  $p.AddBezier(21.8*$k, 16.0*$k, 21.8*$k, 14.0*$k, 20.5*$k, 12.8*$k, 18.4*$k, 12.8*$k)
-  $p.CloseFigure()
-  $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(0x8f,0xc1,0xf0))), $p)
+  $p.AddPolygon($pts)
+  $g.FillPath($ink, $p)
+
+  # RAM contacts along the foot
+  if ($size -ge 24) {
+    $cb = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(150, 0x8f,0xc1,0xf0))
+    foreach ($x0 in 7.0, 11.5, 16.0, 20.5) {
+      $g.FillRectangle($cb, ($x0*$k), (25.0*$k), (3.0*$k), (1.6*$k))
+    }
+  }
 
   $g.Dispose()
   return $bmp
@@ -98,4 +126,9 @@ foreach ($f in $frames) {
 foreach ($f in $frames) { $w.Write($f.Data) }
 $w.Flush(); $fs.Close()
 
-Write-Host "wrote $out ($((Get-Item $out).Length) bytes, $($frames.Count) frames)" -ForegroundColor Green
+# A preview PNG next to the ico is handy for the README and for eyeballing.
+$prev = Draw-Mark 256
+$prev.Save((Join-Path $root 'docs\icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$prev.Dispose()
+
+Write-Host "wrote $out ($((Get-Item $out).Length) bytes, $($frames.Count) frames) + docs\icon.png" -ForegroundColor Green
