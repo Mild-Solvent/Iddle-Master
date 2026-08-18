@@ -60,6 +60,7 @@ namespace IdleMaster
             f.BackColor = Bg;
             f.ForeColor = Fg;
             f.Font = Base();
+            try { f.Icon = App.Icon; } catch (Exception) { }
         }
 
         // ---- controls

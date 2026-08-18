@@ -1540,7 +1540,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup;
         private readonly CheckBox chkSentry;
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
@@ -1549,6 +1549,7 @@ namespace IdleMaster
         private NotifyIcon tray;
         private EatersForm eatersWin;
         private CleanupForm cleanupWin;
+        private BackupForm backupWin;
         private bool reallyExit;
         private bool startHidden;
         private bool watchMode;
@@ -1560,8 +1561,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 706);
-            MinimumSize = new Size(560, 520);
+            Size = new Size(700, 742);
+            MinimumSize = new Size(560, 556);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -1601,28 +1602,30 @@ namespace IdleMaster
 
             btnCleanup = SmallButton("Disk cleanup", 22, 342);
             btnCleanup.Click += delegate { OpenCleanup(); };
+            btnBackup = SmallButton("Backup kit", 182, 342);
+            btnBackup.Click += delegate { OpenBackup(); };
 
             btnUpdate = Theme.Quiet("Check for updates");
-            btnUpdate.SetBounds(182, 342, 152, 30);
+            btnUpdate.SetBounds(342, 342, 152, 30);
             btnUpdate.Click += delegate { CheckUpdates(); };
             Controls.Add(btnUpdate);
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(342, 348, 320, 20);
+            updateLabel.SetBounds(22, 384, 640, 20);
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 382, 190, 22);
+            chkSentry.SetBounds(24, 418, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 384, 442, 20);
+            sentryLabel.SetBounds(220, 420, 442, 20);
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
@@ -1634,7 +1637,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 412, 640, 212);
+            logBox.SetBounds(22, 448, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -1688,6 +1691,19 @@ namespace IdleMaster
             cleanupWin.Show(this);
         }
 
+        // One backup window, same rule.
+        private void OpenBackup()
+        {
+            if (backupWin != null && !backupWin.IsDisposed)
+            {
+                backupWin.Activate();
+                return;
+            }
+            backupWin = new BackupForm(AppendLog);
+            backupWin.Location = new Point(Location.X + Width - 40, Location.Y + 120);
+            backupWin.Show(this);
+        }
+
         // Started by --watch: no window, just the tray icon and the sentry.
         public void HideOnStart(string enforce)
         {
@@ -1715,7 +1731,9 @@ namespace IdleMaster
         private void BuildTray()
         {
             tray = new NotifyIcon();
-            tray.Icon = SystemIcons.Shield;
+            // The 16 px frame, not a squashed 32 - the tray is unforgiving about that.
+            try { tray.Icon = new Icon(App.Icon, 16, 16); }
+            catch (Exception) { tray.Icon = App.Icon; }
             tray.Text = "Idle Master";
             tray.Visible = true;
             tray.DoubleClick += delegate { ShowWindow(); };
@@ -1735,6 +1753,7 @@ namespace IdleMaster
             });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Disk cleanup...", null, delegate { ShowWindow(); OpenCleanup(); });
+            menu.Items.Add("Backup kit...", null, delegate { ShowWindow(); OpenBackup(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
             menu.Items.Add("Exit", null, delegate { reallyExit = true; Close(); });

@@ -1,6 +1,6 @@
 # Idle Master
 
-A single 50 KB exe for a machine that has to stay awake so Sunshine can stream it,
+A single small exe for a machine that has to stay awake so Sunshine can stream it,
 but shouldn't be burning 11 GB of RAM doing nothing at 3am.
 
 Two buttons:
@@ -20,7 +20,7 @@ instead of drifting back up. See [Keeping it clean](#keeping-it-clean).
 
 Download **`IdleMasterSetup.exe`** from
 [Releases](https://github.com/Mild-Solvent/Iddle-Master/releases) and run it.
-One file, ~120 KB, the app is carried inside it.
+One file, ~330 KB, the app is carried inside it.
 
 It installs to `%LOCALAPPDATA%\Programs\IdleMaster` — your own profile, so
 installing needs no administrator (the app elevates itself when it runs, which is
@@ -44,6 +44,7 @@ Silent, for scripts:
 ```
 IdleMasterSetup.exe --silent            install or update, no window
 IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster
+IdleMasterSetup.exe --silent --desktop  ...and a desktop shortcut too
 IdleMasterSetup.exe --uninstall         removes it, keeps your config
 ```
 
@@ -54,8 +55,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Compiles with the .NET Framework compiler that ships inside Windows. No SDK,
-no NuGet, no internet. Outputs `dist\IdleMaster.exe` and `dist\IdleMasterSetup.exe`
-(the app embedded in the installer).
+no NuGet, no internet. Outputs `dist\IdleMasterRebuild.exe` (goes inside every
+backup kit), `dist\IdleMaster.exe` (the app, with the rebuild exe and the icon
+embedded) and `dist\IdleMasterSetup.exe` (the app embedded in the installer).
 
 ## Run
 
@@ -175,6 +177,38 @@ Two things worth knowing before you leave it on:
 privileges) so the watch survives a reboot. It is off unless you ask for it, and
 `--removetask` deletes it.
 
+## Backup kit
+
+For the day you reinstall Windows. **Backup kit** (main window, tray menu) writes
+**one zip** that can put a fresh install back the way this one is:
+
+- **Apps** — it asks winget what is installed; everything with a winget or Store
+  package is listed with its id and pre-ticked (Windows' own bits start off).
+  Things winget cannot reinstall are listed greyed, so you know what to fetch by
+  hand.
+- **Files and folders** — Documents, Desktop, Pictures and `.ssh` start ticked,
+  Downloads/Videos/Music are listed but off, and *Add folder / Add file* take
+  anything else. Sizes count in the background; junctions are skipped.
+- **On the new machine, also:** install Idle Master with this `idlemaster.ini`,
+  run [zoicware/RemoveWindowsAI](https://github.com/zoicware/RemoveWindowsAI)
+  (Copilot, Recall, the lot — non-interactive, all options), apply a
+  [Chris Titus WinUtil](https://christitus.com/win) preset without clicking
+  (Standard / Minimal / Advanced), and leave WinUtil open at the end for anything
+  more you want from it.
+
+The zip holds `IdleMasterRebuild.exe`, a plain-text `rebuild.ini` with what you
+picked, an `apps.json` in `winget import` format, `files\`, your `idlemaster.ini`,
+and — when the app finds its own installer next to it — `IdleMasterSetup.exe` of
+the same version. Building a kit changes nothing on this machine.
+
+On the fresh Windows: extract the *whole* zip, run `IdleMasterRebuild.exe` (asks
+for administrator), tick, **Rebuild**, read the log. Files go back where they
+were (the old profile path is remapped to the new account) or into
+`Desktop\Restored files`; existing files are left alone unless you say
+otherwise. Apps go through `winget install` one at a time, so one failure costs
+one app. Without a bundled installer, the Idle Master step downloads the latest
+release. `--auto` starts with whatever the ini says ticked and no click.
+
 ## The safety story
 
 This is a tool that kills processes on a machine you can only reach remotely, so
@@ -252,10 +286,15 @@ will catch that and scream in the log, but test it once while you're awake.
 ```
 src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
 src/Ui.cs                 every window: main, task manager, settings, ask toast
+src/Cleanup.cs            the disk cleanup scanner
+src/Backup.cs             the backup kit: app inventory, zip writer, window
+src/Rebuild.cs            the standalone exe that ships inside a kit
 src/Theme.cs              the dark palette, fonts, and control styling
 src/Setup.cs              the installer; carries the app as an embedded resource
 src/app.manifest          requireAdministrator + per-monitor DPI
-build.ps1                 builds both exes
+src/idlemaster.ico        the icon; make-icon.ps1 draws it
+build.ps1                 builds all three exes
+dist/IdleMasterRebuild.exe  goes inside every backup kit
 dist/IdleMaster.exe       the app
 dist/IdleMasterSetup.exe  the thing you publish and people download
 dist/idlemaster.ini       the lists; edit in Settings or by hand

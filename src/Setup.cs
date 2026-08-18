@@ -27,8 +27,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master Setup")]
 [assembly: AssemblyDescription("Installer for Idle Master")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.5.0.0")]
-[assembly: AssemblyFileVersion("0.5.0.0")]
+[assembly: AssemblyVersion("0.6.0.0")]
+[assembly: AssemblyFileVersion("0.6.0.0")]
 
 namespace IdleMasterSetup
 {
@@ -79,6 +79,9 @@ namespace IdleMasterSetup
 
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern bool CloseHandle(IntPtr h);
+
+        [DllImport("shell32.dll")]
+        private static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
 
         // PROCESS_QUERY_LIMITED_INFORMATION - the one right an ordinary process
         // still has on an elevated one, which the app always is.
@@ -224,6 +227,12 @@ namespace IdleMasterSetup
             else Delete(desk);
 
             Register(dir, PayloadVersion(exe));
+
+            // The exe on disk just changed and now carries an icon it did not
+            // have before v0.6; without this nudge Explorer keeps showing the
+            // blank one it cached for the old file.
+            try { SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); }   // SHCNE_ASSOCCHANGED
+            catch (Exception) { }
 
             if (logonTask)
             {
@@ -448,13 +457,14 @@ namespace IdleMasterSetup
         [STAThread]
         public static int Main(string[] argv)
         {
-            bool silent = false, uninstall = false;
+            bool silent = false, uninstall = false, desktop = false;
             string dir = null;
             for (int i = 0; i < argv.Length; i++)
             {
                 string a = argv[i].TrimStart('-', '/').ToLowerInvariant();
                 if (a == "s" || a == "silent" || a == "quiet") silent = true;
                 else if (a == "uninstall" || a == "remove") uninstall = true;
+                else if (a == "desktop") desktop = true;   // silent + a desktop shortcut too
                 else if ((a == "dir" || a == "d") && i + 1 < argv.Length) dir = argv[++i];
             }
 
@@ -466,7 +476,7 @@ namespace IdleMasterSetup
                     if (uninstall) Uninstall(say, true);
                     else Install(dir != null ? dir
                             : (InstalledDir() ?? RunningCopyDir() ?? DefaultDir),
-                                 false, false, false, say);
+                                 desktop, false, false, say);
                     return 0;
                 }
                 catch (Exception ex)
@@ -520,6 +530,7 @@ namespace IdleMasterSetup
             BackColor = Bg;
             ForeColor = Fg;
             Font = new Font("Segoe UI", 9f);
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
             Label title = new Label();
             title.Text = "IDLE MASTER";

@@ -72,6 +72,7 @@
     <a href="#asking">Being asked first</a>
     <a href="#windows">The windows</a>
     <a href="#cleanup">Disk cleanup</a>
+    <a href="#backup">Backup kit</a>
     <b>Reference</b>
     <a href="#config">idlemaster.ini</a>
     <a href="#settings">Every setting</a>
@@ -92,7 +93,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.5.0. If you only read one section, make it
+      Written against v0.6.0. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -101,7 +102,7 @@
       <h2>Install <a class="anchor" href="#install">#</a></h2>
       <p>Download <code>IdleMasterSetup.exe</code> from
         <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a> and run it.
-        One file, about 120 KB, with the app carried inside it as an embedded resource.</p>
+        One file, about 330 KB, with the app carried inside it as an embedded resource.</p>
 
       <p>It installs to <code>%LOCALAPPDATA%\Programs\IdleMaster</code> — your own profile, so
         <strong>installing needs no administrator</strong>. The app elevates itself when it runs,
@@ -115,6 +116,7 @@
           <span class="t">IdleMasterSetup.exe</span></div>
 <pre>IdleMasterSetup.exe --silent                        <span class="d">install or update, no window</span>
 IdleMasterSetup.exe --silent --dir D:\Apps\IdleMaster <span class="d">somewhere else</span>
+IdleMasterSetup.exe --silent --desktop              <span class="d">...and a desktop shortcut too</span>
 IdleMasterSetup.exe --uninstall                     <span class="d">remove it, keep your config</span></pre>
       </div>
 
@@ -362,6 +364,45 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         deletes nothing, ever.</p>
     </section>
 
+    <!-- ------------------------------------------------------------- backup -->
+    <section id="backup">
+      <h2>Backup kit <a class="anchor" href="#backup">#</a></h2>
+      <p>For the day you reinstall Windows. <strong>Backup kit</strong> (main window, tray menu)
+        opens a window with two lists and a few switches, and writes <strong>one zip</strong> that
+        can put a fresh install back the way this one is.</p>
+      <ul>
+        <li><strong>Apps</strong> — it asks winget what is installed. Everything with a winget or
+          Store package is listed with its id and pre-ticked; things Windows ships (Edge, WebView2,
+          the VC++ runtimes) start unticked; things winget cannot reinstall are listed greyed, so
+          you at least know what to fetch by hand.</li>
+        <li><strong>Files and folders</strong> — Documents, Desktop, Pictures and <code>.ssh</code>
+          start ticked; Downloads, Videos and Music are listed but off (they are usually the big
+          ones). <em>Add folder</em> / <em>Add file</em> take anything else. Sizes are counted in
+          the background; junctions and symlinks are skipped so nothing loops.</li>
+        <li><strong>On the new machine, also:</strong> install Idle Master with this
+          <code>idlemaster.ini</code>; run <a href="https://github.com/zoicware/RemoveWindowsAI">zoicware/RemoveWindowsAI</a>
+          (Copilot, Recall, the lot — non-interactive, all options); apply a
+          <a href="https://christitus.com/win">Chris Titus WinUtil</a> preset without clicking
+          (Standard, Minimal or Advanced); and leave WinUtil open at the end for anything more you
+          want from it.</li>
+      </ul>
+      <p>The zip holds <code>IdleMasterRebuild.exe</code>, a plain-text <code>rebuild.ini</code>
+        with everything you picked (edit it if you like), an <code>apps.json</code> in
+        <code>winget import</code> format, <code>files\</code>, your <code>idlemaster.ini</code>,
+        and — when the app finds its own installer next to it — <code>IdleMasterSetup.exe</code>
+        of the same version, so the rebuild works offline apart from the two scripts. Nothing on
+        this machine is changed by building a kit.</p>
+      <p>On the fresh Windows: extract the <em>whole</em> zip, run
+        <code>IdleMasterRebuild.exe</code> (it asks for administrator), tick, press
+        <em>Rebuild</em>, read the log. Files go back where they were — the old profile path is
+        remapped to the new account, so a different user name is fine — or into
+        <code>Desktop\Restored files</code> if you prefer; existing files are left alone unless you
+        say otherwise. Apps go through <code>winget install</code> one at a time, so one failure
+        costs one app. If the kit carries no installer, the Idle Master step downloads the latest
+        release. <code>IdleMasterRebuild.exe --auto</code> starts with whatever the ini says
+        ticked and no click.</p>
+    </section>
+
     <!-- ------------------------------------------------------------- config -->
     <section id="config">
       <h2>idlemaster.ini <a class="anchor" href="#config">#</a></h2>
@@ -517,7 +558,7 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
         <table class="tbl">
           <thead><tr><th>File</th><th>What it is</th></tr></thead>
           <tbody>
-            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~50 KB, no dependencies.</td></tr>
+            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~280 KB, no dependencies; carries the rebuild exe and its icon inside.</td></tr>
             <tr><td class="n">idlemaster.ini</td><td class="wrap-ok">The lists and settings. Written on first run, never overwritten by an update.</td></tr>
             <tr><td class="n">idlemaster.log</td><td class="wrap-ok">Append-only record, written only when something actually happens.</td></tr>
             <tr><td class="n">idlemaster.state</td><td class="wrap-ok">Written by boost and idle, consumed by restore. The undo list.</td></tr>
@@ -526,9 +567,11 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
       </div>
       <p>In the repository: <code>src/IdleMaster.cs</code> is the engine, config, sentry, updater
         and CLI entry point; <code>src/Ui.cs</code> is every window; <code>src/Cleanup.cs</code>
-        is the disk scanner; <code>src/Theme.cs</code> is the palette;
-        <code>src/Setup.cs</code> is the installer, which carries the app as an embedded
-        resource.</p>
+        is the disk scanner; <code>src/Backup.cs</code> is the backup kit (inventory, zip
+        writer, window); <code>src/Rebuild.cs</code> is the standalone exe that ships inside a
+        kit; <code>src/Theme.cs</code> is the palette; <code>src/Setup.cs</code> is the installer,
+        which carries the app as an embedded resource. <code>src/idlemaster.ico</code> is the
+        icon, drawn by <code>make-icon.ps1</code>.</p>
     </section>
 
     <!-- ----------------------------------------------------------- recovery -->

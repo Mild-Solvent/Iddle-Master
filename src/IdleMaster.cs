@@ -28,8 +28,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.5.0.0")]
-[assembly: AssemblyFileVersion("0.5.0.0")]
+[assembly: AssemblyVersion("0.6.0.0")]
+[assembly: AssemblyFileVersion("0.6.0.0")]
 
 namespace IdleMaster
 {
@@ -2198,6 +2198,30 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public static string Version
         {
             get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); }
+        }
+
+        // The mark, at every size, from the .ico build.ps1 puts inside the exe.
+        // Windows picks the frame it wants for a title bar or a tray slot; the
+        // Shield fallback is what it drew before there was an icon at all.
+        private static Icon icon;
+
+        public static Icon Icon
+        {
+            get
+            {
+                if (icon != null) return icon;
+                try
+                {
+                    using (Stream s = Assembly.GetExecutingAssembly()
+                        .GetManifestResourceStream("idlemaster.ico"))
+                    {
+                        if (s != null) icon = new Icon(s);
+                    }
+                }
+                catch (Exception) { }
+                if (icon == null) icon = SystemIcons.Shield;
+                return icon;
+            }
         }
 
         private static string LogPath { get { return Path.Combine(Dir, "idlemaster.log"); } }

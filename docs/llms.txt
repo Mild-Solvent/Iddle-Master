@@ -1,6 +1,6 @@
 # Idle Master
 
-> A 50 KB Windows utility that frees 1.5-2 GB of RAM by closing the background
+> A small Windows utility that frees 1.5-2 GB of RAM by closing the background
 > updaters, launcher services and tray webviews nobody opened on purpose, then
 > keeps them from respawning. Services are stopped, never disabled, so a reboot
 > undoes everything.
@@ -82,6 +82,17 @@ Absolute idle closes `explorer.exe`, which removes the taskbar and wallpaper. Th
 recovery is Ctrl+Shift+Esc, File, Run new task, IdleMaster.exe, Restore desktop -
 Task Manager is hosted by winlogon so it works with no shell running. Setting
 `KillExplorer=0` disables this behaviour.
+
+## Backup kit
+
+The **Backup kit** window writes one zip for reinstalling Windows: the installed
+apps you tick (reinstalled through winget, one at a time), the files and folders
+you tick (copied back where they were, old profile path remapped to the new
+account), Idle Master with your idlemaster.ini, and optionally two well-known
+scripts run on the new machine - zoicware/RemoveWindowsAI (Copilot, Recall,
+non-interactive) and Chris Titus WinUtil (a preset applied headless, then left
+open). The zip contains IdleMasterRebuild.exe, a plain-text rebuild.ini,
+apps.json in winget-import format, and files\. Building a kit changes nothing.
 
 ## Install and use
 
