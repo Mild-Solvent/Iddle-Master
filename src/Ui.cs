@@ -307,7 +307,9 @@ namespace IdleMaster
         private readonly List<string> values = new List<string>();
         public readonly List<string> Picked = new List<string>();
 
-        public PickForm(string title, bool services)
+        public PickForm(string title, bool services) : this(title, services ? "svc" : "proc") { }
+
+        public PickForm(string title, string kind)
         {
             Theme.Form(this);
             Text = title;
@@ -322,7 +324,9 @@ namespace IdleMaster
             Theme.Input_(box);
             Controls.Add(box);
 
-            if (services) FillServices(); else FillProcesses();
+            if (kind == "svc") FillServices();
+            else if (kind == "wifi") FillWifi();
+            else FillProcesses();
 
             Button ok = Theme.Action("Add selected");
             ok.SetBounds(316, 444, 105, 30);
@@ -353,6 +357,40 @@ namespace IdleMaster
             }
         }
 
+        // Saved Wi-Fi profiles; the ones in the air right now first, by signal.
+        private void FillWifi()
+        {
+            Wlan.Interface w = Wlan.First();
+            if (w == null)
+            {
+                box.Items.Add("(no Wi-Fi adapter found - or the WLAN service is not running)");
+                box.Enabled = false;
+                return;
+            }
+            List<string> profiles = Wlan.Profiles(w.Guid);
+            Dictionary<string, int> air = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (Wlan.Network n in Wlan.Visible(w.Guid, false))
+            {
+                string name = n.Profile.Length > 0 ? n.Profile : n.Ssid;
+                if (name.Length == 0) continue;
+                if (!air.ContainsKey(name) || air[name] < n.Signal) air[name] = n.Signal;
+            }
+            profiles.Sort(delegate(string a, string b)
+            {
+                int sa = air.ContainsKey(a) ? air[a] : -1, sb = air.ContainsKey(b) ? air[b] : -1;
+                if (sa != sb) return sb.CompareTo(sa);
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+            });
+            foreach (string p in profiles)
+            {
+                values.Add(p);
+                box.Items.Add(air.ContainsKey(p)
+                    ? string.Format(CultureInfo.InvariantCulture, "* {0,-40} in range, signal {1}%", p, air[p])
+                    : "  " + p);
+            }
+            if (profiles.Count == 0) box.Items.Add("(no saved Wi-Fi profiles - connect to a network once by hand first)");
+        }
+
         private void FillServices()
         {
             List<ServiceController> all = new List<ServiceController>(ServiceController.GetServices());
@@ -381,14 +419,17 @@ namespace IdleMaster
     internal sealed class ListPane : Panel
     {
         private readonly string section;
-        private readonly bool services;
+        private readonly string kind;       // "proc" | "svc" | "wifi" - what "Add from machine" lists
         private readonly CheckedListBox box = new CheckedListBox();
         private readonly List<IniFile.Entry> before;
 
         public ListPane(IniFile ini, string sectionName, string caption, bool isServices)
+            : this(ini, sectionName, caption, isServices ? "svc" : "proc") { }
+
+        public ListPane(IniFile ini, string sectionName, string caption, string listKind)
         {
             section = sectionName;
-            services = isServices;
+            kind = listKind;
             before = ini.Section(section);
 
             BackColor = Theme.Panel;
@@ -398,7 +439,9 @@ namespace IdleMaster
             Size = new Size(366, 372);
 
             Label head = Theme.Caption(caption);
-            head.SetBounds(6, 6, 340, 18);
+            head.SetBounds(6, 6, 354, 18);
+            head.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            head.AutoEllipsis = true;
             Controls.Add(head);
 
             box.SetBounds(6, 28, 354, 300);
@@ -410,7 +453,7 @@ namespace IdleMaster
 
             foreach (IniFile.Entry e in before) box.Items.Add(e.Text, e.Enabled);
 
-            Button add = Btn("Add from machine", 6, 130);
+            Button add = Btn(kind == "wifi" ? "Pick a saved network" : "Add from machine", 6, 130);
             add.Click += delegate { Pick(); };
 
             Button typed = Btn("Type one", 142, 88);
@@ -435,7 +478,8 @@ namespace IdleMaster
 
         private void Pick()
         {
-            using (PickForm f = new PickForm(services ? "Running services" : "Running processes", services))
+            string title = kind == "svc" ? "Running services" : kind == "wifi" ? "Saved Wi-Fi networks" : "Running processes";
+            using (PickForm f = new PickForm(title, kind))
             {
                 if (f.ShowDialog(this) != DialogResult.OK) return;
                 foreach (string v in f.Picked)
@@ -459,7 +503,7 @@ namespace IdleMaster
                 f.MinimizeBox = f.MaximizeBox = false;
 
                 Label l = new Label();
-                l.Text = services ? "Service name:" : "Process name ('*' allowed):";
+                l.Text = kind == "svc" ? "Service name:" : kind == "wifi" ? "Wi-Fi profile name ('*' allowed):" : "Process name ('*' allowed):";
                 l.SetBounds(12, 10, 300, 18);
                 f.Controls.Add(l);
 
@@ -533,6 +577,9 @@ namespace IdleMaster
             new string[] { "TrimWorkingSets",      "Squeeze the working set of every surviving process" },
             new string[] { "ClearStandbyList",     "Purge the standby (cached) list" },
             new string[] { "CloseBrowsersInBoost", "Boost closes browsers too" },
+            new string[] { "RemoteGuard",          "Remote guard - keep the link, Tailscale and Sunshine up; fix and reconnect when they drop" },
+            new string[] { "RemoteGuardWifi",      "...including reconnecting Wi-Fi to a known network on its own" },
+            new string[] { "RemoteGuardKeepWifiAwake", "...and stop Windows powering the Wi-Fi adapter down to save energy" },
         };
 
         // key, label, min, max, default
@@ -552,11 +599,13 @@ namespace IdleMaster
             new string[] { "UpdateCheckHours",     "Look for a newer release every (hours, 0 = only by hand)", "0", "720", "6" },
             new string[] { "CleanupInstallerDays", "Suggest Downloads installers older than (days)",  "7",  "3650",   "90" },
             new string[] { "CleanupBigDirMinMb",   "Big-folder suggestions start at (MB)",            "50", "999999", "500" },
+            new string[] { "RemoteGuardSeconds",   "Remote guard checks the connection every (seconds)", "15", "3600", "60" },
         };
 
         // How the Numbers table splits into headings in the advanced window.
         public const int SentryCount = 8;
         public const int AskCount = 4;
+        public const int CleanupCount = 2;
 
         // key, label, choices (value|label)
         public static readonly string[] TimeoutAction = new string[]
@@ -633,7 +682,7 @@ namespace IdleMaster
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = MaximizeBox = false;
-            ClientSize = new Size(460, 424);
+            ClientSize = new Size(460, 472);
 
             int y = 16;
             y = Flag("Sentry", "Keep hunting after a boost",
@@ -642,6 +691,8 @@ namespace IdleMaster
                 "A toast with the app's icon and four answers; no answer = the choice below.", y);
             y = Flag("Tray", "Keep running in the tray",
                 "Closing the window hides Idle Master instead of quitting it.", y);
+            y = Flag("RemoteGuard", "Remote guard - never lose the way back in",
+                "Checks Wi-Fi, internet, Tailscale and Sunshine; reconnects what drops.", y);
 
             y += 8;
             y = Number("AskTimeoutSeconds", y);
@@ -657,17 +708,17 @@ namespace IdleMaster
             y = Number("TrimWhenFreeBelowMb", y);
 
             Button advanced = Theme.Quiet("Advanced settings...");
-            advanced.SetBounds(20, 376, 150, 30);
+            advanced.SetBounds(20, 424, 150, 30);
             advanced.Click += delegate { OpenAdvanced(); };
             Controls.Add(advanced);
 
             Button save = Theme.Action("Save");
-            save.SetBounds(252, 376, 90, 30);
+            save.SetBounds(252, 424, 90, 30);
             save.Click += delegate { Persist(); };
             Controls.Add(save);
 
             Button cancel = Theme.Quiet("Cancel");
-            cancel.SetBounds(350, 376, 90, 30);
+            cancel.SetBounds(350, 424, 90, 30);
             cancel.Click += delegate { Close(); };
             Controls.Add(cancel);
             CancelButton = cancel;
@@ -767,7 +818,7 @@ namespace IdleMaster
             tabs.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             tabs.SizeMode = TabSizeMode.Fixed;
-            tabs.ItemSize = new Size(112, 28);
+            tabs.ItemSize = new Size(104, 28);     // seven tabs have to fit in 754 px
             tabs.DrawItem += DrawTab;
             Controls.Add(tabs);
 
@@ -782,6 +833,8 @@ namespace IdleMaster
                 "Relaunched by Restore desktop  (full path, optional |arguments)"));
             tabs.TabPages.Add(Single("Cleanup", "cleanup.protect",
                 "Paths disk cleanup must never touch  (full path, '*' works)"));
+            tabs.TabPages.Add(Single("Remote guard", "remote.wifi",
+                "Wi-Fi networks the remote guard reconnects to, best first  (saved profiles; empty = any it knows)", "wifi"));
 
             Label hint = Theme.Hint("Unchecked entries stay in the file, commented out. Nothing here can "
                 + "override 'Never touch'.");
@@ -859,7 +912,13 @@ namespace IdleMaster
 
             y += 8;
             y = Header(page, "Disk cleanup", y);
-            for (int i = SettingSpec.SentryCount + SettingSpec.AskCount; i < SettingSpec.Numbers.Length; i++)
+            int cleanupFrom = SettingSpec.SentryCount + SettingSpec.AskCount;
+            for (int i = cleanupFrom; i < cleanupFrom + SettingSpec.CleanupCount; i++)
+                y = NumberRow(page, SettingSpec.Numbers[i], y);
+
+            y += 8;
+            y = Header(page, "Remote guard", y);
+            for (int i = cleanupFrom + SettingSpec.CleanupCount; i < SettingSpec.Numbers.Length; i++)
                 y = NumberRow(page, SettingSpec.Numbers[i], y);
 
             return page;
@@ -919,10 +978,15 @@ namespace IdleMaster
 
         private TabPage Single(string title, string section, string caption)
         {
+            return Single(title, section, caption, "proc");
+        }
+
+        private TabPage Single(string title, string section, string caption, string kind)
+        {
             TabPage page = new TabPage(title);
             page.BackColor = Theme.Panel;
 
-            ListPane pane = new ListPane(ini, section, caption, false);
+            ListPane pane = new ListPane(ini, section, caption, kind);
             page.Controls.Add(pane);
             page.Resize += delegate
             {
@@ -1890,13 +1954,17 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry;
-        private readonly CheckBox chkSentry;
-        private readonly Label sentryLabel;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnRemote;
+        private readonly CheckBox chkSentry, chkRemote;
+        private readonly Label sentryLabel, remoteLabel;
+        private ToolTip remoteTip;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
         private readonly System.Windows.Forms.Timer updateTimer;
         private Sentry sentry;
+        private RemoteGuard guard;
+        private bool checkingByHand;
+        private DateTime nextGuardRetry = DateTime.MinValue;
         private NotifyIcon tray;
         private ToolStripMenuItem trayUpdate;
         private Updater.Release pending;        // a newer release we know about
@@ -1915,8 +1983,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 742);
-            MinimumSize = new Size(560, 556);
+            Size = new Size(700, 776);
+            MinimumSize = new Size(560, 590);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -1990,6 +2058,31 @@ namespace IdleMaster
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
 
+            // The remote guard's row: the same shape as the sentry's, one line
+            // below it. Link, internet, Tailscale, Sunshine - and the last check.
+            chkRemote = new CheckBox();
+            chkRemote.Text = "Remote guard";
+            chkRemote.Checked = cfg.RemoteGuard;
+            chkRemote.SetBounds(24, 452, 106, 22);
+            chkRemote.ForeColor = Theme.Fg;
+            chkRemote.FlatStyle = FlatStyle.Flat;
+            chkRemote.Click += delegate { ToggleRemote(); };
+            Controls.Add(chkRemote);
+
+            remoteLabel = Theme.Hint("");
+            remoteLabel.SetBounds(132, 454, 372, 20);
+            remoteLabel.AutoEllipsis = true;
+            remoteLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(remoteLabel);
+            remoteTip = new ToolTip();
+            remoteTip.AutoPopDelay = 15000;
+
+            btnRemote = Theme.Quiet("Check connection");
+            btnRemote.SetBounds(510, 448, 152, 30);
+            btnRemote.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRemote.Click += delegate { CheckConnection(); };
+            Controls.Add(btnRemote);
+
             logBox = new TextBox();
             logBox.Multiline = true;
             logBox.ReadOnly = true;
@@ -1998,13 +2091,13 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 448, 640, 212);
+            logBox.SetBounds(22, 482, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 2000;
-            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); };
+            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); UpdateRemote(); };
             timer.Start();
             UpdateMemory();
             UpdateSentry();
@@ -2030,7 +2123,156 @@ namespace IdleMaster
             if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry && !Sentry.IsRunningSomewhere())
                 StartSentry(st.Mode);
 
+            // The guard does not wait for a mode: the connection matters from
+            // the moment the app is up.
+            if (cfg.RemoteGuard) StartGuard();
+            UpdateRemote();
+
             FormClosing += OnClosing;
+        }
+
+        // --guard: the guard alone, whatever the ini says about it.
+        public void ForceGuard()
+        {
+            chkRemote.Checked = true;
+            StartGuard();
+            UpdateRemote();
+        }
+
+        private void StartGuard()
+        {
+            if (guard != null && guard.Alive) return;
+            guard = new RemoteGuard(cfg, engine, AppendLog);
+            guard.Start();          // a refusal is kept in guard.Refused for the label
+        }
+
+        private void StopGuard()
+        {
+            if (guard == null) return;
+            if (guard.Alive) guard.Stop();
+            guard = null;
+        }
+
+        // The checkbox is the setting: it is written to the ini, because "off"
+        // from the keyboard should still be off after the next reboot.
+        private void ToggleRemote()
+        {
+            bool on = chkRemote.Checked;
+            cfg.RemoteGuard = on;
+            try
+            {
+                IniFile ini = new IniFile();
+                ini.SetSetting("RemoteGuard", on ? "1" : "0");
+                ini.Save();
+            }
+            catch (Exception ex) { AppendLog("! could not save RemoteGuard to the ini: " + ex.Message.Split('\n')[0]); }
+            if (on) StartGuard(); else StopGuard();
+            UpdateRemote();
+        }
+
+        // "Check connection": the running guard looks now and says everything;
+        // without a guard, a one-off does the same from a worker thread.
+        private void CheckConnection()
+        {
+            if (guard != null && guard.Alive)
+            {
+                guard.CheckNow();
+                return;
+            }
+            if (checkingByHand) return;
+            checkingByHand = true;
+            btnRemote.Enabled = false;
+            RemoteGuard once = new RemoteGuard(cfg, engine, AppendLog);
+            Thread t = new Thread(delegate()
+            {
+                try { once.Check(true, true); }
+                catch (Exception ex) { AppendLog("! connection check failed: " + ex.Message.Split('\n')[0]); }
+                finally
+                {
+                    try
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            checkingByHand = false;
+                            btnRemote.Enabled = true;
+                            if (once.Last != null)
+                            {
+                                remoteLabel.Text = (once.Last.Healthy ? "checked - " : "checked - trouble: ") + once.Last.Summary()
+                                    + " - " + DateTime.Now.ToString("HH:mm") + " (guard is off)";
+                                remoteLabel.ForeColor = once.Last.Healthy ? Theme.Dim : Theme.Warn;
+                            }
+                        });
+                    }
+                    catch (Exception) { }
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void UpdateRemote()
+        {
+            bool on = guard != null && guard.Alive;
+
+            // Wanted but not running - another copy held the slot, or the thread
+            // died. Try again every half minute; when the tray copy exits, this
+            // window takes the guard over without being asked.
+            if (!on && chkRemote.Checked && !checkingByHand && DateTime.Now >= nextGuardRetry)
+            {
+                nextGuardRetry = DateTime.Now.AddSeconds(30);
+                if (!RemoteGuard.IsRunningSomewhere())
+                {
+                    guard = null;
+                    StartGuard();
+                    on = guard != null && guard.Alive;
+                }
+            }
+
+            if (on)
+            {
+                NetReport r = guard.Last;
+                string when = guard.LastCheck == DateTime.MinValue ? "" : " - " + guard.LastCheck.ToString("HH:mm");
+                if (r == null)
+                {
+                    remoteLabel.Text = "guarding - first check in a moment";
+                    remoteLabel.ForeColor = Theme.Accent;
+                }
+                else if (r.Healthy)
+                {
+                    remoteLabel.Text = "OK - " + r.Summary() + when
+                        + (guard.FixCount > 0 ? " (" + guard.FixCount + " fix" + (guard.FixCount == 1 ? "" : "es") + " so far)" : "");
+                    remoteLabel.ForeColor = Theme.Accent;
+                }
+                else
+                {
+                    remoteLabel.Text = (guard.Busy ? "fixing - " : "trouble - ") + r.Summary()
+                        + (guard.Attempt > 1 ? " (try " + guard.Attempt + ")" : "") + when;
+                    remoteLabel.ForeColor = Theme.Warn;
+                }
+            }
+            else if (checkingByHand)
+            {
+                remoteLabel.Text = "checking the connection...";
+                remoteLabel.ForeColor = Theme.Dim;
+            }
+            else if (chkRemote.Checked && guard != null && guard.Refused.Length > 0)
+            {
+                remoteLabel.Text = guard.Refused;
+                remoteLabel.ForeColor = Theme.Dim;
+            }
+            else if (chkRemote.Checked)
+            {
+                remoteLabel.Text = "off - the guard could not start (see the log)";
+                remoteLabel.ForeColor = Theme.Dim;
+            }
+            else if (remoteLabel.Text.StartsWith("checked - ")) { }   // keep the one-off result on screen
+            else
+            {
+                remoteLabel.Text = "off - nothing watches the connection";
+                remoteLabel.ForeColor = Theme.Dim;
+            }
+            if (remoteTip != null && remoteTip.GetToolTip(remoteLabel) != remoteLabel.Text)
+                remoteTip.SetToolTip(remoteLabel, remoteLabel.Text);
         }
 
         // One live task-manager window, reused if it is already open.
@@ -2146,6 +2388,7 @@ namespace IdleMaster
                 chkSentry.Checked = false;
                 StopSentry();
             });
+            menu.Items.Add("Check connection now", null, delegate { CheckConnection(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Disk cleanup...", null, delegate { ShowWindow(); OpenCleanup(); });
             menu.Items.Add("Backup kit...", null, delegate { ShowWindow(); OpenBackup(); });
@@ -2174,20 +2417,28 @@ namespace IdleMaster
         private void OnClosing(object sender, FormClosingEventArgs e)
         {
             bool hunting = sentry != null && sentry.Alive;
-            if (!reallyExit && cfg.Tray && hunting && e.CloseReason == CloseReason.UserClosing)
+            bool guarding = guard != null && guard.Alive;
+            if (!reallyExit && cfg.Tray && (hunting || guarding) && e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
                 Hide();
                 try
                 {
-                    tray.ShowBalloonTip(4000, "Still hunting",
-                        "Idle Master is holding " + sentry.Mode.ToUpperInvariant()
-                        + " in the tray. Right-click the icon to stop it.", ToolTipIcon.Info);
+                    if (hunting)
+                        tray.ShowBalloonTip(4000, "Still hunting",
+                            "Idle Master is holding " + sentry.Mode.ToUpperInvariant()
+                            + " in the tray" + (guarding ? " and guarding the connection" : "")
+                            + ". Right-click the icon to stop it.", ToolTipIcon.Info);
+                    else
+                        tray.ShowBalloonTip(4000, "Still guarding",
+                            "Idle Master is keeping the connection up from the tray. "
+                            + "Exit from the tray menu when you mean it.", ToolTipIcon.Info);
                 }
                 catch (Exception) { }
                 return;
             }
             StopSentry(false);
+            StopGuard();
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
         }
 
@@ -2257,8 +2508,10 @@ namespace IdleMaster
             {
                 sentry = null;
                 // --unwatch (or Restore from elsewhere) killed the watch, and a tray
-                // app with nothing to do is just a stray icon.
-                if (watchMode) { reallyExit = true; Close(); return; }
+                // app with nothing to do is just a stray icon. One that is still
+                // guarding the connection has something to do.
+                bool guarding = guard != null && guard.Alive;
+                if (watchMode && !guarding) { reallyExit = true; Close(); return; }
             }
 
             if (on)
@@ -2451,6 +2704,9 @@ namespace IdleMaster
                 if (sentry != null && sentry.Alive)
                     AppendLog("The sentry is using the new lists from its next sweep.");
                 if (cfg.Tray && tray == null) BuildTray();
+                chkRemote.Checked = cfg.RemoteGuard;
+                if (cfg.RemoteGuard) StartGuard(); else StopGuard();
+                UpdateRemote();
                 if (eatersWin != null && !eatersWin.IsDisposed) eatersWin.RefreshNow();
             }
             catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }

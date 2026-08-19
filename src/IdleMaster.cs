@@ -4,6 +4,7 @@
 //   ABSOLUTE IDLE  : strip down to Windows vitals + Sunshine + Tailscale.
 //   RESTORE        : undo whatever the last mode did.
 //   SENTRY         : after a mode runs, keep hunting so the RAM stays clean.
+//   REMOTE GUARD   : keep the link, Tailscale and Sunshine up, always (Remote.cs).
 //
 // Built against the in-box .NET Framework compiler, so this is C# 5:
 // no string interpolation, no ?., no nameof, no expression-bodied members.
@@ -28,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.6.2.0")]
-[assembly: AssemblyFileVersion("0.6.2.0")]
+[assembly: AssemblyVersion("0.7.0.0")]
+[assembly: AssemblyFileVersion("0.7.0.0")]
 
 namespace IdleMaster
 {
@@ -272,6 +273,12 @@ namespace IdleMaster
         public bool Tray = true;                    // tray icon; closing the window hides to it
         public int UpdateCheckHours = 6;            // ask GitHub for a newer release this often. 0 = only by hand
 
+        // --- remote guard: the connection itself, independent of the sentry
+        public bool RemoteGuard = true;             // watch link + internet + Tailscale + Sunshine, fix what drops
+        public bool RemoteGuardWifi = true;         // ...including reconnecting Wi-Fi to a known network
+        public bool RemoteGuardKeepWifiAwake = true;// stop Windows powering the Wi-Fi adapter down
+        public int RemoteGuardSeconds = 60;         // how often it checks
+
         // --- disk cleanup: the scanner only suggests, these tune the suggestions
         public int CleanupInstallerDays = 90;       // Downloads installers older than this
         public int CleanupBigDirMinMb = 500;        // big-folder suggestions start here
@@ -284,6 +291,7 @@ namespace IdleMaster
         public readonly List<string> IdleServices = new List<string>();
         public readonly List<string> RestoreLaunch = new List<string>();
         public readonly List<string> CleanupProtect = new List<string>();
+        public readonly List<string> RemoteWifi = new List<string>();     // preferred Wi-Fi profiles, in order
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
 
@@ -339,6 +347,10 @@ namespace IdleMaster
                         }
                         case "tray": c.Tray = b; break;
                         case "updatecheckhours": c.UpdateCheckHours = Int(v, c.UpdateCheckHours, 0); break;
+                        case "remoteguard": c.RemoteGuard = b; break;
+                        case "remoteguardwifi": c.RemoteGuardWifi = b; break;
+                        case "remoteguardkeepwifiawake": c.RemoteGuardKeepWifiAwake = b; break;
+                        case "remoteguardseconds": c.RemoteGuardSeconds = Int(v, c.RemoteGuardSeconds, 15); break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
                         case "cleanupinstallerdays": c.CleanupInstallerDays = Int(v, c.CleanupInstallerDays, 7); break;
@@ -358,6 +370,8 @@ namespace IdleMaster
                     case "restore.launch": c.RestoreLaunch.Add(line); break;
                     // Paths, not process names - StripExe must not touch these.
                     case "cleanup.protect": c.CleanupProtect.Add(line); break;
+                    // Wi-Fi profile names, verbatim.
+                    case "remote.wifi": c.RemoteWifi.Add(line); break;
                 }
             }
             return c;
@@ -394,6 +408,9 @@ namespace IdleMaster
             AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
             UpdateCheckHours = o.UpdateCheckHours;
+            RemoteGuard = o.RemoteGuard; RemoteGuardWifi = o.RemoteGuardWifi;
+            RemoteGuardKeepWifiAwake = o.RemoteGuardKeepWifiAwake;
+            RemoteGuardSeconds = o.RemoteGuardSeconds;
             CleanupInstallerDays = o.CleanupInstallerDays;
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
 
@@ -402,6 +419,7 @@ namespace IdleMaster
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
             Swap(CleanupProtect, o.CleanupProtect);
+            Swap(RemoteWifi, o.RemoteWifi);
         }
 
         private static void Swap(List<string> mine, List<string> theirs)
@@ -535,6 +553,24 @@ Tray=1
 # one click downloads it, installs it in place and brings Idle Master back.
 # Your idlemaster.ini is never touched. 0 = only when you press the button.
 UpdateCheckHours=6
+
+# --- REMOTE GUARD -----------------------------------------------------------
+# The sentry guards the RAM; this guards the way back in. Whenever Idle Master
+# is running it checks, every RemoteGuardSeconds, that a network link is up,
+# that the internet answers, that Tailscale is Running with an address, and
+# that Sunshine is listening - and fixes what is not: restarts the services,
+# turns the Wi-Fi radio back on, reconnects to a known network, renews DHCP,
+# flushes DNS, bounces the adapter, runs 'tailscale up'. Quiet while all is
+# well; every fix is one line in the log. --remote does one check by hand.
+RemoteGuard=1
+# Reconnect Wi-Fi on its own. [remote.wifi] below says which networks first;
+# with it empty, any network this machine has a saved profile for will do.
+RemoteGuardWifi=1
+# Keep Windows from powering the Wi-Fi adapter down to save energy - the usual
+# reason a headless laptop drops off the network at 3am. Best effort.
+RemoteGuardKeepWifiAwake=1
+# Seconds between checks. Each check is a few TCP connects; 60 is cheap.
+RemoteGuardSeconds=60
 
 # --- DISK CLEANUP -----------------------------------------------------------
 # The cleanup window only suggests. Nothing is deleted until you tick it and
@@ -798,6 +834,15 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 [cleanup.protect]
 #C:\Users\*\Documents
 #D:\backups
+
+# ---------------------------------------------------------------------------
+# Wi-Fi networks the remote guard should reconnect to, best first. Names of
+# SAVED profiles (the ones 'netsh wlan show profiles' lists) - the guard cannot
+# type a password. Empty = any saved network it can see, strongest first.
+# ---------------------------------------------------------------------------
+[remote.wifi]
+#HomeNet
+#HomeNet 5G
 ";
     }
 
@@ -1549,7 +1594,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return ok && sunshinePort && tailscaleUp;
         }
 
-        private bool EnsureService(string name, bool loud)
+        public bool EnsureService(string name, bool loud)
         {
             try
             {
@@ -1567,6 +1612,56 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             catch (Exception ex)
             {
                 log("   ! " + name + " check failed: " + ex.Message.Split('\n')[0]);
+                return false;
+            }
+        }
+
+        // Is the service installed at all? Asking a missing one for its status throws.
+        public static bool ServiceExists(string name)
+        {
+            try
+            {
+                ServiceController sc = new ServiceController(name);
+                ServiceControllerStatus s = sc.Status;
+                sc.Close();
+                return true;
+            }
+            catch (Exception) { return false; }
+        }
+
+        public static bool ServiceRunning(string name)
+        {
+            try
+            {
+                ServiceController sc = new ServiceController(name);
+                bool on = sc.Status == ServiceControllerStatus.Running;
+                sc.Close();
+                return on;
+            }
+            catch (Exception) { return false; }
+        }
+
+        // Stop + start, for a service that is running but no longer doing its job.
+        public bool RestartService(string name)
+        {
+            try
+            {
+                ServiceController sc = new ServiceController(name);
+                if (sc.Status != ServiceControllerStatus.Stopped && sc.CanStop)
+                {
+                    sc.Stop();
+                    sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+                }
+                sc.Refresh();
+                if (sc.Status == ServiceControllerStatus.Stopped) sc.Start();
+                sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                bool ok = sc.Status == ServiceControllerStatus.Running;
+                sc.Close();
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                log("   ! " + name + " restart failed: " + ex.Message.Split('\n')[0]);
                 return false;
             }
         }
@@ -2355,16 +2450,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public static int Main(string[] argv)
         {
             string mode = "";
-            bool watch = false;
+            bool watch = false, guardOnly = false;
             foreach (string a in argv)
             {
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "boost" || s == "idle" || s == "restore" || s == "report" || s == "help"
                     || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask"
-                    || s == "cleanup-report")
+                    || s == "cleanup-report" || s == "remote" || s == "guard")
                     mode = s;
                 else if (s == "watch" || s == "hunt")
                     watch = true;
+                if (s == "guard") guardOnly = true;
+                if (s == "installtask") mode = "installtask";   // "--installtask --guard": the task runs --guard
             }
             if (watch && mode == "") mode = "watch";
 
@@ -2399,6 +2496,24 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 case "restore": eng.RunRestore(); break;
                 case "report": eng.Report(); break;
                 case "cleanup-report": CleanupReport(cfg, logger); break;
+                case "remote": return RemoteCheck(cfg, eng, logger);
+                case "guard":
+                {
+                    // The remote guard alone, in the tray: no sentry, no window.
+                    if (RemoteGuard.IsRunningSomewhere())
+                    {
+                        Console.WriteLine("another Idle Master is already guarding the connection - nothing to do.");
+                        return 1;
+                    }
+                    Console.WriteLine("guarding the connection from the tray. Exit from the tray menu stops it.");
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    MainForm g = new MainForm(cfg);
+                    g.HideOnStart("");
+                    g.ForceGuard();
+                    Application.Run(g);
+                    return 0;
+                }
                 case "watch": break;          // no mode run, just take up the watch
                 case "unwatch":
                 case "stopwatch":
@@ -2406,15 +2521,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                         ? "sentry told to stand down."
                         : "no sentry is running.");
                     return 0;
-                case "installtask": return Task_(true);
-                case "removetask": return Task_(false);
+                case "installtask": return Task_(true, guardOnly);
+                case "removetask": return Task_(false, false);
                 default:
                     Console.WriteLine("IdleMaster.exe [--boost | --idle | --restore | --report]");
                     Console.WriteLine("  --watch           keep hunting after the mode, until --unwatch");
                     Console.WriteLine("  --unwatch         stop the sentry");
-                    Console.WriteLine("  --installtask     run the sentry at every logon (scheduled task)");
+                    Console.WriteLine("  --installtask     run the sentry (and the remote guard) at every logon (scheduled task)");
+                    Console.WriteLine("  --installtask --guard   ...or only the remote guard at logon");
                     Console.WriteLine("  --removetask      undo that");
                     Console.WriteLine("  --cleanup-report  scan the disk for junk and print what was found");
+                    Console.WriteLine("  --remote          check link + internet + Tailscale + Sunshine now, fix what is down");
+                    Console.WriteLine("  --guard           sit in the tray running only the remote guard");
                     Console.WriteLine("  no arguments = open the window");
                     return 0;
             }
@@ -2445,6 +2563,16 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 Application.Run(form);
             }
             return 0;
+        }
+
+        // One remote-guard check by hand: measure, fix what is down, print the
+        // picture. Exit 0 = everything up, 1 = something still is not - so a
+        // scheduled task or a script can tell.
+        private static int RemoteCheck(Config cfg, Engine eng, Action<string> log)
+        {
+            RemoteGuard g = new RemoteGuard(cfg, eng, log);
+            NetReport r = g.Check(true, true);
+            return r.Healthy ? 0 : 1;
         }
 
         // The console twin of the cleanup window: same scanner, same findings,
@@ -2493,14 +2621,14 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 + " of known junk. The window ('Disk cleanup') does the actual cleaning.");
         }
 
-        // Optional: a logon task so the watch survives a reboot. Nothing calls this
-        // on its own - you have to ask for it.
-        private static int Task_(bool install)
+        // Optional: a logon task so the watch - or just the guard - survives a
+        // reboot. Nothing calls this on its own - you have to ask for it.
+        private static int Task_(bool install, bool guardOnly)
         {
             string name = "IdleMaster Sentry";
             string args = install
                 ? "/Create /TN \"" + name + "\" /TR \"\\\"" + Application.ExecutablePath
-                  + "\\\" --watch\" /SC ONLOGON /RL HIGHEST /F"
+                  + "\\\" " + (guardOnly ? "--guard" : "--watch") + "\" /SC ONLOGON /RL HIGHEST /F"
                 : "/Delete /TN \"" + name + "\" /F";
             try
             {
@@ -2515,7 +2643,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 p.WaitForExit();
                 if (p.ExitCode == 0)
                     Console.WriteLine(install
-                        ? "Sentry will start at logon. Remove it with --removetask."
+                        ? (guardOnly ? "The remote guard will start at logon. Remove it with --removetask."
+                                     : "Sentry (and the remote guard) will start at logon. Remove it with --removetask.")
                         : "Logon task removed.");
                 return p.ExitCode;
             }

@@ -68,6 +68,17 @@ changes nothing.
   `[protect.services]`. Before finishing, and repeatedly in idle mode, the tool
   verifies the service is running, a port is listening and the adapter is up, and
   restarts it if it died. The machine cannot lock the user out.
+- **The connection itself is guarded.** A standing **remote guard** checks every
+  minute, whenever the app runs, that a network link is up, the internet answers,
+  Tailscale is running with an address, and Sunshine is listening - and repairs
+  the first thing that is wrong with an escalating ladder: restarts WLAN/DHCP/DNS
+  services, turns the Wi-Fi radio and auto-connect back on, reconnects Wi-Fi to a
+  known network (a preferred list, then any saved network in range), renews DHCP,
+  flushes DNS, bounces the adapter, restarts Tailscale or runs `tailscale up`,
+  restarts Sunshine. It never drops a link Tailscale is still up through, backs
+  off after six failed tries, and can also stop Windows powering the Wi-Fi
+  adapter down. `--remote` runs one check from a script; `--guard` runs only the
+  guard from the tray.
 - **Nothing is disabled.** Services are stopped only, so a reboot restores the
   machine with no further action.
 - **Every run is recorded** and can be undone with `--restore`.
@@ -114,7 +125,10 @@ IdleMaster.exe --restore     undo, and stop the sentry
 IdleMaster.exe --report      print what is eating RAM, change nothing
 IdleMaster.exe --boost --watch   boost, then keep hunting
 IdleMaster.exe --unwatch     stop the sentry
-IdleMaster.exe --installtask run the sentry at every logon
+IdleMaster.exe --remote      check link, internet, Tailscale, Sunshine; fix what is down
+IdleMaster.exe --guard       run only the remote guard, in the tray
+IdleMaster.exe --installtask run the sentry (and the guard) at every logon
+IdleMaster.exe --installtask --guard   only the remote guard at logon
 ```
 
 Builds with the .NET Framework compiler already present in Windows:
