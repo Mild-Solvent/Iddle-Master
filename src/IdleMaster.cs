@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.7.0.0")]
-[assembly: AssemblyFileVersion("0.7.0.0")]
+[assembly: AssemblyVersion("0.7.1.0")]
+[assembly: AssemblyFileVersion("0.7.1.0")]
 
 namespace IdleMaster
 {
@@ -277,6 +277,7 @@ namespace IdleMaster
         public bool RemoteGuard = true;             // watch link + internet + Tailscale + Sunshine, fix what drops
         public bool RemoteGuardWifi = true;         // ...including reconnecting Wi-Fi to a known network
         public bool RemoteGuardKeepWifiAwake = true;// stop Windows powering the Wi-Fi adapter down
+        public bool RemoteGuardScan = false;        // look at what is in range / the SSID - Windows asks for location once
         public int RemoteGuardSeconds = 60;         // how often it checks
 
         // --- disk cleanup: the scanner only suggests, these tune the suggestions
@@ -350,6 +351,7 @@ namespace IdleMaster
                         case "remoteguard": c.RemoteGuard = b; break;
                         case "remoteguardwifi": c.RemoteGuardWifi = b; break;
                         case "remoteguardkeepwifiawake": c.RemoteGuardKeepWifiAwake = b; break;
+                        case "remoteguardscan": c.RemoteGuardScan = b; break;
                         case "remoteguardseconds": c.RemoteGuardSeconds = Int(v, c.RemoteGuardSeconds, 15); break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
@@ -410,6 +412,7 @@ namespace IdleMaster
             UpdateCheckHours = o.UpdateCheckHours;
             RemoteGuard = o.RemoteGuard; RemoteGuardWifi = o.RemoteGuardWifi;
             RemoteGuardKeepWifiAwake = o.RemoteGuardKeepWifiAwake;
+            RemoteGuardScan = o.RemoteGuardScan;
             RemoteGuardSeconds = o.RemoteGuardSeconds;
             CleanupInstallerDays = o.CleanupInstallerDays;
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
@@ -569,6 +572,11 @@ RemoteGuardWifi=1
 # Keep Windows from powering the Wi-Fi adapter down to save energy - the usual
 # reason a headless laptop drops off the network at 3am. Best effort.
 RemoteGuardKeepWifiAwake=1
+# Let it scan for which saved networks are in range (and name the one it is on).
+# Windows counts that as LOCATION and asks you to allow it, once, for the app.
+# Off = it never asks: reconnects go by [remote.wifi] order, then Windows' own
+# saved order, which is almost always the same thing a little slower.
+RemoteGuardScan=0
 # Seconds between checks. Each check is a few TCP connects; 60 is cheap.
 RemoteGuardSeconds=60
 

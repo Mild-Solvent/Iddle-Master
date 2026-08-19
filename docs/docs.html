@@ -94,7 +94,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.7.0. If you only read one section, make it
+      Written against v0.7.1. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -346,7 +346,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         <table class="tbl">
           <thead><tr><th style="width:90px">It checks</th><th style="width:230px">Healthy means</th><th>If not, it</th></tr></thead>
           <tbody>
-            <tr><td class="n">link</td><td class="wrap-ok">a real adapter is up with a default gateway</td><td class="wrap-ok">restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; <strong>reconnects to a known network</strong> — <code>[remote.wifi]</code> first, then anything in range it has a saved profile for, strongest first; renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter</td></tr>
+            <tr><td class="n">link</td><td class="wrap-ok">a real adapter is up with a default gateway</td><td class="wrap-ok">restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; <strong>reconnects to a known network</strong> — <code>[remote.wifi]</code> first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter</td></tr>
             <tr><td class="n">internet</td><td class="wrap-ok"><code>controlplane.tailscale.com</code> answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online</td><td class="wrap-ok">flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter</td></tr>
             <tr><td class="n">Tailscale</td><td class="wrap-ok">service running, <code>BackendState: Running</code>, an address, adapter up</td><td class="wrap-ok">restarts the service; runs <code>tailscale up</code> if it was Stopped; a needed login is said loudly once — nothing can type that for you</td></tr>
             <tr><td class="n">Sunshine</td><td class="wrap-ok">service running and listening on its ports</td><td class="wrap-ok">restarts the service; up-but-deaf twice in a row gets restarted too</td></tr>
@@ -370,13 +370,18 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
 
       <h3>Wi-Fi</h3>
       <p>It uses the Windows WLAN API directly, not <code>netsh</code>, so it works in any
-        language and does not need the location permission <code>netsh wlan</code> started asking
-        for in 24H2. It can only join networks Windows already has a profile for — connect once
-        by hand and it can reconnect forever; it cannot type a password.
+        language. It can only join networks Windows already has a profile for — connect once by
+        hand and it can reconnect forever; it cannot type a password.
         <code>[remote.wifi]</code> says which networks to try first (saved profile names,
-        <code>*</code> works); leave it empty and any saved network in range will do, strongest
-        first. It is edited under <em>Settings › Advanced › Remote guard</em>, with a picker of
-        the saved networks that shows which are in range.</p>
+        <code>*</code> works); after those it tries every other saved profile. It is edited under
+        <em>Settings › Advanced › Remote guard</em>, with a picker of the saved networks.</p>
+      <p><b>It never asks for location.</b> Windows 11 counts a Wi-Fi scan — and even naming the
+        network you are on — as knowing where you are, and prompts you to allow it. By default
+        the guard does neither: reconnects go by <code>[remote.wifi]</code> order, then Windows'
+        own saved order, and the status line just says <em>Wi-Fi</em>. Set
+        <code>RemoteGuardScan=1</code> and it scans (in-range networks first, strongest first,
+        the name shown, the picker marks what is in range) — Windows asks for location
+        permission once, for Idle Master.</p>
       <p><code>RemoteGuardKeepWifiAwake</code> (on) also tells the power plan and the adapter not
         to switch the Wi-Fi off to save energy — the usual reason a headless laptop falls off the
         network at 3am. Best effort; silent when the driver has no such knob.</p>
@@ -591,6 +596,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">RemoteGuard</td><td class="n">1</td><td class="wrap-ok">Watch link, internet, Tailscale and Sunshine whenever Idle Master runs, and fix what drops. The checkbox in the window writes this.</td></tr>
             <tr><td class="n">RemoteGuardWifi</td><td class="n">1</td><td class="wrap-ok">…including reconnecting Wi-Fi on its own — <code>[remote.wifi]</code> first, then any saved network in range.</td></tr>
             <tr><td class="n">RemoteGuardKeepWifiAwake</td><td class="n">1</td><td class="wrap-ok">Tell the power plan and the adapter not to power the Wi-Fi down to save energy. Best effort.</td></tr>
+            <tr><td class="n">RemoteGuardScan</td><td class="n">0</td><td class="wrap-ok">Scan for which saved networks are in range and name the one you are on. Windows treats that as <em>location</em> and asks once. Off = never asks; reconnects go by list order.</td></tr>
             <tr><td class="n">RemoteGuardSeconds</td><td class="n">60</td><td class="wrap-ok">Seconds between checks. Each is a few TCP connects; 60 is cheap. Minimum 15.</td></tr>
           </tbody>
         </table>
@@ -612,7 +618,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">[idle.services]</td><td class="wrap-ok">Services absolute idle stops on top of the boost list.</td></tr>
             <tr><td class="n">[restore.launch]</td><td class="wrap-ok">Programs relaunched by Restore. Deliberately short — restore gives you a working machine back, not the bloat back. <code>path|arguments</code> per line.</td></tr>
             <tr><td class="n">[cleanup.protect]</td><td class="wrap-ok">Full paths disk cleanup must never touch. A path protects everything underneath it.</td></tr>
-            <tr><td class="n">[remote.wifi]</td><td class="wrap-ok">Wi-Fi networks the remote guard reconnects to, best first. Names of <em>saved</em> profiles; <code>*</code> works. Empty = any saved network in range, strongest first.</td></tr>
+            <tr><td class="n">[remote.wifi]</td><td class="wrap-ok">Wi-Fi networks the remote guard reconnects to, best first. Names of <em>saved</em> profiles; <code>*</code> works. After these, every other saved profile in Windows' order (in range first with <code>RemoteGuardScan=1</code>).</td></tr>
           </tbody>
         </table>
       </div>

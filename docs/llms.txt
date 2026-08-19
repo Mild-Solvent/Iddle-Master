@@ -73,7 +73,8 @@ changes nothing.
   Tailscale is running with an address, and Sunshine is listening - and repairs
   the first thing that is wrong with an escalating ladder: restarts WLAN/DHCP/DNS
   services, turns the Wi-Fi radio and auto-connect back on, reconnects Wi-Fi to a
-  known network (a preferred list, then any saved network in range), renews DHCP,
+  known network (a preferred list, then every saved profile; it never scans or
+  asks for location unless RemoteGuardScan=1), renews DHCP,
   flushes DNS, bounces the adapter, restarts Tailscale or runs `tailscale up`,
   restarts Sunshine. It never drops a link Tailscale is still up through, backs
   off after six failed tries, and can also stop Windows powering the Wi-Fi

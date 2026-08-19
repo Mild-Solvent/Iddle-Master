@@ -369,7 +369,11 @@ namespace IdleMaster
             }
             List<string> profiles = Wlan.Profiles(w.Guid);
             Dictionary<string, int> air = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (Wlan.Network n in Wlan.Visible(w.Guid, false))
+            // Looking at what is in range makes Windows ask for location. Only
+            // when the guard itself has been allowed to (RemoteGuardScan).
+            bool scan = false;
+            try { scan = Config.Load().RemoteGuardScan; } catch (Exception) { }
+            foreach (Wlan.Network n in scan ? Wlan.Visible(w.Guid, false) : new List<Wlan.Network>())
             {
                 string name = n.Profile.Length > 0 ? n.Profile : n.Ssid;
                 if (name.Length == 0) continue;
@@ -389,6 +393,7 @@ namespace IdleMaster
                     : "  " + p);
             }
             if (profiles.Count == 0) box.Items.Add("(no saved Wi-Fi profiles - connect to a network once by hand first)");
+            else if (!scan) box.Items.Add("  (in Windows' own order; RemoteGuardScan=1 would mark the ones in range - Windows asks for location then)");
         }
 
         private void FillServices()
@@ -580,6 +585,7 @@ namespace IdleMaster
             new string[] { "RemoteGuard",          "Remote guard - keep the link, Tailscale and Sunshine up; fix and reconnect when they drop" },
             new string[] { "RemoteGuardWifi",      "...including reconnecting Wi-Fi to a known network on its own" },
             new string[] { "RemoteGuardKeepWifiAwake", "...and stop Windows powering the Wi-Fi adapter down to save energy" },
+            new string[] { "RemoteGuardScan",      "...and scan for which saved networks are in range (Windows asks for location permission once)" },
         };
 
         // key, label, min, max, default

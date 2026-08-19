@@ -216,7 +216,7 @@ first thing that is wrong:
 
 | it checks | healthy means | if not, it |
 |---|---|---|
-| **link** | a real adapter is up with a default gateway | restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; **reconnects to a known network** — `[remote.wifi]` first, then anything in range it has a saved profile for, strongest first; renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter |
+| **link** | a real adapter is up with a default gateway | restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; **reconnects to a known network** — `[remote.wifi]` first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter |
 | **internet** | `controlplane.tailscale.com` answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online | flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter |
 | **Tailscale** | service running, `BackendState: Running`, an address, adapter up | restarts the service; runs `tailscale up` if it was Stopped; a needed login is said loudly once — nothing can type that for you |
 | **Sunshine** | service running and listening on its ports | restarts the service; up-but-deaf twice in a row gets restarted too |
@@ -236,10 +236,14 @@ bounces an adapter more than once in 10.
 switch the Wi-Fi off to save energy — the usual reason a headless laptop falls
 off the network at 3am. Best effort; silent when the driver has no such knob.
 
-It uses the Windows WLAN API directly, not `netsh`, so it works in any language
-and does not need the location permission `netsh wlan` started asking for in
-24H2. It can only join networks Windows already has a profile for — connect once
-by hand and it can reconnect forever; it cannot type a password.
+It uses the Windows WLAN API directly, not `netsh`, so it works in any language.
+It can only join networks Windows already has a profile for — connect once by
+hand and it can reconnect forever; it cannot type a password. By default it
+**never scans** and never asks which network it is on: Windows 11 counts both as
+*location* and would prompt you to allow it — so reconnects go by `[remote.wifi]`
+order, then Windows' own saved order, and the status line just says *Wi-Fi*.
+`RemoteGuardScan=1` turns the scan on (in-range networks first, strongest first,
+the name shown) and Windows asks for location permission once.
 
 Quiet while all is well. Every fix is one line in `idlemaster.log`, every outage
 one *trouble* line and one *back after* line. In the window it is the **Remote
@@ -249,7 +253,7 @@ when, *Check connection* looks right now and says everything — and the tray ha
 `--remote` does one check-and-fix from a script, `--guard` sits in the tray
 running only the guard, and `--installtask --guard` makes that happen at every
 logon. `[remote.wifi]` is edited under *Settings › Advanced › Remote guard*, with
-a picker of the saved networks that shows which are in range.
+a picker of the saved networks.
 
 ## Backup kit
 

@@ -868,7 +868,9 @@ namespace IdleMaster
                     if (r.WifiAdapter.Length == 0) r.WifiAdapter = AdapterNameFor(w.Description);
                     bool soft, hard;
                     if (Wlan.RadioState(w.Guid, out soft, out hard)) { r.RadioSoftOff = soft; r.RadioHardOff = hard; }
-                    if (w.State == Wlan.Connected)
+                    // Naming the network we are on is, to Windows, telling the
+                    // app where you are - it prompts for location. Only if asked.
+                    if (w.State == Wlan.Connected && cfg.RemoteGuardScan)
                     {
                         string ssid;
                         r.WifiProfile = Wlan.CurrentProfile(w.Guid, out ssid);
@@ -1284,10 +1286,13 @@ namespace IdleMaster
         // the ones in the air, then anything else in the air we have a profile
         // for by signal, then the rest of [remote.wifi] (hidden SSIDs do not
         // show in a scan), then every saved profile if the scan told us nothing.
+        // Without RemoteGuardScan there is no "in the air" - a scan is a location
+        // request to Windows, and it asks - so it is [remote.wifi], then every
+        // saved profile in Windows' own order. Slower, never a prompt.
         internal List<string> Candidates(Guid g)
         {
             List<string> profiles = Wlan.Profiles(g);
-            List<Wlan.Network> air = Wlan.Visible(g, true);
+            List<Wlan.Network> air = cfg.RemoteGuardScan ? Wlan.Visible(g, true) : new List<Wlan.Network>();
             List<string> result = new List<string>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -1348,7 +1353,8 @@ namespace IdleMaster
                     continue;
                 }
                 bool assoc = false;
-                for (int t = 0; t < 15 && !stopping; t++)
+                int patience = cfg.RemoteGuardScan ? 15 : 10;
+                for (int t = 0; t < patience && !stopping; t++)
                 {
                     Thread.Sleep(1000);
                     if (Wlan.State(g) == Wlan.Connected) { assoc = true; break; }
