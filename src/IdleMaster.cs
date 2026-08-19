@@ -4,7 +4,7 @@
 //   ABSOLUTE IDLE  : strip down to Windows vitals + Sunshine + Tailscale.
 //   RESTORE        : undo whatever the last mode did.
 //   SENTRY         : after a mode runs, keep hunting so the RAM stays clean.
-//   REMOTE GUARD   : keep the link, Tailscale and Sunshine up, always (Remote.cs).
+//   NETWORK GUARD  : keep the link, Tailscale and Sunshine up, always (NetGuard.cs).
 //
 // Built against the in-box .NET Framework compiler, so this is C# 5:
 // no string interpolation, no ?., no nameof, no expression-bodied members.
@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.7.1.0")]
-[assembly: AssemblyFileVersion("0.7.1.0")]
+[assembly: AssemblyVersion("0.7.2.0")]
+[assembly: AssemblyFileVersion("0.7.2.0")]
 
 namespace IdleMaster
 {
@@ -245,7 +245,7 @@ namespace IdleMaster
     internal sealed class Config
     {
         public bool KillExplorer = true;
-        public bool NetworkGuard = true;
+        public bool NetworkGuard = true;            // the guard: checks inside a run, and the standing watch (NetGuard)
         public bool TrimWorkingSets = true;
         public bool ClearStandbyList = true;
         public bool CloseBrowsersInBoost = false;
@@ -273,12 +273,11 @@ namespace IdleMaster
         public bool Tray = true;                    // tray icon; closing the window hides to it
         public int UpdateCheckHours = 6;            // ask GitHub for a newer release this often. 0 = only by hand
 
-        // --- remote guard: the connection itself, independent of the sentry
-        public bool RemoteGuard = true;             // watch link + internet + Tailscale + Sunshine, fix what drops
-        public bool RemoteGuardWifi = true;         // ...including reconnecting Wi-Fi to a known network
-        public bool RemoteGuardKeepWifiAwake = true;// stop Windows powering the Wi-Fi adapter down
-        public bool RemoteGuardScan = false;        // look at what is in range / the SSID - Windows asks for location once
-        public int RemoteGuardSeconds = 60;         // how often it checks
+        // --- network guard, the standing watch: the connection itself, independent of the sentry
+        public bool NetworkGuardWifi = true;        // reconnect Wi-Fi to a known network on its own
+        public bool NetworkGuardKeepWifiAwake = true;// stop Windows powering the Wi-Fi adapter down
+        public bool NetworkGuardScan = false;       // look at what is in range / the SSID - Windows asks for location once
+        public int NetworkGuardSeconds = 60;        // how often it checks
 
         // --- disk cleanup: the scanner only suggests, these tune the suggestions
         public int CleanupInstallerDays = 90;       // Downloads installers older than this
@@ -292,7 +291,7 @@ namespace IdleMaster
         public readonly List<string> IdleServices = new List<string>();
         public readonly List<string> RestoreLaunch = new List<string>();
         public readonly List<string> CleanupProtect = new List<string>();
-        public readonly List<string> RemoteWifi = new List<string>();     // preferred Wi-Fi profiles, in order
+        public readonly List<string> NetworkWifi = new List<string>();    // preferred Wi-Fi profiles, in order
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
 
@@ -348,11 +347,12 @@ namespace IdleMaster
                         }
                         case "tray": c.Tray = b; break;
                         case "updatecheckhours": c.UpdateCheckHours = Int(v, c.UpdateCheckHours, 0); break;
-                        case "remoteguard": c.RemoteGuard = b; break;
-                        case "remoteguardwifi": c.RemoteGuardWifi = b; break;
-                        case "remoteguardkeepwifiawake": c.RemoteGuardKeepWifiAwake = b; break;
-                        case "remoteguardscan": c.RemoteGuardScan = b; break;
-                        case "remoteguardseconds": c.RemoteGuardSeconds = Int(v, c.RemoteGuardSeconds, 15); break;
+                        // 0.7.0/0.7.1 called it the remote guard; those keys still read.
+                        case "remoteguard": c.NetworkGuard = b; break;
+                        case "networkguardwifi": case "remoteguardwifi": c.NetworkGuardWifi = b; break;
+                        case "networkguardkeepwifiawake": case "remoteguardkeepwifiawake": c.NetworkGuardKeepWifiAwake = b; break;
+                        case "networkguardscan": case "remoteguardscan": c.NetworkGuardScan = b; break;
+                        case "networkguardseconds": case "remoteguardseconds": c.NetworkGuardSeconds = Int(v, c.NetworkGuardSeconds, 15); break;
                         case "asktimeoutseconds": c.AskTimeoutSeconds = Int(v, c.AskTimeoutSeconds, 5); break;
                         case "askabovemb": c.AskAboveMb = Int(v, c.AskAboveMb, 0); break;
                         case "cleanupinstallerdays": c.CleanupInstallerDays = Int(v, c.CleanupInstallerDays, 7); break;
@@ -373,7 +373,7 @@ namespace IdleMaster
                     // Paths, not process names - StripExe must not touch these.
                     case "cleanup.protect": c.CleanupProtect.Add(line); break;
                     // Wi-Fi profile names, verbatim.
-                    case "remote.wifi": c.RemoteWifi.Add(line); break;
+                    case "network.wifi": c.NetworkWifi.Add(line); break;
                 }
             }
             return c;
@@ -410,10 +410,10 @@ namespace IdleMaster
             AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
             UpdateCheckHours = o.UpdateCheckHours;
-            RemoteGuard = o.RemoteGuard; RemoteGuardWifi = o.RemoteGuardWifi;
-            RemoteGuardKeepWifiAwake = o.RemoteGuardKeepWifiAwake;
-            RemoteGuardScan = o.RemoteGuardScan;
-            RemoteGuardSeconds = o.RemoteGuardSeconds;
+            NetworkGuardWifi = o.NetworkGuardWifi;
+            NetworkGuardKeepWifiAwake = o.NetworkGuardKeepWifiAwake;
+            NetworkGuardScan = o.NetworkGuardScan;
+            NetworkGuardSeconds = o.NetworkGuardSeconds;
             CleanupInstallerDays = o.CleanupInstallerDays;
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
 
@@ -422,7 +422,7 @@ namespace IdleMaster
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
             Swap(CleanupProtect, o.CleanupProtect);
-            Swap(RemoteWifi, o.RemoteWifi);
+            Swap(NetworkWifi, o.NetworkWifi);
         }
 
         private static void Swap(List<string> mine, List<string> theirs)
@@ -489,7 +489,9 @@ namespace IdleMaster
 # ABSOLUTE IDLE closes the Windows shell (explorer + start menu + search host).
 # Frees ~450 MB. To get the desktop back: Ctrl+Shift+Esc -> Run new task -> IdleMaster.exe
 KillExplorer=1
-# After every destructive step, verify Sunshine + Tailscale are alive; restart them if not.
+# The network guard: after every destructive step it verifies Sunshine + Tailscale
+# are alive and restarts them if not - and, whenever Idle Master is running, it
+# keeps watch over the connection itself (see NETWORK GUARD below).
 NetworkGuard=1
 # Squeeze the working set of every surviving process.
 TrimWorkingSets=1
@@ -557,28 +559,28 @@ Tray=1
 # Your idlemaster.ini is never touched. 0 = only when you press the button.
 UpdateCheckHours=6
 
-# --- REMOTE GUARD -----------------------------------------------------------
-# The sentry guards the RAM; this guards the way back in. Whenever Idle Master
-# is running it checks, every RemoteGuardSeconds, that a network link is up,
-# that the internet answers, that Tailscale is Running with an address, and
-# that Sunshine is listening - and fixes what is not: restarts the services,
-# turns the Wi-Fi radio back on, reconnects to a known network, renews DHCP,
-# flushes DNS, bounces the adapter, runs 'tailscale up'. Quiet while all is
-# well; every fix is one line in the log. --remote does one check by hand.
-RemoteGuard=1
-# Reconnect Wi-Fi on its own. [remote.wifi] below says which networks first;
+# --- NETWORK GUARD ----------------------------------------------------------
+# The sentry guards the RAM; this guards the way back in. With NetworkGuard=1,
+# whenever Idle Master is running it checks, every NetworkGuardSeconds, that a
+# network link is up, that the internet answers, that Tailscale is Running with
+# an address, and that Sunshine is listening - and fixes what is not: restarts
+# the services, turns the Wi-Fi radio back on, reconnects to a known network,
+# renews DHCP, flushes DNS, bounces the adapter, runs 'tailscale up'. Quiet
+# while all is well; every fix is one line in the log. --network does one check
+# by hand. The Network guard button in the window is its page.
+# Reconnect Wi-Fi on its own. [network.wifi] below says which networks first;
 # with it empty, any network this machine has a saved profile for will do.
-RemoteGuardWifi=1
+NetworkGuardWifi=1
 # Keep Windows from powering the Wi-Fi adapter down to save energy - the usual
 # reason a headless laptop drops off the network at 3am. Best effort.
-RemoteGuardKeepWifiAwake=1
+NetworkGuardKeepWifiAwake=1
 # Let it scan for which saved networks are in range (and name the one it is on).
 # Windows counts that as LOCATION and asks you to allow it, once, for the app.
-# Off = it never asks: reconnects go by [remote.wifi] order, then Windows' own
+# Off = it never asks: reconnects go by [network.wifi] order, then Windows' own
 # saved order, which is almost always the same thing a little slower.
-RemoteGuardScan=0
+NetworkGuardScan=0
 # Seconds between checks. Each check is a few TCP connects; 60 is cheap.
-RemoteGuardSeconds=60
+NetworkGuardSeconds=60
 
 # --- DISK CLEANUP -----------------------------------------------------------
 # The cleanup window only suggests. Nothing is deleted until you tick it and
@@ -844,11 +846,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 #D:\backups
 
 # ---------------------------------------------------------------------------
-# Wi-Fi networks the remote guard should reconnect to, best first. Names of
+# Wi-Fi networks the network guard should reconnect to, best first. Names of
 # SAVED profiles (the ones 'netsh wlan show profiles' lists) - the guard cannot
-# type a password. Empty = any saved network it can see, strongest first.
+# type a password. Empty = every saved network, in Windows' own order.
 # ---------------------------------------------------------------------------
-[remote.wifi]
+[network.wifi]
 #HomeNet
 #HomeNet 5G
 ";
@@ -2464,8 +2466,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "boost" || s == "idle" || s == "restore" || s == "report" || s == "help"
                     || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask"
-                    || s == "cleanup-report" || s == "remote" || s == "guard")
+                    || s == "cleanup-report" || s == "network" || s == "guard")
                     mode = s;
+                else if (s == "remote") mode = "network";     // 0.7.0's name for it
                 else if (s == "watch" || s == "hunt")
                     watch = true;
                 if (s == "guard") guardOnly = true;
@@ -2504,11 +2507,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 case "restore": eng.RunRestore(); break;
                 case "report": eng.Report(); break;
                 case "cleanup-report": CleanupReport(cfg, logger); break;
-                case "remote": return RemoteCheck(cfg, eng, logger);
+                case "network": return NetworkCheck(cfg, eng, logger);
                 case "guard":
                 {
-                    // The remote guard alone, in the tray: no sentry, no window.
-                    if (RemoteGuard.IsRunningSomewhere())
+                    // The network guard alone, in the tray: no sentry, no window.
+                    if (NetGuard.IsRunningSomewhere())
                     {
                         Console.WriteLine("another Idle Master is already guarding the connection - nothing to do.");
                         return 1;
@@ -2535,12 +2538,12 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Console.WriteLine("IdleMaster.exe [--boost | --idle | --restore | --report]");
                     Console.WriteLine("  --watch           keep hunting after the mode, until --unwatch");
                     Console.WriteLine("  --unwatch         stop the sentry");
-                    Console.WriteLine("  --installtask     run the sentry (and the remote guard) at every logon (scheduled task)");
-                    Console.WriteLine("  --installtask --guard   ...or only the remote guard at logon");
+                    Console.WriteLine("  --installtask     run the sentry (and the network guard) at every logon (scheduled task)");
+                    Console.WriteLine("  --installtask --guard   ...or only the network guard at logon");
                     Console.WriteLine("  --removetask      undo that");
                     Console.WriteLine("  --cleanup-report  scan the disk for junk and print what was found");
-                    Console.WriteLine("  --remote          check link + internet + Tailscale + Sunshine now, fix what is down");
-                    Console.WriteLine("  --guard           sit in the tray running only the remote guard");
+                    Console.WriteLine("  --network         check link + internet + Tailscale + Sunshine now, fix what is down");
+                    Console.WriteLine("  --guard           sit in the tray running only the network guard");
                     Console.WriteLine("  no arguments = open the window");
                     return 0;
             }
@@ -2573,12 +2576,12 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return 0;
         }
 
-        // One remote-guard check by hand: measure, fix what is down, print the
+        // One network-guard check by hand: measure, fix what is down, print the
         // picture. Exit 0 = everything up, 1 = something still is not - so a
         // scheduled task or a script can tell.
-        private static int RemoteCheck(Config cfg, Engine eng, Action<string> log)
+        private static int NetworkCheck(Config cfg, Engine eng, Action<string> log)
         {
-            RemoteGuard g = new RemoteGuard(cfg, eng, log);
+            NetGuard g = new NetGuard(cfg, eng, log);
             NetReport r = g.Check(true, true);
             return r.Healthy ? 0 : 1;
         }
@@ -2651,8 +2654,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 p.WaitForExit();
                 if (p.ExitCode == 0)
                     Console.WriteLine(install
-                        ? (guardOnly ? "The remote guard will start at logon. Remove it with --removetask."
-                                     : "Sentry (and the remote guard) will start at logon. Remove it with --removetask.")
+                        ? (guardOnly ? "The network guard will start at logon. Remove it with --removetask."
+                                     : "Sentry (and the network guard) will start at logon. Remove it with --removetask.")
                         : "Logon task removed.");
                 return p.ExitCode;
             }

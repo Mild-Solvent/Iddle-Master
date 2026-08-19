@@ -1,4 +1,4 @@
-// IDLE MASTER - the remote guard.
+// IDLE MASTER - the network guard.
 //
 // The sentry guards the RAM. This guards the way back in: a machine that is
 // only ever reached over Sunshine-through-Tailscale is useless the moment its
@@ -564,13 +564,42 @@ namespace IdleMaster
             if (Healthy) return LinkText + ", " + TailscaleText + ", " + SunshineText;
             return string.Join(", ", Problems.ToArray());
         }
+
+        // The Wi-Fi adapter's own state, in words, whether or not it carries the link.
+        public string WifiText()
+        {
+            if (!WifiEnumerated) return "adapter disabled or missing";
+            if (RadioHardOff) return "radio switched off in hardware";
+            if (RadioSoftOff) return "radio off";
+            switch (WifiState)
+            {
+                case Wlan.Connected: return "connected" + (WifiProfile.Length > 0 ? " to '" + WifiProfile + "'" : "");
+                case Wlan.Disconnected: return "disconnected";
+                case Wlan.NotReady: return "not ready";
+                default: return "state " + WifiState;
+            }
+        }
+
+        // The four-line picture, for the log and for the guard's page.
+        public List<string> Lines()
+        {
+            List<string> l = new List<string>();
+            l.Add((LinkUp ? "+" : "!") + " link       " + LinkText
+                + (WifiPresent && !LinkIsWifi ? "  (Wi-Fi " + WifiText() + ")" : ""));
+            l.Add((Internet ? "+" : "!") + " internet   " + (Internet ? "reachable" : "NOT reachable")
+                + (Internet && !Dns ? ", but DNS is not resolving" : ""));
+            l.Add((TailscaleOk ? "+" : "!") + " " + TailscaleText
+                + (TailscaleInstalled && TailscaleState == "Running" ? (TailscaleOnline ? ", online" : ", not online yet") : ""));
+            l.Add((SunshineOk ? "+" : "!") + " " + SunshineText);
+            return l;
+        }
     }
 
     // -------------------------------------------------------------- guard
 
-    internal sealed class RemoteGuard
+    internal sealed class NetGuard
     {
-        private const string OnlyOne = "Global\\IdleMasterRemoteGuard";
+        private const string OnlyOne = "Global\\IdleMasterNetworkGuard";
 
         private readonly Config cfg;
         private readonly Engine engine;
@@ -603,7 +632,7 @@ namespace IdleMaster
         private readonly HashSet<string> missingProfiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private string tailscaleExe;
 
-        public RemoteGuard(Config c, Engine e, Action<string> logger)
+        public NetGuard(Config c, Engine e, Action<string> logger)
         {
             cfg = c; engine = e; log = logger;
         }
@@ -636,14 +665,14 @@ namespace IdleMaster
                     slot.Close();
                     slot = null;
                     Refused = "another Idle Master is already guarding the connection";
-                    log("[remote] " + Refused + " - not starting a second guard");
+                    log("[guard] " + Refused + " - not starting a second guard");
                     return false;
                 }
             }
             catch (Exception ex)
             {
                 Refused = "could not claim the guard: " + ex.Message.Split('\n')[0];
-                log("[remote] " + Refused);
+                log("[guard] " + Refused);
                 return false;
             }
 
@@ -654,10 +683,10 @@ namespace IdleMaster
             downSince = DateTime.MinValue;
             thread = new Thread(Loop);
             thread.IsBackground = true;
-            thread.Name = "remote guard";
+            thread.Name = "network guard";
             thread.Start();
-            log("[remote] guarding the connection - link, internet, Tailscale, Sunshine every "
-                + cfg.RemoteGuardSeconds + " s.");
+            log("[guard] guarding the connection - link, internet, Tailscale, Sunshine every "
+                + cfg.NetworkGuardSeconds + " s.");
             return true;
         }
 
@@ -670,7 +699,7 @@ namespace IdleMaster
                 try { thread.Join(3000); } catch (Exception) { }
             }
             ReleaseSlot();
-            log("[remote] guard off. " + Checks + " checks, " + FixCount + " fixes.");
+            log("[guard] guard off. " + Checks + " checks, " + FixCount + " fixes.");
         }
 
         // Run a check right now, and say what was found even if all is well.
@@ -697,7 +726,7 @@ namespace IdleMaster
             // The first check comes quickly: if we are starting at logon on a
             // machine that lost its network overnight, now is the moment.
             int wait = 5000;
-            if (cfg.RemoteGuardKeepWifiAwake)
+            if (cfg.NetworkGuardKeepWifiAwake)
             {
                 try { KeepWifiAwake(); } catch (Exception) { }
             }
@@ -714,10 +743,10 @@ namespace IdleMaster
                 }
                 catch (Exception ex)
                 {
-                    log("[remote] check failed: " + ex.Message.Split('\n')[0]);
+                    log("[guard] check failed: " + ex.Message.Split('\n')[0]);
                 }
                 finally { Busy = false; }
-                wait = Math.Max(15, cfg.RemoteGuardSeconds) * 1000;
+                wait = Math.Max(15, cfg.NetworkGuardSeconds) * 1000;
             }
             ReleaseSlot();
         }
@@ -726,7 +755,7 @@ namespace IdleMaster
 
         // Measure; if something is wrong and 'repair' is on, walk the ladder and
         // measure again. Returns the last measurement. 'loud' prints the whole
-        // picture even when it is fine - the button and --remote want that; the
+        // picture even when it is fine - the button and --network want that; the
         // timer only wants to hear about trouble.
         public NetReport Check(bool repair, bool loud)
         {
@@ -738,7 +767,7 @@ namespace IdleMaster
             {
                 if (downSince != DateTime.MinValue)
                 {
-                    log("[remote] connection is back on its own after "
+                    log("[guard] connection is back on its own after "
                         + Minutes(DateTime.Now - downSince) + " - " + r.Summary());
                     downSince = DateTime.MinValue;
                 }
@@ -755,7 +784,7 @@ namespace IdleMaster
             if (first) downSince = DateTime.Now;
             Attempt++;
             if (loud || first || Attempt <= 3 || Attempt % 10 == 0)
-                log("[remote] trouble" + (Attempt > 1 ? " (try " + Attempt + ")" : "") + ": "
+                log("[guard] trouble" + (Attempt > 1 ? " (try " + Attempt + ")" : "") + ": "
                     + string.Join("; ", r.Problems.ToArray()));
             Last = r;
             if (!repair)
@@ -772,7 +801,7 @@ namespace IdleMaster
             Last = after;
             if (after.Healthy)
             {
-                log("[remote] connection back after " + Minutes(DateTime.Now - downSince)
+                log("[guard] connection back after " + Minutes(DateTime.Now - downSince)
                     + " - " + (after.Fixes.Count > 0 ? string.Join("; ", after.Fixes.ToArray()) : "it recovered while being looked at")
                     + ". Now: " + after.Summary());
                 downSince = DateTime.MinValue;
@@ -782,10 +811,10 @@ namespace IdleMaster
             else
             {
                 if (loud || Attempt <= 3 || Attempt % 10 == 0)
-                    log("[remote] still not right: " + string.Join("; ", after.Problems.ToArray())
+                    log("[guard] still not right: " + string.Join("; ", after.Problems.ToArray())
                         + (after.Fixes.Count > 0 ? "  (tried: " + string.Join("; ", after.Fixes.ToArray()) + ")" : "")
-                        + (Attempt >= 6 ? " - checking every " + cfg.RemoteGuardSeconds + " s, repairing every 5th check"
-                                        : " - again in " + cfg.RemoteGuardSeconds + " s"));
+                        + (Attempt >= 6 ? " - checking every " + cfg.NetworkGuardSeconds + " s, repairing every 5th check"
+                                        : " - again in " + cfg.NetworkGuardSeconds + " s"));
                 if (loud) Print(after, "still broken");
             }
             return after;
@@ -800,30 +829,12 @@ namespace IdleMaster
 
         private void Print(NetReport r, string verdict)
         {
-            log("-- remote guard: " + verdict);
-            log("   " + (r.LinkUp ? "+" : "!") + " link: " + r.LinkText
-                + (r.WifiPresent && !r.LinkIsWifi ? "  (Wi-Fi " + WifiStateText(r) + ")" : ""));
-            log("   " + (r.Internet ? "+" : "!") + " internet: " + (r.Internet ? "reachable" : "NOT reachable")
-                + (r.Internet && !r.Dns ? ", but DNS is not resolving" : ""));
-            log("   " + (r.TailscaleOk ? "+" : "!") + " " + r.TailscaleText
-                + (r.TailscaleInstalled && r.TailscaleState == "Running" ? (r.TailscaleOnline ? ", online" : ", not online yet") : ""));
-            log("   " + (r.SunshineOk ? "+" : "!") + " " + r.SunshineText);
+            log("-- network guard: " + verdict);
+            foreach (string line in r.Lines()) log("   " + line);
             foreach (string f in r.Fixes) log("   * " + f);
         }
 
-        private static string WifiStateText(NetReport r)
-        {
-            if (!r.WifiEnumerated) return "adapter disabled or missing";
-            if (r.RadioHardOff) return "radio switched off in hardware";
-            if (r.RadioSoftOff) return "radio off";
-            switch (r.WifiState)
-            {
-                case Wlan.Connected: return "connected" + (r.WifiProfile.Length > 0 ? " to '" + r.WifiProfile + "'" : "");
-                case Wlan.Disconnected: return "disconnected";
-                case Wlan.NotReady: return "not ready";
-                default: return "state " + r.WifiState;
-            }
-        }
+        private static string WifiStateText(NetReport r) { return r.WifiText(); }
 
         // ---- measuring
 
@@ -870,7 +881,7 @@ namespace IdleMaster
                     if (Wlan.RadioState(w.Guid, out soft, out hard)) { r.RadioSoftOff = soft; r.RadioHardOff = hard; }
                     // Naming the network we are on is, to Windows, telling the
                     // app where you are - it prompts for location. Only if asked.
-                    if (w.State == Wlan.Connected && cfg.RemoteGuardScan)
+                    if (w.State == Wlan.Connected && cfg.NetworkGuardScan)
                     {
                         string ssid;
                         r.WifiProfile = Wlan.CurrentProfile(w.Guid, out ssid);
@@ -1154,7 +1165,7 @@ namespace IdleMaster
             // then whatever is wired.
             if (!now.LinkUp)
             {
-                if (now.WifiPresent && cfg.RemoteGuardWifi) now = RepairWifi(now, done);
+                if (now.WifiPresent && cfg.NetworkGuardWifi) now = RepairWifi(now, done);
                 if (now.Healthy) return now;
                 if (!now.LinkUp) now = RepairWire(now, done);
                 if (now.Healthy) return now;
@@ -1282,28 +1293,28 @@ namespace IdleMaster
             return now;
         }
 
-        // The list of networks to try, best first: your [remote.wifi] order for
+        // The list of networks to try, best first: your [network.wifi] order for
         // the ones in the air, then anything else in the air we have a profile
-        // for by signal, then the rest of [remote.wifi] (hidden SSIDs do not
+        // for by signal, then the rest of [network.wifi] (hidden SSIDs do not
         // show in a scan), then every saved profile if the scan told us nothing.
-        // Without RemoteGuardScan there is no "in the air" - a scan is a location
-        // request to Windows, and it asks - so it is [remote.wifi], then every
+        // Without NetworkGuardScan there is no "in the air" - a scan is a location
+        // request to Windows, and it asks - so it is [network.wifi], then every
         // saved profile in Windows' own order. Slower, never a prompt.
         internal List<string> Candidates(Guid g)
         {
             List<string> profiles = Wlan.Profiles(g);
-            List<Wlan.Network> air = cfg.RemoteGuardScan ? Wlan.Visible(g, true) : new List<Wlan.Network>();
+            List<Wlan.Network> air = cfg.NetworkGuardScan ? Wlan.Visible(g, true) : new List<Wlan.Network>();
             List<string> result = new List<string>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             List<string> preferred = new List<string>();
-            foreach (string want in cfg.RemoteWifi)
+            foreach (string want in cfg.NetworkWifi)
             {
                 bool hit = false;
                 foreach (string p in profiles)
                     if (Engine.Match(want, p)) { hit = true; if (!preferred.Contains(p)) preferred.Add(p); }
                 if (!hit && missingProfiles.Add(want))
-                    log("[remote] '" + want + "' in [remote.wifi] is not a saved Wi-Fi profile on this machine"
+                    log("[guard] '" + want + "' in [network.wifi] is not a saved Wi-Fi profile on this machine"
                         + " - connect to it once by hand so Windows keeps the password, then the guard can use it");
             }
 
@@ -1335,7 +1346,7 @@ namespace IdleMaster
             List<string> cands = Candidates(g);
             if (cands.Count == 0)
             {
-                done.Add("no saved Wi-Fi network to connect to" + (cfg.RemoteWifi.Count > 0 ? "" : " - name one in [remote.wifi], or connect once by hand"));
+                done.Add("no saved Wi-Fi network to connect to" + (cfg.NetworkWifi.Count > 0 ? "" : " - name one in [network.wifi], or connect once by hand"));
                 return now;
             }
 
@@ -1353,7 +1364,7 @@ namespace IdleMaster
                     continue;
                 }
                 bool assoc = false;
-                int patience = cfg.RemoteGuardScan ? 15 : 10;
+                int patience = cfg.NetworkGuardScan ? 15 : 10;
                 for (int t = 0; t < patience && !stopping; t++)
                 {
                     Thread.Sleep(1000);
@@ -1452,7 +1463,7 @@ namespace IdleMaster
             if (Attempt >= 3 && MayDisrupt(now))
             {
                 lastDisrupt = DateTime.Now;
-                if (now.LinkIsWifi && now.WifiEnumerated && cfg.RemoteGuardWifi)
+                if (now.LinkIsWifi && now.WifiEnumerated && cfg.NetworkGuardWifi)
                 {
                     Wlan.Disconnect(now.WifiGuid);
                     done.Add("dropped the Wi-Fi connection to rebuild it");
@@ -1468,7 +1479,7 @@ namespace IdleMaster
                 }
 
                 // Rung 4, same pass: bounce the Wi-Fi adapter too, then reconnect.
-                if (Attempt >= 4 && now.LinkIsWifi && cfg.RemoteGuardWifi && MayBounce())
+                if (Attempt >= 4 && now.LinkIsWifi && cfg.NetworkGuardWifi && MayBounce())
                 {
                     Bounce(now.WifiAdapter, done);
                     now = Again(now, done);
@@ -1506,7 +1517,7 @@ namespace IdleMaster
             {
                 if (!loginNagged)
                 {
-                    log("[remote] !! Tailscale says it needs a login (its key expired or it was logged out)."
+                    log("[guard] !! Tailscale says it needs a login (its key expired or it was logged out)."
                         + " Nothing here can type that for you: run 'tailscale up' or use the tray app at the keyboard.");
                     loginNagged = true;
                 }
@@ -1626,7 +1637,7 @@ namespace IdleMaster
                     bool ok = Exec("powercfg.exe", "/setacvalueindex SCHEME_CURRENT " + sub + " " + key + " 0", 10000, out outp) == 0;
                     ok &= Exec("powercfg.exe", "/setdcvalueindex SCHEME_CURRENT " + sub + " " + key + " 0", 10000, out outp) == 0;
                     ok &= Exec("powercfg.exe", "/setactive SCHEME_CURRENT", 10000, out outp) == 0;
-                    if (ok) log("[remote] Wi-Fi power saving set to maximum performance in the power plan (RemoteGuardKeepWifiAwake)");
+                    if (ok) log("[guard] Wi-Fi power saving set to maximum performance in the power plan (NetworkGuardKeepWifiAwake)");
                 }
             }
 
@@ -1640,7 +1651,7 @@ namespace IdleMaster
             string set = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"Set-NetAdapterPowerManagement -Name '"
                 + name + "' -AllowComputerToTurnOffDevice Disabled -NoRestart -ErrorAction Stop\"";
             if (Exec("powershell.exe", set, 30000, out outp) == 0)
-                log("[remote] told Windows it may not switch off the " + r.WifiAdapter
+                log("[guard] told Windows it may not switch off the " + r.WifiAdapter
                     + " adapter to save power (takes effect at the next adapter restart)");
         }
 

@@ -19,10 +19,10 @@ keeps sweeping the same lists in the background, and RAM stays where you put it
 instead of drifting back up. See [Keeping it clean](#keeping-it-clean).
 
 And because a machine you only reach over Sunshine-through-Tailscale is a brick
-the moment its Wi-Fi drops, there is a **remote guard**: whenever Idle Master is
+the moment its Wi-Fi drops, there is a **network guard**: whenever Idle Master is
 running it checks the link, the internet, Tailscale and Sunshine every minute and
 puts back whatever fell over — reconnecting Wi-Fi to a known network included.
-See [Remote guard](#remote-guard).
+See [Network guard](#network-guard).
 
 ## Install
 
@@ -89,10 +89,10 @@ IdleMaster.exe --report      print what's eating RAM and what each mode would do
 IdleMaster.exe --boost --watch   boost, then keep hunting until told to stop
 IdleMaster.exe --watch       take up the watch for whichever mode ran last
 IdleMaster.exe --unwatch     stop the sentry
-IdleMaster.exe --remote      check link + internet + Tailscale + Sunshine now, fix what is down (exit 0 = all up)
-IdleMaster.exe --guard       sit in the tray running only the remote guard
+IdleMaster.exe --network      check link + internet + Tailscale + Sunshine now, fix what is down (exit 0 = all up)
+IdleMaster.exe --guard       sit in the tray running only the network guard
 IdleMaster.exe --installtask run the sentry at every logon (--removetask undoes it)
-IdleMaster.exe --installtask --guard   ...or only the remote guard at logon
+IdleMaster.exe --installtask --guard   ...or only the network guard at logon
 ```
 
 Run `--report` first. It tags every process and service with the mode that would
@@ -202,21 +202,21 @@ sweep, and `BoostWhenFreeBelowMb` does one the moment free RAM drops under a lin
 privileges) so the watch survives a reboot. It is off unless you ask for it, and
 `--removetask` deletes it.
 
-## Remote guard
+## Network guard
 
-The sentry guards the RAM; the remote guard guards the way back in. A headless
+The sentry guards the RAM; the network guard guards the way back in. A headless
 laptop that is only ever reached over Sunshine-through-Tailscale is useless the
 moment its Wi-Fi drops, its DHCP lease goes stale, `tailscaled` stops, or Sunshine
 sits alive without listening — and nothing on the machine will notice except you,
 from somewhere else, too late.
 
 So whenever Idle Master is running — window, tray, `--watch` or `--guard` — the
-guard checks, every `RemoteGuardSeconds` (60), in this order, and repairs the
+guard checks, every `NetworkGuardSeconds` (60), in this order, and repairs the
 first thing that is wrong:
 
 | it checks | healthy means | if not, it |
 |---|---|---|
-| **link** | a real adapter is up with a default gateway | restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; **reconnects to a known network** — `[remote.wifi]` first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter |
+| **link** | a real adapter is up with a default gateway | restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; **reconnects to a known network** — `[network.wifi]` first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter |
 | **internet** | `controlplane.tailscale.com` answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online | flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter |
 | **Tailscale** | service running, `BackendState: Running`, an address, adapter up | restarts the service; runs `tailscale up` if it was Stopped; a needed login is said loudly once — nothing can type that for you |
 | **Sunshine** | service running and listening on its ports | restarts the service; up-but-deaf twice in a row gets restarted too |
@@ -232,7 +232,7 @@ up through — an internet probe can be firewalled; your session cannot be argue
 with. And it never rebuilds a working link more than once in 15 minutes, or
 bounces an adapter more than once in 10.
 
-`RemoteGuardKeepWifiAwake` (on) also tells the power plan and the adapter not to
+`NetworkGuardKeepWifiAwake` (on) also tells the power plan and the adapter not to
 switch the Wi-Fi off to save energy — the usual reason a headless laptop falls
 off the network at 3am. Best effort; silent when the driver has no such knob.
 
@@ -240,20 +240,21 @@ It uses the Windows WLAN API directly, not `netsh`, so it works in any language.
 It can only join networks Windows already has a profile for — connect once by
 hand and it can reconnect forever; it cannot type a password. By default it
 **never scans** and never asks which network it is on: Windows 11 counts both as
-*location* and would prompt you to allow it — so reconnects go by `[remote.wifi]`
+*location* and would prompt you to allow it — so reconnects go by `[network.wifi]`
 order, then Windows' own saved order, and the status line just says *Wi-Fi*.
-`RemoteGuardScan=1` turns the scan on (in-range networks first, strongest first,
+`NetworkGuardScan=1` turns the scan on (in-range networks first, strongest first,
 the name shown) and Windows asks for location permission once.
 
 Quiet while all is well. Every fix is one line in `idlemaster.log`, every outage
-one *trouble* line and one *back after* line. In the window it is the **Remote
-guard** row — the checkbox is the setting, the line says what it last saw and
-when, *Check connection* looks right now and says everything — and the tray has
-*Check connection now*. Closing the window while it guards hides to the tray.
-`--remote` does one check-and-fix from a script, `--guard` sits in the tray
-running only the guard, and `--installtask --guard` makes that happen at every
-logon. `[remote.wifi]` is edited under *Settings › Advanced › Remote guard*, with
-a picker of the saved networks.
+one *trouble* line and one *back after* line (all prefixed `[guard]`). In the window it is the **Network
+guard** button, which turns red while the guard is fighting something and opens
+its own page: the four-line picture of what it last saw, *Check now*, its
+switches (`NetworkGuard` is the whole feature — the check inside a run *and* the
+standing watch), the check interval, and the `[network.wifi]` list with a picker
+of the saved networks. The tray has *Network guard...* and *Check the connection
+now*. Closing the window while it guards hides to the tray. `--network` does one
+check-and-fix from a script, `--guard` sits in the tray running only the guard,
+and `--installtask --guard` makes that happen at every logon.
 
 ## Backup kit
 
@@ -303,8 +304,8 @@ more than the RAM the backend costs. Take it out of `[protect]` if you disagree.
 `SunshineService` and `Tailscale` are running, that something is listening on a
 Sunshine port, and that the Tailscale adapter is up. If a service died as
 collateral damage, it restarts it and says so loudly in the log. That is the
-check *inside* a run; the [remote guard](#remote-guard) is the one that stands
-there all the time.
+check *inside* a run; the same [network guard](#network-guard) also stands
+there the whole time Idle Master is running.
 
 **Everything is reversible.** Services are *stopped*, never disabled, so a reboot
 returns the machine to normal on its own. Each run writes `idlemaster.state` with
@@ -365,7 +366,7 @@ will catch that and scream in the log, but test it once while you're awake.
 
 ```
 src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
-src/Remote.cs             the remote guard: WLAN API, measuring, the repair ladder
+src/NetGuard.cs             the network guard: WLAN API, measuring, the repair ladder
 src/Ui.cs                 every window: main, task manager, settings, ask toast
 src/Cleanup.cs            the disk cleanup scanner
 src/Backup.cs             the backup kit: app inventory, zip writer, window

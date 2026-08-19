@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Idle Master documentation — install, modes, sentry, config reference</title>
-<meta name="description" content="The full Idle Master manual: installing and updating, what each mode closes, how the sentry works, how the remote guard keeps Wi-Fi, Tailscale and Sunshine up, every idlemaster.ini setting with its default, the command line, and how to get your desktop back if something goes wrong.">
+<meta name="description" content="The full Idle Master manual: installing and updating, what each mode closes, how the sentry works, how the network guard keeps Wi-Fi, Tailscale and Sunshine up, every idlemaster.ini setting with its default, the command line, and how to get your desktop back if something goes wrong.">
 <link rel="canonical" href="https://mild-solvent.github.io/Iddle-Master/docs.html">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 <meta property="og:title" content="Idle Master documentation">
@@ -70,7 +70,7 @@
     <a href="#restore">Restore</a>
     <a href="#sentry">The sentry</a>
     <a href="#asking">Being asked first</a>
-    <a href="#remote">Remote guard</a>
+    <a href="#netguard">Network guard</a>
     <a href="#windows">The windows</a>
     <a href="#cleanup">Disk cleanup</a>
     <a href="#backup">Backup kit</a>
@@ -94,7 +94,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.7.1. If you only read one section, make it
+      Written against v0.7.2. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -330,23 +330,23 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
       </div>
     </section>
 
-    <!-- ------------------------------------------------------------- remote -->
-    <section id="remote">
-      <h2>Remote guard <a class="anchor" href="#remote">#</a></h2>
-      <p>The sentry guards the RAM; the remote guard guards the way back in. A headless laptop that
+    <!-- ----------------------------------------------------------- netguard -->
+    <section id="netguard">
+      <h2>Network guard <a class="anchor" href="#netguard">#</a></h2>
+      <p>The sentry guards the RAM; the network guard guards the way back in. A headless laptop that
         is only ever reached over Sunshine-through-Tailscale is useless the moment its Wi-Fi
         drops, its DHCP lease goes stale, <code>tailscaled</code> stops, or Sunshine sits alive
         without listening — and nothing on the machine will notice except you, from somewhere
         else, too late.</p>
       <p>So whenever Idle Master is running — window, tray, <code>--watch</code> or
-        <code>--guard</code> — the guard checks every <code>RemoteGuardSeconds</code> (60), in this
+        <code>--guard</code> — the guard checks every <code>NetworkGuardSeconds</code> (60), in this
         order, and repairs the first thing that is wrong:</p>
 
       <div class="scroll">
         <table class="tbl">
           <thead><tr><th style="width:90px">It checks</th><th style="width:230px">Healthy means</th><th>If not, it</th></tr></thead>
           <tbody>
-            <tr><td class="n">link</td><td class="wrap-ok">a real adapter is up with a default gateway</td><td class="wrap-ok">restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; <strong>reconnects to a known network</strong> — <code>[remote.wifi]</code> first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter</td></tr>
+            <tr><td class="n">link</td><td class="wrap-ok">a real adapter is up with a default gateway</td><td class="wrap-ok">restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; <strong>reconnects to a known network</strong> — <code>[network.wifi]</code> first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter</td></tr>
             <tr><td class="n">internet</td><td class="wrap-ok"><code>controlplane.tailscale.com</code> answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online</td><td class="wrap-ok">flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter</td></tr>
             <tr><td class="n">Tailscale</td><td class="wrap-ok">service running, <code>BackendState: Running</code>, an address, adapter up</td><td class="wrap-ok">restarts the service; runs <code>tailscale up</code> if it was Stopped; a needed login is said loudly once — nothing can type that for you</td></tr>
             <tr><td class="n">Sunshine</td><td class="wrap-ok">service running and listening on its ports</td><td class="wrap-ok">restarts the service; up-but-deaf twice in a row gets restarted too</td></tr>
@@ -372,29 +372,31 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
       <p>It uses the Windows WLAN API directly, not <code>netsh</code>, so it works in any
         language. It can only join networks Windows already has a profile for — connect once by
         hand and it can reconnect forever; it cannot type a password.
-        <code>[remote.wifi]</code> says which networks to try first (saved profile names,
+        <code>[network.wifi]</code> says which networks to try first (saved profile names,
         <code>*</code> works); after those it tries every other saved profile. It is edited under
-        <em>Settings › Advanced › Remote guard</em>, with a picker of the saved networks.</p>
+        the <em>Network guard</em> page (and <em>Settings › Advanced › Network guard</em>), with a
+        picker of the saved networks.</p>
       <p><b>It never asks for location.</b> Windows 11 counts a Wi-Fi scan — and even naming the
         network you are on — as knowing where you are, and prompts you to allow it. By default
-        the guard does neither: reconnects go by <code>[remote.wifi]</code> order, then Windows'
+        the guard does neither: reconnects go by <code>[network.wifi]</code> order, then Windows'
         own saved order, and the status line just says <em>Wi-Fi</em>. Set
-        <code>RemoteGuardScan=1</code> and it scans (in-range networks first, strongest first,
+        <code>NetworkGuardScan=1</code> and it scans (in-range networks first, strongest first,
         the name shown, the picker marks what is in range) — Windows asks for location
         permission once, for Idle Master.</p>
-      <p><code>RemoteGuardKeepWifiAwake</code> (on) also tells the power plan and the adapter not
+      <p><code>NetworkGuardKeepWifiAwake</code> (on) also tells the power plan and the adapter not
         to switch the Wi-Fi off to save energy — the usual reason a headless laptop falls off the
         network at 3am. Best effort; silent when the driver has no such knob.</p>
 
       <h3>Where it shows</h3>
       <p>Quiet while all is well. Every fix is one line in <code>idlemaster.log</code>, every
         outage one <em>trouble</em> line and one <em>back after</em> line. In the window it is the
-        <strong>Remote guard</strong> row — the checkbox is the setting and is written to the ini,
-        the line says what it last saw and when, <em>Check connection</em> looks right now and
-        says everything — and the tray has <em>Check connection now</em>. Closing the window while
-        it guards hides to the tray, like the sentry. Only one guard runs at a time; a second
-        Idle Master says so and leaves it to the first.</p>
-      <p>On the command line, <code>--remote</code> does one check-and-fix and prints the picture
+        <strong>Network guard</strong> button — red while the guard is fighting something — which
+        opens its own page: the four-line picture of what it last saw, <em>Check now</em>, its
+        switches, the check interval, and the <code>[network.wifi]</code> list with a picker of
+        the saved networks. The tray has <em>Network guard...</em> and <em>Check the connection
+        now</em>. Closing the window while it guards hides to the tray, like the sentry. Only one
+        guard runs at a time; a second Idle Master says so and leaves it to the first.</p>
+      <p>On the command line, <code>--network</code> does one check-and-fix and prints the picture
         (exit 0 = all up, 1 = something still is not), <code>--guard</code> sits in the tray
         running only the guard, and <code>--installtask --guard</code> makes that happen at every
         logon.</p>
@@ -533,7 +535,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
           <tbody>
             <tr><td class="n">KillExplorer</td><td class="n">1</td><td class="wrap-ok">Absolute idle closes the Windows shell — explorer, start menu, search host. About 450 MB. Set to <code>0</code> and idle leaves your desktop alone.</td></tr>
-            <tr><td class="n">NetworkGuard</td><td class="n">1</td><td class="wrap-ok">After every destructive step, verify the protected services are alive and restart them if not.</td></tr>
+            <tr><td class="n">NetworkGuard</td><td class="n">1</td><td class="wrap-ok">The network guard: after every destructive step verify Sunshine + Tailscale are alive and restart them if not — and, whenever Idle Master runs, keep the standing watch over the connection (see <a href="#netguard">Network guard</a>).</td></tr>
             <tr><td class="n">TrimWorkingSets</td><td class="n">1</td><td class="wrap-ok">Squeeze the working set of every surviving process.</td></tr>
             <tr><td class="n">ClearStandbyList</td><td class="n">1</td><td class="wrap-ok">Purge the standby (cached) list, so Task Manager shows the memory as free.</td></tr>
             <tr><td class="n">CloseBrowsersInBoost</td><td class="n">0</td><td class="wrap-ok">Off, because during a boost you are working. Turn it on and boost treats browsers like idle does.</td></tr>
@@ -588,16 +590,15 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         </table>
       </div>
 
-      <h3>Remote guard</h3>
+      <h3>Network guard</h3>
       <div class="scroll">
         <table class="tbl">
           <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
           <tbody>
-            <tr><td class="n">RemoteGuard</td><td class="n">1</td><td class="wrap-ok">Watch link, internet, Tailscale and Sunshine whenever Idle Master runs, and fix what drops. The checkbox in the window writes this.</td></tr>
-            <tr><td class="n">RemoteGuardWifi</td><td class="n">1</td><td class="wrap-ok">…including reconnecting Wi-Fi on its own — <code>[remote.wifi]</code> first, then any saved network in range.</td></tr>
-            <tr><td class="n">RemoteGuardKeepWifiAwake</td><td class="n">1</td><td class="wrap-ok">Tell the power plan and the adapter not to power the Wi-Fi down to save energy. Best effort.</td></tr>
-            <tr><td class="n">RemoteGuardScan</td><td class="n">0</td><td class="wrap-ok">Scan for which saved networks are in range and name the one you are on. Windows treats that as <em>location</em> and asks once. Off = never asks; reconnects go by list order.</td></tr>
-            <tr><td class="n">RemoteGuardSeconds</td><td class="n">60</td><td class="wrap-ok">Seconds between checks. Each is a few TCP connects; 60 is cheap. Minimum 15.</td></tr>
+            <tr><td class="n">NetworkGuardWifi</td><td class="n">1</td><td class="wrap-ok">…including reconnecting Wi-Fi on its own — <code>[network.wifi]</code> first, then any saved network in range.</td></tr>
+            <tr><td class="n">NetworkGuardKeepWifiAwake</td><td class="n">1</td><td class="wrap-ok">Tell the power plan and the adapter not to power the Wi-Fi down to save energy. Best effort.</td></tr>
+            <tr><td class="n">NetworkGuardScan</td><td class="n">0</td><td class="wrap-ok">Scan for which saved networks are in range and name the one you are on. Windows treats that as <em>location</em> and asks once. Off = never asks; reconnects go by list order.</td></tr>
+            <tr><td class="n">NetworkGuardSeconds</td><td class="n">60</td><td class="wrap-ok">Seconds between checks. Each is a few TCP connects; 60 is cheap. Minimum 15.</td></tr>
           </tbody>
         </table>
       </div>
@@ -618,7 +619,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">[idle.services]</td><td class="wrap-ok">Services absolute idle stops on top of the boost list.</td></tr>
             <tr><td class="n">[restore.launch]</td><td class="wrap-ok">Programs relaunched by Restore. Deliberately short — restore gives you a working machine back, not the bloat back. <code>path|arguments</code> per line.</td></tr>
             <tr><td class="n">[cleanup.protect]</td><td class="wrap-ok">Full paths disk cleanup must never touch. A path protects everything underneath it.</td></tr>
-            <tr><td class="n">[remote.wifi]</td><td class="wrap-ok">Wi-Fi networks the remote guard reconnects to, best first. Names of <em>saved</em> profiles; <code>*</code> works. After these, every other saved profile in Windows' order (in range first with <code>RemoteGuardScan=1</code>).</td></tr>
+            <tr><td class="n">[network.wifi]</td><td class="wrap-ok">Wi-Fi networks the network guard reconnects to, best first. Names of <em>saved</em> profiles; <code>*</code> works. After these, every other saved profile in Windows' order (in range first with <code>NetworkGuardScan=1</code>).</td></tr>
           </tbody>
         </table>
       </div>
@@ -647,10 +648,10 @@ IdleMaster.exe --cleanup-report  <span class="d">scan the disk, print findings, 
 IdleMaster.exe --boost --watch   <span class="d">boost, then keep hunting</span>
 IdleMaster.exe --watch           <span class="d">take up the watch for whichever mode ran last</span>
 IdleMaster.exe --unwatch         <span class="d">stop the sentry</span>
-IdleMaster.exe --remote          <span class="d">check link + internet + Tailscale + Sunshine, fix what is down (exit 0 = all up)</span>
-IdleMaster.exe --guard           <span class="d">sit in the tray running only the remote guard</span>
+IdleMaster.exe --network          <span class="d">check link + internet + Tailscale + Sunshine, fix what is down (exit 0 = all up)</span>
+IdleMaster.exe --guard           <span class="d">sit in the tray running only the network guard</span>
 IdleMaster.exe --installtask     <span class="d">run the sentry (and the guard) at every logon</span>
-IdleMaster.exe --installtask --guard   <span class="d">...or only the remote guard at logon</span>
+IdleMaster.exe --installtask --guard   <span class="d">...or only the network guard at logon</span>
 IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
       </div>
       <p>A watch does not run as a console loop — it runs as a tray app, because it needs a
@@ -676,7 +677,7 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
         </table>
       </div>
       <p>In the repository: <code>src/IdleMaster.cs</code> is the engine, config, sentry, updater
-        and CLI entry point; <code>src/Remote.cs</code> is the remote guard — the WLAN API wrapper,
+        and CLI entry point; <code>src/NetGuard.cs</code> is the network guard — the WLAN API wrapper,
         the measuring, the repair ladder; <code>src/Ui.cs</code> is every window; <code>src/Cleanup.cs</code>
         is the disk scanner; <code>src/Backup.cs</code> is the backup kit (inventory, zip
         writer, window); <code>src/Rebuild.cs</code> is the standalone exe that ships inside a
@@ -743,8 +744,8 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
         and repeatedly during idle mode. The shipped example is a Sunshine + Tailscale pair because
         this is a streaming host; swap in RDP, Parsec, Moonlight, SSH or your own VPN.</p>
       <p>If the machine fell off the <em>network</em> rather than a service dying, that is the
-        <a href="#remote">remote guard</a>'s job: it reconnects Wi-Fi, renews the lease, restarts
-        Tailscale and Sunshine, and writes what it did. Read the <code>[remote]</code> lines in
+        <a href="#netguard">network guard</a>'s job: it reconnects Wi-Fi, renews the lease, restarts
+        Tailscale and Sunshine, and writes what it did. Read the <code>[guard]</code> lines in
         <code>idlemaster.log</code>; if they end in <em>Tailscale needs a login</em>, that is the
         one thing it cannot do for you.</p>
 
