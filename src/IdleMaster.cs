@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.7.2.0")]
-[assembly: AssemblyFileVersion("0.7.2.0")]
+[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyFileVersion("0.8.0.0")]
 
 namespace IdleMaster
 {
@@ -291,6 +291,7 @@ namespace IdleMaster
         public readonly List<string> IdleServices = new List<string>();
         public readonly List<string> RestoreLaunch = new List<string>();
         public readonly List<string> CleanupProtect = new List<string>();
+        public readonly List<string> DebloatProtect = new List<string>();
         public readonly List<string> NetworkWifi = new List<string>();    // preferred Wi-Fi profiles, in order
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
@@ -372,6 +373,8 @@ namespace IdleMaster
                     case "restore.launch": c.RestoreLaunch.Add(line); break;
                     // Paths, not process names - StripExe must not touch these.
                     case "cleanup.protect": c.CleanupProtect.Add(line); break;
+                    // Store package names, verbatim.
+                    case "debloat.protect": c.DebloatProtect.Add(line); break;
                     // Wi-Fi profile names, verbatim.
                     case "network.wifi": c.NetworkWifi.Add(line); break;
                 }
@@ -422,6 +425,7 @@ namespace IdleMaster
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
             Swap(CleanupProtect, o.CleanupProtect);
+            Swap(DebloatProtect, o.DebloatProtect);
             Swap(NetworkWifi, o.NetworkWifi);
         }
 
@@ -844,6 +848,16 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 [cleanup.protect]
 #C:\Users\*\Documents
 #D:\backups
+
+# ---------------------------------------------------------------------------
+# Store apps the debloater must NEVER suggest. Package names (the ones
+# 'Get-AppxPackage' lists), '*' works. The Store itself, winget, the terminal,
+# WSL and the codec packs are protected in code and cannot be listed at all -
+# they are the way back when a removal turns out to be a mistake.
+# ---------------------------------------------------------------------------
+[debloat.protect]
+#Microsoft.WindowsCalculator
+#Microsoft.ScreenSketch
 
 # ---------------------------------------------------------------------------
 # Wi-Fi networks the network guard should reconnect to, best first. Names of
@@ -2466,7 +2480,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "boost" || s == "idle" || s == "restore" || s == "report" || s == "help"
                     || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask"
-                    || s == "cleanup-report" || s == "network" || s == "guard")
+                    || s == "cleanup-report" || s == "debloat-report" || s == "network" || s == "guard")
                     mode = s;
                 else if (s == "remote") mode = "network";     // 0.7.0's name for it
                 else if (s == "watch" || s == "hunt")
@@ -2507,6 +2521,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 case "restore": eng.RunRestore(); break;
                 case "report": eng.Report(); break;
                 case "cleanup-report": CleanupReport(cfg, logger); break;
+                case "debloat-report": DebloatReport(cfg, logger); break;
                 case "network": return NetworkCheck(cfg, eng, logger);
                 case "guard":
                 {
@@ -2542,6 +2557,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Console.WriteLine("  --installtask --guard   ...or only the network guard at logon");
                     Console.WriteLine("  --removetask      undo that");
                     Console.WriteLine("  --cleanup-report  scan the disk for junk and print what was found");
+                    Console.WriteLine("  --debloat-report  list the preinstalled Store apps and which are known bloat");
                     Console.WriteLine("  --network         check link + internet + Tailscale + Sunshine now, fix what is down");
                     Console.WriteLine("  --guard           sit in the tray running only the network guard");
                     Console.WriteLine("  no arguments = open the window");
@@ -2630,6 +2646,38 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             }
             log("   = " + found.Count + " findings; " + CleanupScanner.Nice(junk)
                 + " of known junk. The window ('Disk cleanup') does the actual cleaning.");
+        }
+
+        // The console twin of the debloat window: same scanner, same table,
+        // but strictly read-only - the CLI never uninstalls anything.
+        private static void DebloatReport(Config cfg, Action<string> log)
+        {
+            log("-- debloat scan (report only - nothing is removed)");
+            DebloatScanner scanner = new DebloatScanner(cfg);
+            List<DebloatItem> found = scanner.Scan(
+                delegate(string where) { },
+                delegate(DebloatItem it) { });
+
+            found.Sort(delegate(DebloatItem a, DebloatItem b)
+            {
+                int r = DebloatScanner.Rank(a.Category).CompareTo(DebloatScanner.Rank(b.Category));
+                return r != 0 ? r : b.Bytes.CompareTo(a.Bytes);
+            });
+
+            int bloat = 0;
+            string last = null;
+            foreach (DebloatItem it in found)
+            {
+                if (it.Category != last) { log("-- " + it.Category); last = it.Category; }
+                if (it.Safe) bloat++;
+                log("   " + (it.Safe ? "bloat  " : "review ")
+                    + (it.Bytes > 0 ? CleanupScanner.Nice(it.Bytes).PadLeft(9) : "?".PadLeft(9))
+                    + "  " + it.Name + "  - " + it.Package
+                    + (it.Provisioned ? "  [comes back for new accounts]" : "")
+                    + (it.Note.Length > 0 ? "  (" + it.Note + ")" : ""));
+            }
+            log("   = " + found.Count + " removable apps; " + bloat
+                + " known bloat. The window ('Debloat') does the actual removing.");
         }
 
         // Optional: a logon task so the watch - or just the guard - survives a

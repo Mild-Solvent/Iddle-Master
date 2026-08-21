@@ -823,7 +823,7 @@ namespace IdleMaster
             tabs.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             tabs.SizeMode = TabSizeMode.Fixed;
-            tabs.ItemSize = new Size(104, 28);     // seven tabs have to fit in 754 px
+            tabs.ItemSize = new Size(92, 28);      // eight tabs have to fit in 754 px
             tabs.DrawItem += DrawTab;
             Controls.Add(tabs);
 
@@ -838,6 +838,8 @@ namespace IdleMaster
                 "Relaunched by Restore desktop  (full path, optional |arguments)"));
             tabs.TabPages.Add(Single("Cleanup", "cleanup.protect",
                 "Paths disk cleanup must never touch  (full path, '*' works)"));
+            tabs.TabPages.Add(Single("Debloat", "debloat.protect",
+                "Store apps debloat must never suggest  (package names, '*' works)"));
             tabs.TabPages.Add(Single("Network guard", "network.wifi",
                 "Wi-Fi networks the network guard reconnects to, best first  (saved profiles; empty = every one it knows)", "wifi"));
 
@@ -1752,6 +1754,417 @@ namespace IdleMaster
         }
     }
 
+    // ----------------------------------------------------------------- debloat
+
+    // The review table behind "Debloat". Scan fills it on a worker thread, you
+    // tick what goes, Remove uninstalls the ticked apps - and unlike cleanup
+    // this is NOT the Recycle Bin: gone means reinstall-from-the-Store gone.
+    // The dialog says so, the known-junk table pre-ticks only the shameless.
+    internal sealed class DebloatForm : Form
+    {
+        private readonly Config cfg;
+        private readonly Action<string> log;
+        private readonly BufferedListView list;
+        private readonly ColumnHeader colName, colCat, colPkg, colSize, colClass;
+        private readonly Button btnScan, btnStop, btnRemove;
+        private readonly CheckBox chkDeprovision;
+        private readonly Label progress;
+        private readonly System.Windows.Forms.Timer timer;
+        private readonly ToolStripMenuItem miRemoveOne, miProtect, miCopy;
+
+        // The worker drops findings here; a 200 ms timer drains them onto the
+        // UI thread in batches - the same plumbing the cleanup window uses.
+        private readonly List<DebloatItem> arrived = new List<DebloatItem>();
+        private readonly object gate = new object();
+        private string phase = "";
+        private DebloatScanner scanner;
+        private bool working;
+        private bool filling;
+
+        public DebloatForm(Config c, Action<string> logger)
+        {
+            cfg = c;
+            log = logger;
+
+            Theme.Form(this);
+            Text = "IDLE MASTER - debloat";
+            Size = new Size(760, 656);
+            MinimumSize = new Size(620, 456);
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+
+            Label cap = Theme.Caption("DEBLOAT");
+            cap.SetBounds(16, 12, 180, 18);
+            Controls.Add(cap);
+
+            Label hint = Theme.Hint("scan, tick what goes - Remove UNINSTALLS it (the Store can bring it back)");
+            hint.Font = Theme.Small();
+            hint.TextAlign = ContentAlignment.MiddleRight;
+            hint.SetBounds(200, 12, 528, 18);
+            hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(hint);
+
+            list = new BufferedListView();
+            list.View = View.Details;
+            list.CheckBoxes = true;
+            list.FullRowSelect = true;
+            list.MultiSelect = false;
+            list.HideSelection = false;
+            list.ShowItemToolTips = true;
+            list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            list.BorderStyle = BorderStyle.FixedSingle;
+            list.BackColor = Theme.Input;
+            list.ForeColor = Theme.Fg;
+            list.OwnerDraw = true;
+            list.DrawColumnHeader += DrawHeader;
+            list.DrawItem += delegate(object s, DrawListViewItemEventArgs a) { a.DrawDefault = true; };
+            list.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs a) { a.DrawDefault = true; };
+            colName = list.Columns.Add("App", 176);
+            colCat = list.Columns.Add("Category", 118);
+            colPkg = list.Columns.Add("Package", 250);
+            colSize = list.Columns.Add("Size", 88, HorizontalAlignment.Right);
+            colClass = list.Columns.Add("Class", 64);
+            list.SetBounds(16, 36, 712, 488);
+            list.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            list.Resize += delegate { SizeColumns(); };
+            list.ItemChecked += delegate { if (!filling) UpdateRemoveButton(); };
+            Controls.Add(list);
+            SizeColumns();
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+            Theme.Menu(menu);
+            miRemoveOne = new ToolStripMenuItem("Remove just this one");
+            miRemoveOne.Click += delegate { RemoveSelectedOnly(); };
+            miProtect = new ToolStripMenuItem("Never suggest this app (protect)");
+            miProtect.Click += delegate { ProtectSelected(); };
+            miCopy = new ToolStripMenuItem("Copy package name");
+            miCopy.Click += delegate { CopySelected(); };
+            menu.Items.Add(miRemoveOne);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(miProtect);
+            menu.Items.Add(miCopy);
+            menu.Opening += MenuOpening;
+            list.ContextMenuStrip = menu;
+
+            btnScan = Theme.Action("Scan");
+            btnScan.SetBounds(16, 536, 100, 30);
+            btnScan.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnScan.Click += delegate { StartScan(); };
+            Controls.Add(btnScan);
+
+            btnStop = Theme.Quiet("Stop scan");
+            btnStop.SetBounds(124, 536, 100, 30);
+            btnStop.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            btnStop.Visible = false;
+            btnStop.Click += delegate { if (scanner != null) scanner.Cancel(); };
+            Controls.Add(btnStop);
+
+            progress = Theme.Hint("no scan yet");
+            progress.Font = Theme.Small();
+            progress.SetBounds(232, 541, 220, 20);
+            progress.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(progress);
+
+            btnRemove = Theme.Dangerous("Remove checked");
+            btnRemove.SetBounds(460, 536, 268, 30);
+            btnRemove.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            btnRemove.Enabled = false;
+            btnRemove.Click += delegate { Remove(Checked()); };
+            Controls.Add(btnRemove);
+
+            // Removing only the installed copy leaves the machine copy behind,
+            // and a feature update or a new account quietly restores the app.
+            // On by default because "stays gone" is what debloat means.
+            chkDeprovision = new CheckBox();
+            chkDeprovision.Text = "Also drop the machine copy, so new accounts and Windows updates do not bring it back";
+            chkDeprovision.Checked = true;
+            chkDeprovision.ForeColor = Theme.Fg;
+            chkDeprovision.FlatStyle = FlatStyle.Flat;
+            chkDeprovision.SetBounds(16, 574, 712, 22);
+            chkDeprovision.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(chkDeprovision);
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 200;
+            timer.Tick += delegate { Drain(); };
+            timer.Start();
+        }
+
+        private void SizeColumns()
+        {
+            int rest = colName.Width + colCat.Width + colSize.Width + colClass.Width;
+            int w = list.ClientSize.Width - rest - 4;
+            if (w > 80) colPkg.Width = w;
+        }
+
+        private void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            using (SolidBrush b = new SolidBrush(Theme.Panel))
+                e.Graphics.FillRectangle(b, e.Bounds);
+            TextFormatFlags align = e.ColumnIndex == 3
+                ? TextFormatFlags.Right : TextFormatFlags.Left;
+            Rectangle r = e.Bounds;
+            r.Inflate(-6, 0);
+            TextRenderer.DrawText(e.Graphics, e.Header.Text, list.Font, r, Theme.Dim,
+                align | TextFormatFlags.VerticalCenter);
+        }
+
+        // ---- scanning
+
+        public void StartScan()
+        {
+            if (working) return;
+            working = true;
+            scanner = new DebloatScanner(cfg);
+
+            filling = true;
+            list.Items.Clear();
+            filling = false;
+            lock (gate) { arrived.Clear(); phase = "starting..."; }
+
+            btnScan.Enabled = false;
+            btnStop.Visible = true;
+            UpdateRemoveButton();
+            log("-- debloat scan");
+
+            DebloatScanner mine = scanner;
+            Thread t = new Thread(delegate()
+            {
+                List<DebloatItem> all = null;
+                try
+                {
+                    all = mine.Scan(
+                        delegate(string where) { lock (gate) { phase = where; } },
+                        delegate(DebloatItem it) { lock (gate) { arrived.Add(it); } });
+                }
+                catch (Exception ex) { log("   ! debloat scan failed: " + ex.Message); }
+                try { BeginInvoke((Action)delegate { ScanDone(all); }); }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void Drain()
+        {
+            List<DebloatItem> take = null;
+            string where;
+            lock (gate)
+            {
+                where = phase;
+                if (arrived.Count > 0)
+                {
+                    take = new List<DebloatItem>(arrived);
+                    arrived.Clear();
+                }
+            }
+            if (working) progress.Text = where;
+            if (take == null) return;
+
+            filling = true;
+            list.BeginUpdate();
+            try { foreach (DebloatItem it in take) AddRow(it); }
+            finally { list.EndUpdate(); filling = false; }
+            UpdateRemoveButton();
+        }
+
+        private void ScanDone(List<DebloatItem> all)
+        {
+            Drain();
+            working = false;
+            btnScan.Enabled = true;
+            btnStop.Visible = false;
+
+            int bloat = 0;
+            foreach (ListViewItem row in list.Items)
+                if (((DebloatItem)row.Tag).Safe) bloat++;
+            bool cancelled = scanner != null && scanner.Cancelled;
+            progress.Text = (cancelled ? "cancelled - " : "")
+                + list.Items.Count + " removable apps, " + bloat + " known bloat";
+            log("   = scan " + (cancelled ? "cancelled" : "finished") + ": "
+                + list.Items.Count + " removable apps, " + bloat + " known bloat pre-ticked.");
+            UpdateRemoveButton();
+        }
+
+        private void AddRow(DebloatItem it)
+        {
+            if (list.Items.ContainsKey(it.Key)) return;
+
+            ListViewItem row = new ListViewItem(it.Name);
+            row.Name = it.Key;
+            row.Tag = it;
+            row.UseItemStyleForSubItems = false;
+            row.SubItems.Add(it.Category);
+            row.SubItems.Add(it.Package);
+            row.SubItems.Add(it.Bytes > 0 ? CleanupScanner.Nice(it.Bytes) : "?");
+            row.SubItems.Add(it.Safe ? "bloat" : "review");
+            row.SubItems[1].ForeColor = Theme.Dim;
+            row.SubItems[2].ForeColor = Theme.Dim;
+            row.SubItems[4].ForeColor = it.Safe ? Theme.Accent : Theme.Warn;
+            row.ToolTipText = (it.Note.Length > 0 ? it.Note + "\n" : "")
+                + (it.Provisioned ? "provisioned - Windows re-installs it for every new account\n" : "")
+                + it.Where;
+            list.Items.Insert(InsertAt(it), row);
+            row.Checked = it.Safe;      // known bloat arrives ticked, the rest is your call
+                                        // (set after the insert - a detached row forgets it)
+        }
+
+        private int InsertAt(DebloatItem it)
+        {
+            int mine = DebloatScanner.Rank(it.Category);
+            for (int i = 0; i < list.Items.Count; i++)
+            {
+                DebloatItem other = (DebloatItem)list.Items[i].Tag;
+                int r = DebloatScanner.Rank(other.Category);
+                if (r > mine) return i;
+                if (r == mine && other.Bytes < it.Bytes) return i;
+            }
+            return list.Items.Count;
+        }
+
+        // ---- removing
+
+        private List<DebloatItem> Checked()
+        {
+            List<DebloatItem> picked = new List<DebloatItem>();
+            foreach (ListViewItem row in list.Items)
+                if (row.Checked) picked.Add((DebloatItem)row.Tag);
+            return picked;
+        }
+
+        private void UpdateRemoveButton()
+        {
+            int n = 0;
+            foreach (ListViewItem row in list.Items)
+                if (row.Checked) n++;
+            btnRemove.Enabled = n > 0 && !working;
+            btnRemove.Text = n == 0
+                ? "Remove checked"
+                : "Remove checked  (" + n + " app" + (n == 1 ? "" : "s") + ")";
+        }
+
+        private void Remove(List<DebloatItem> picked)
+        {
+            if (working || picked.Count == 0) return;
+
+            bool deprovision = chkDeprovision.Checked;
+            string msg = "Uninstall " + picked.Count + " app" + (picked.Count == 1 ? "" : "s")
+                + " for every account on this machine?\n\nThis is NOT the Recycle Bin:"
+                + " an app removed here is gone until you reinstall it from the Microsoft Store."
+                + (deprovision
+                    ? "\n\nThe machine copy goes too, so new accounts and Windows updates"
+                      + " will not bring these back."
+                    : "");
+            if (MessageBox.Show(this, msg, "Debloat", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                return;
+
+            working = true;
+            btnScan.Enabled = false;
+            UpdateRemoveButton();
+            progress.Text = "removing...";
+            log("-- debloat");
+
+            DebloatScanner guard = scanner != null ? scanner : new DebloatScanner(cfg);
+            Thread t = new Thread(delegate()
+            {
+                List<string> gone = new List<string>();
+                foreach (DebloatItem it in picked)
+                {
+                    if (!DebloatActions.Remove(it, deprovision, guard, log)) continue;
+                    gone.Add(it.Key);
+                }
+                log("   = " + gone.Count + " of " + picked.Count + " apps uninstalled."
+                    + (gone.Count > 0 ? " The Microsoft Store can reinstall any of them." : ""));
+                try { BeginInvoke((Action)delegate { RemoveDone(gone, picked.Count); }); }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        private void RemoveDone(List<string> gone, int asked)
+        {
+            filling = true;
+            foreach (string key in gone)
+            {
+                int at = list.Items.IndexOfKey(key);
+                if (at >= 0) list.Items.RemoveAt(at);
+            }
+            filling = false;
+            working = false;
+            btnScan.Enabled = true;
+            progress.Text = gone.Count == asked
+                ? "removed - the Store can bring any of them back"
+                : "partly removed - what refused is still listed";
+            UpdateRemoveButton();
+        }
+
+        // ---- the right-click verdicts
+
+        private DebloatItem Selected()
+        {
+            if (list.SelectedItems.Count == 0) return null;
+            return (DebloatItem)list.SelectedItems[0].Tag;
+        }
+
+        private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            DebloatItem it = Selected();
+            if (it == null) { e.Cancel = true; return; }
+            miRemoveOne.Enabled = !working;
+            miRemoveOne.Text = "Remove just this one  (" + it.Name + ")";
+        }
+
+        private void RemoveSelectedOnly()
+        {
+            DebloatItem it = Selected();
+            if (it == null) return;
+            List<DebloatItem> one = new List<DebloatItem>();
+            one.Add(it);
+            Remove(one);
+        }
+
+        // The same recipe cleanup uses for "Never touch": write the decision
+        // into the ini, reload the running config, drop the row.
+        private void ProtectSelected()
+        {
+            DebloatItem it = Selected();
+            if (it == null) return;
+
+            if (!Config.Append("debloat.protect", it.Package))
+            {
+                log("   ! could not write " + it.Package + " into [debloat.protect].");
+                return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                log(it.Package + " added to [debloat.protect] - debloat will never suggest it.");
+            }
+            catch (Exception ex) { log("   ! could not reload the config: " + ex.Message); }
+
+            int at = list.Items.IndexOfKey(it.Key);
+            if (at >= 0) list.Items.RemoveAt(at);
+            UpdateRemoveButton();
+        }
+
+        private void CopySelected()
+        {
+            DebloatItem it = Selected();
+            if (it == null) return;
+            try { Clipboard.SetText(it.Package); }
+            catch (Exception) { }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            timer.Stop();
+            if (scanner != null) scanner.Cancel();
+            base.OnFormClosed(e);
+        }
+    }
+
     // ------------------------------------------------------------------ sentry
 
     // What the sentry hunts and how often, in one place: the active mode's kill
@@ -2176,7 +2589,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat;
         private readonly CheckBox chkSentry;
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
@@ -2194,6 +2607,7 @@ namespace IdleMaster
         private DateTime nextUpdateCheck;
         private EatersForm eatersWin;
         private CleanupForm cleanupWin;
+        private DebloatForm debloatWin;
         private BackupForm backupWin;
         private bool reallyExit;
         private bool startHidden;
@@ -2206,8 +2620,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 742);
-            MinimumSize = new Size(560, 556);
+            Size = new Size(700, 778);
+            MinimumSize = new Size(560, 592);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -2261,28 +2675,31 @@ namespace IdleMaster
             btnNetGuard = SmallButton("Network guard", 502, 342);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
 
+            btnDebloat = SmallButton("Debloat", 22, 378);
+            btnDebloat.Click += delegate { OpenDebloat(); };
+
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(22, 384, 640, 20);
+            updateLabel.SetBounds(22, 420, 640, 20);
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 418, 190, 22);
+            chkSentry.SetBounds(24, 454, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 420, 300, 20);
+            sentryLabel.SetBounds(220, 456, 300, 20);
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, 414, 152, 30);
+            btnSentry.SetBounds(510, 450, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -2295,7 +2712,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 448, 640, 212);
+            logBox.SetBounds(22, 484, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -2483,6 +2900,19 @@ namespace IdleMaster
             cleanupWin.Show(this);
         }
 
+        // One debloat window, same rule.
+        private void OpenDebloat()
+        {
+            if (debloatWin != null && !debloatWin.IsDisposed)
+            {
+                debloatWin.Activate();
+                return;
+            }
+            debloatWin = new DebloatForm(cfg, AppendLog);
+            debloatWin.Location = new Point(Location.X + Width - 40, Location.Y + 100);
+            debloatWin.Show(this);
+        }
+
         // The sentry's own window: its lists and timers, saved straight to the ini.
         private void OpenSentry()
         {
@@ -2571,6 +3001,7 @@ namespace IdleMaster
             menu.Items.Add("Check the connection now", null, delegate { CheckConnection(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Disk cleanup...", null, delegate { ShowWindow(); OpenCleanup(); });
+            menu.Items.Add("Debloat...", null, delegate { ShowWindow(); OpenDebloat(); });
             menu.Items.Add("Backup kit...", null, delegate { ShowWindow(); OpenBackup(); });
             menu.Items.Add("Sentry lists && timers...", null, delegate { ShowWindow(); OpenSentry(); });
             menu.Items.Add("Network guard...", null, delegate { ShowWindow(); OpenNetGuard(); });

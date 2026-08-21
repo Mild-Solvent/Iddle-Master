@@ -89,6 +89,7 @@ IdleMaster.exe --report      print what's eating RAM and what each mode would do
 IdleMaster.exe --boost --watch   boost, then keep hunting until told to stop
 IdleMaster.exe --watch       take up the watch for whichever mode ran last
 IdleMaster.exe --unwatch     stop the sentry
+IdleMaster.exe --debloat-report  list the preinstalled Store apps and which are known bloat
 IdleMaster.exe --network      check link + internet + Tailscale + Sunshine now, fix what is down (exit 0 = all up)
 IdleMaster.exe --guard       sit in the tray running only the network guard
 IdleMaster.exe --installtask run the sentry at every logon (--removetask undoes it)
@@ -256,6 +257,43 @@ now*. Closing the window while it guards hides to the tray. `--network` does one
 check-and-fix from a script, `--guard` sits in the tray running only the guard,
 and `--installtask --guard` makes that happen at every logon.
 
+## Debloat
+
+The sentry fights the junk that runs; **Debloat** removes the junk that is merely
+*installed* — the Store apps Windows and the OEM shipped that you never asked
+for. Same shape as Disk cleanup: **Scan** fills a table, you tick, **Remove
+checked** acts. Nothing is removed until you press the button.
+
+The scan asks Windows itself (`Get-AppxPackage`) and shows *every* removable
+app, so nothing hides:
+
+- **Preinstalled junk** — News, Weather, Solitaire, Get Help, Tips, Feedback
+  Hub, Cortana, Copilot, consumer Teams, the Office ad... arrives **pre-ticked**.
+- **Sponsored apps** — the force-installed third-party stuff. Candy Crush and
+  the McAfee nag arrive ticked; Spotify, Netflix and friends are only *listed*,
+  because they might be yours.
+- **Xbox & gaming** — never pre-ticked: Game Bar owns game capture, and the
+  Xbox identity provider owns Minecraft / Game Pass sign-ins.
+- **Microsoft extras** — Photos, Snipping Tool, Calculator, Phone Link...
+  listed with a note saying what each one is, decided by you.
+- **Everything else** — whatever else is installed and removable.
+
+Two things to know before pressing the button:
+
+- **This is not the Recycle Bin.** A removed app is gone until you reinstall it
+  from the Microsoft Store; the confirm dialog says so in as many words. That is
+  also why the Store, winget, the Terminal, WSL, Edge and the codec packs are
+  protected **in code** — no ini edit can shoot the reinstall path on a machine
+  you only reach remotely.
+- **Also drop the machine copy** (on by default) removes the *provisioned* copy
+  too, so a feature update or a new account does not quietly bring the app
+  back. Rows that would come back are marked in their tooltip.
+
+Right-click offers *Remove just this one*, *Copy package name*, and *Never
+suggest this app*, which writes the package into `[debloat.protect]` — the same
+protect-list-wins design everything else here uses. `--debloat-report` prints
+the same table from a script and never removes anything.
+
 ## Backup kit
 
 For the day you reinstall Windows. **Backup kit** (main window, tray menu) writes
@@ -369,6 +407,7 @@ src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
 src/NetGuard.cs             the network guard: WLAN API, measuring, the repair ladder
 src/Ui.cs                 every window: main, task manager, settings, ask toast
 src/Cleanup.cs            the disk cleanup scanner
+src/Debloat.cs            the debloater: Store-app inventory, known-bloat table, removal
 src/Backup.cs             the backup kit: app inventory, zip writer, window
 src/Rebuild.cs            the standalone exe that ships inside a kit
 src/Theme.cs              the dark palette, fonts, and control styling

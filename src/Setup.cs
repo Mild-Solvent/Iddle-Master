@@ -27,8 +27,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master Setup")]
 [assembly: AssemblyDescription("Installer for Idle Master")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.7.2.0")]
-[assembly: AssemblyFileVersion("0.7.2.0")]
+[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyFileVersion("0.8.0.0")]
 
 namespace IdleMasterSetup
 {
