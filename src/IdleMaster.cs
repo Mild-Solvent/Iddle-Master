@@ -664,10 +664,14 @@ audiodg
 spoolsv
 dasHost
 wlanext
-# the streaming stack itself
+# the streaming stack itself. These four are also protected in code - no edit
+# here or anywhere else can put them on a kill list. tailscale-ipn is the tray
+# app: on Windows it is what tells the daemon to connect, so killing it strands
+# tailscaled in NoState and takes the machine off the network.
 sunshine
 sunshinesvc
 tailscaled
+tailscale-ipn
 # Docker and the WSL/Hyper-V machinery it rides on. Killing the desktop app while
 # the engine has containers up is a good way to lose work, and the backend costs
 # nothing once it is idle.
@@ -829,8 +833,8 @@ Code
 # Docker used to be here. It is in [protect] now - the containers you left running
 # matter more than the ~700 MB the backend costs. Delete it from [protect] if you
 # would rather have the RAM.
-# tray icons nobody can see
-tailscale-ipn
+# tray icons nobody can see. NOT tailscale-ipn: that one is the way back in
+# (it is what connects the daemon), and the code refuses to kill it anyway.
 SecurityHealthSystray
 RtkAudUService64
 FnHotkeyCapsLKNumLK
@@ -1350,8 +1354,23 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return Regex.IsMatch(text, rx, RegexOptions.IgnoreCase);
         }
 
+        // The way back in, protected in code rather than in a list. On Windows
+        // the Tailscale TRAY app is what tells the daemon which profile to
+        // connect: kill it and tailscaled drops to NoState, where no service
+        // restart reaches it - the machine is simply gone until somebody at
+        // the keyboard starts the app again. That is not a trade any mode may
+        // make on a box you only reach remotely, so no ini may list these,
+        // the same way the debloat page may never remove the Store.
+        private static readonly string[] NeverKill = new string[]
+        {
+            "tailscaled", "tailscale-ipn", "tailscale",
+            "sunshine", "sunshinesvc",
+        };
+
         public bool IsProtectedProcess(string name)
         {
+            foreach (string p in NeverKill)
+                if (Match(p, name)) return true;
             foreach (string p in cfg.Protect)
                 if (Match(p, name)) return true;
             return false;

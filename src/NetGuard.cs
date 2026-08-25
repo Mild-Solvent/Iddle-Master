@@ -1537,10 +1537,20 @@ namespace IdleMaster
             // Stopped and NoState both mean the daemon is up with nobody
             // having said "connect" - NoState is also where a fresh service
             // start lands. Restarting the service again never leaves NoState
-            // (two days of field log prove that); what leaves it is
-            // 'tailscale up'.
+            // (two days of field log prove that). What leaves it, on a
+            // Windows box, is the tray app: tailscale-ipn is what tells the
+            // daemon which profile to connect, and idle's own kill list takes
+            // it down as a "tray icon nobody can see". Starting it is exactly
+            // what typing "tailscale" after the Windows key does - so do
+            // that first, then say 'tailscale up' ourselves.
             if (now.TailscaleState == "Stopped" || now.TailscaleState == "NoState")
             {
+                if (StartTailscaleGui(done))
+                {
+                    Thread.Sleep(10000);
+                    now = Again(now, done);
+                    if (now.TailscaleOk) return now;
+                }
                 TailscaleUp(done, "(it was " + now.TailscaleState + ")");
                 Thread.Sleep(5000);
                 now = Again(now, done);
@@ -1561,12 +1571,93 @@ namespace IdleMaster
                 if (!now.TailscaleOk && (now.TailscaleState == "Stopped"
                     || now.TailscaleState == "NoState" || now.TailscaleState.Length == 0))
                 {
+                    StartTailscaleGui(done);
                     TailscaleUp(done, "after the restart");
-                    Thread.Sleep(5000);
+                    Thread.Sleep(8000);
                     now = Again(now, done);
                 }
             }
             return now;
+        }
+
+        // What typing "tailscale" after the Windows key does: start the tray
+        // app. On Windows that app is the thing that hands the daemon a
+        // profile to connect with, which is why starting it cures NoState
+        // when nothing else does. Already running = nothing to do (a second
+        // copy just exits anyway).
+        //
+        // Found the same way the CLI is: next to tailscale.exe, then the
+        // service's own ImagePath, then the usual install root, then PATH -
+        // so a machine that put Tailscale somewhere else is still covered.
+        private bool StartTailscaleGui(List<string> done)
+        {
+            try
+            {
+                if (Process.GetProcessesByName("tailscale-ipn").Length > 0) return false;
+            }
+            catch (Exception) { }
+
+            string exe = TailscaleGuiExe();
+            if (exe == null) { done.Add("no Tailscale tray app to start"); return false; }
+
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo(exe);
+                psi.WorkingDirectory = Path.GetDirectoryName(exe);
+                psi.UseShellExecute = true;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;    // it is a tray app; no window on your screen
+                Process.Start(psi);
+                done.Add("started the Tailscale tray app");
+                FixCount++;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                done.Add("could not start the Tailscale tray app: " + First(ex.Message));
+                return false;
+            }
+        }
+
+        private string tailscaleGui;
+
+        private string TailscaleGuiExe()
+        {
+            if (tailscaleGui != null) return tailscaleGui.Length == 0 ? null : tailscaleGui;
+
+            List<string> tries = new List<string>();
+            try
+            {
+                string cli = TailscaleExe();
+                string dir = Path.GetDirectoryName(cli);
+                if (!string.IsNullOrEmpty(dir)) tries.Add(Path.Combine(dir, "tailscale-ipn.exe"));
+            }
+            catch (Exception) { }
+            tries.Add(Path.Combine(Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFiles), "Tailscale\\tailscale-ipn.exe"));
+            tries.Add(Path.Combine(Environment.GetFolderPath(
+                Environment.SpecialFolder.ProgramFilesX86), "Tailscale\\tailscale-ipn.exe"));
+
+            foreach (string t in tries)
+            {
+                try { if (t.Length > 0 && File.Exists(t)) { tailscaleGui = t; return t; } }
+                catch (Exception) { }
+            }
+
+            // Last resort: whatever a copy that is running right now was
+            // started from - covers installs in a place nobody guessed.
+            try
+            {
+                Process[] live = Process.GetProcessesByName("tailscale-ipn");
+                if (live.Length > 0)
+                {
+                    string path = live[0].MainModule.FileName;
+                    if (File.Exists(path)) { tailscaleGui = path; return path; }
+                }
+            }
+            catch (Exception) { }
+
+            tailscaleGui = "";
+            return null;
         }
 
         // 'tailscale up' with the stored prefs - connects, changes nothing.
