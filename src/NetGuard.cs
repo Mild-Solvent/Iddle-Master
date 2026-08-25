@@ -1534,12 +1534,14 @@ namespace IdleMaster
                 return now;
             }
 
-            string outp;
-            if (now.TailscaleState == "Stopped")
+            // Stopped and NoState both mean the daemon is up with nobody
+            // having said "connect" - NoState is also where a fresh service
+            // start lands. Restarting the service again never leaves NoState
+            // (two days of field log prove that); what leaves it is
+            // 'tailscale up'.
+            if (now.TailscaleState == "Stopped" || now.TailscaleState == "NoState")
             {
-                int rc = Exec(TailscaleExe(), "up", 45000, out outp);
-                if (rc == 0) { done.Add("ran 'tailscale up' (it was Stopped)"); FixCount++; }
-                else done.Add("'tailscale up' failed: " + First(outp));
+                TailscaleUp(done, "(it was " + now.TailscaleState + ")");
                 Thread.Sleep(5000);
                 now = Again(now, done);
                 if (now.TailscaleOk) return now;
@@ -1554,15 +1556,31 @@ namespace IdleMaster
                 if (ok) FixCount++;
                 Thread.Sleep(8000);
                 now = Again(now, done);
-                if (!now.TailscaleOk && now.TailscaleState == "Stopped")
+                // A restarted daemon reports Stopped or NoState until someone
+                // says "connect" - say it, whichever of the two it landed in.
+                if (!now.TailscaleOk && (now.TailscaleState == "Stopped"
+                    || now.TailscaleState == "NoState" || now.TailscaleState.Length == 0))
                 {
-                    int rc = Exec(TailscaleExe(), "up", 45000, out outp);
-                    if (rc == 0) { done.Add("ran 'tailscale up' after the restart"); FixCount++; }
+                    TailscaleUp(done, "after the restart");
                     Thread.Sleep(5000);
                     now = Again(now, done);
                 }
             }
             return now;
+        }
+
+        // 'tailscale up' with the stored prefs - connects, changes nothing.
+        // Newer CLIs take --timeout so a wedged daemon cannot hang the guard's
+        // thread; older ones do not know the flag, so a refusal falls back to
+        // the bare command (Exec's own clock still bounds that one).
+        private bool TailscaleUp(List<string> done, string why)
+        {
+            string outp;
+            int rc = Exec(TailscaleExe(), "up --timeout=40s", 55000, out outp);
+            if (rc != 0) rc = Exec(TailscaleExe(), "up", 45000, out outp);
+            if (rc == 0) { done.Add("ran 'tailscale up' " + why); FixCount++; return true; }
+            done.Add("'tailscale up' " + why + " failed: " + First(outp));
+            return false;
         }
 
         private NetReport RepairSunshine(NetReport r, List<string> done)
