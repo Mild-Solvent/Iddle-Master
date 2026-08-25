@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.8.0.0")]
-[assembly: AssemblyFileVersion("0.8.0.0")]
+[assembly: AssemblyVersion("0.9.0.0")]
+[assembly: AssemblyFileVersion("0.9.0.0")]
 
 namespace IdleMaster
 {
@@ -260,6 +260,7 @@ namespace IdleMaster
         public int SentryBackoffMinutes = 30;       // ...and for how long it leaves it alone
         public bool SentrySkipForeground = true;    // never kill what you are actively looking at
         public bool SkipOpenApps = true;            // never kill any app with a window open (boost only)
+        public bool OverclockedSentry = false;      // away mode: the sentry kills EVERYTHING not protected - no asking, no sparing
         public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
         public int SentryFullPassMinutes = 0;       // a whole boost pass (services + trim + guard) every N min. 0 = off
         public int BoostWhenFreeBelowMb = 0;        // ...and one right now when free RAM drops under this. 0 = off
@@ -272,6 +273,8 @@ namespace IdleMaster
                                                     // that are on no list at all. 0 = off.
         public bool Tray = true;                    // tray icon; closing the window hides to it
         public int UpdateCheckHours = 6;            // ask GitHub for a newer release this often. 0 = only by hand
+        public bool StartWithWindows = false;       // logon task: Idle Master opens as you log in
+        public string StartupAction = "none";       // ...and then runs: none | boost | idle
 
         // --- network guard, the standing watch: the connection itself, independent of the sentry
         public bool NetworkGuardWifi = true;        // reconnect Wi-Fi to a known network on its own
@@ -293,6 +296,7 @@ namespace IdleMaster
         public readonly List<string> CleanupProtect = new List<string>();
         public readonly List<string> DebloatProtect = new List<string>();
         public readonly List<string> NetworkWifi = new List<string>();    // preferred Wi-Fi profiles, in order
+        public readonly List<string> RemoteApps = new List<string>();     // apps the remote-desktop watch keeps connected
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
 
@@ -330,6 +334,14 @@ namespace IdleMaster
                         case "sentry": c.Sentry = b; break;
                         case "sentryskipforeground": c.SentrySkipForeground = b; break;
                         case "skipopenapps": c.SkipOpenApps = b; break;
+                        case "overclockedsentry": c.OverclockedSentry = b; break;
+                        case "startwithwindows": c.StartWithWindows = b; break;
+                        case "startupaction":
+                        {
+                            string sa = v.ToLowerInvariant();
+                            c.StartupAction = (sa == "boost" || sa == "idle") ? sa : "none";
+                            break;
+                        }
                         case "sentryseconds": c.SentrySeconds = Int(v, c.SentrySeconds, 5); break;
                         case "sentryserviceminutes": c.SentryServiceMinutes = Int(v, c.SentryServiceMinutes, 1); break;
                         case "sentrytrimminutes": c.SentryTrimMinutes = Int(v, c.SentryTrimMinutes, 1); break;
@@ -377,6 +389,8 @@ namespace IdleMaster
                     case "debloat.protect": c.DebloatProtect.Add(line); break;
                     // Wi-Fi profile names, verbatim.
                     case "network.wifi": c.NetworkWifi.Add(line); break;
+                    // Process names the remote-desktop watch keeps connected.
+                    case "remote.apps": c.RemoteApps.Add(item); break;
                 }
             }
             return c;
@@ -406,6 +420,9 @@ namespace IdleMaster
             SentryBackoffMinutes = o.SentryBackoffMinutes;
             SentrySkipForeground = o.SentrySkipForeground;
             SkipOpenApps = o.SkipOpenApps;
+            OverclockedSentry = o.OverclockedSentry;
+            StartWithWindows = o.StartWithWindows;
+            StartupAction = o.StartupAction;
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
             SentryFullPassMinutes = o.SentryFullPassMinutes;
             BoostWhenFreeBelowMb = o.BoostWhenFreeBelowMb;
@@ -427,6 +444,21 @@ namespace IdleMaster
             Swap(CleanupProtect, o.CleanupProtect);
             Swap(DebloatProtect, o.DebloatProtect);
             Swap(NetworkWifi, o.NetworkWifi);
+            Swap(RemoteApps, o.RemoteApps);
+        }
+
+        // The names one section of the shipped default config carries, enabled
+        // and commented-out suggestions alike, so the windows can mark which
+        // entries are "base kit" and which the user (or a toast answer) added.
+        private static IniFile kit;
+
+        public static bool IsKitEntry(string section, string text)
+        {
+            if (kit == null)
+                kit = new IniFile(DefaultIni.Replace("\r\n", "\n").Split('\n'));
+            foreach (IniFile.Entry e in kit.Section(section))
+                if (e.Text.Equals(text, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         private static void Swap(List<string> mine, List<string> theirs)
@@ -528,6 +560,11 @@ SentrySkipForeground=1
 # and killing those crashes the app even though its own name is not listed.
 # Boost only; ABSOLUTE IDLE still closes everything.
 SkipOpenApps=1
+# The away switch: while this is 1, a hunting sentry kills EVERYTHING that is
+# not on [protect] - no questions, no sparing open windows, no foreground mercy.
+# Toggle it in the window, click ABSOLUTE IDLE, walk away. Turn it off (or hit
+# Restore) when you are back at the keyboard.
+OverclockedSentry=0
 # Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
 TrimWhenFreeBelowMb=0
 # Repeated boost: every N minutes do a WHOLE pass at once - re-stop services,
@@ -562,6 +599,12 @@ Tray=1
 # one click downloads it, installs it in place and brings Idle Master back.
 # Your idlemaster.ini is never touched. 0 = only when you press the button.
 UpdateCheckHours=6
+# Start Idle Master as you log in (a logon scheduled task, created or removed
+# when you save Settings - the checkbox there is the switch).
+StartWithWindows=0
+# What that logon start runs on its own: none, boost, or idle. 'Keep hunting'
+# still applies afterwards, exactly as if you had clicked the button yourself.
+StartupAction=none
 
 # --- NETWORK GUARD ----------------------------------------------------------
 # The sentry guards the RAM; this guards the way back in. With NetworkGuard=1,
@@ -867,6 +910,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 [network.wifi]
 #HomeNet
 #HomeNet 5G
+
+# ---------------------------------------------------------------------------
+# REMOTE DESKTOP SETUP - apps the network guard must keep connected. Process
+# names ('*' works); pick them in the window ('Remote desktop setup'), where
+# the common streaming/remote tools are offered first but ANY app can be
+# chosen. Click Calibrate there while everything is connected the way you
+# like: the guard remembers each app's exe, service and listening ports, and
+# whenever that picture changes it restarts/relaunches the app to get it back.
+# ---------------------------------------------------------------------------
+[remote.apps]
+#sunshine
+#parsecd
 ";
     }
 
@@ -882,11 +937,17 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         public IniFile() { lines = new List<string>(File.ReadAllLines(Config.Path_)); }
 
+        // For parsing text that is not the config on disk - the shipped default,
+        // mostly, so the windows can tell base-kit entries from added ones.
+        public IniFile(string[] text) { lines = new List<string>(text); }
+
         public sealed class Entry
         {
             public readonly string Text;
             public bool Enabled;
-            public Entry(string text, bool enabled) { Text = text; Enabled = enabled; }
+            public readonly bool Chosen;      // written by a toast answer ("you chose this on ...")
+            public Entry(string text, bool enabled) : this(text, enabled, false) { }
+            public Entry(string text, bool enabled, bool chosen) { Text = text; Enabled = enabled; Chosen = chosen; }
         }
 
         private static bool IsHeader(string line, string section)
@@ -944,7 +1005,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 if (bare.Length == 0) continue;                 // blank or pure prose comment
                 if (bare.IndexOf('=') >= 0 && section == "settings") continue;
                 if (Disabled(lines[i]) && IsProse(lines[i], bare)) continue;
-                found.Add(new Entry(bare, !Disabled(lines[i])));
+                bool chosen = lines[i].IndexOf("you chose this on", StringComparison.OrdinalIgnoreCase) >= 0;
+                found.Add(new Entry(bare, !Disabled(lines[i]), chosen));
             }
             return found;
         }
@@ -2070,7 +2132,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 {
                     slot.Close();
                     slot = null;
-                    log("[sentry] another sentry already has the watch - not starting a second one");
+                    log("[sentry] sentry found - another watch already has the slot");
                     return false;
                 }
             }
@@ -2101,6 +2163,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             log("[sentry] on watch, enforcing " + mode.ToUpperInvariant()
                 + " every " + cfg.SentrySeconds + "s. Restore turns it off.");
+            if (cfg.OverclockedSentry)
+                log("[sentry] OVERCLOCKED - everything not on the protect list is fair game.");
             return true;
         }
 
@@ -2242,18 +2306,23 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             HashSet<string> skip = new HashSet<string>();
             foreach (KeyValuePair<string, DateTime> kv in cooling) skip.Add(kv.Key);
 
+            // Overclocked: nobody is at the keyboard, so nothing is spared and
+            // everything not protected counts as listed. [protect] still wins -
+            // Census never hands over a protected name.
+            bool over = cfg.OverclockedSentry;
+
             int spare = 0;
-            if (mode == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
+            if (!over && mode == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
 
             WindowGuard guard = null;
-            if (mode == "boost" && cfg.SkipOpenApps) guard = WindowGuard.Snapshot();
+            if (!over && mode == "boost" && cfg.SkipOpenApps) guard = WindowGuard.Snapshot();
 
             List<Candidate> all = engine.Census(skip, spare, guard);
             List<KillHit> hits = new List<KillHit>();
 
             foreach (Candidate c in all)
             {
-                bool listed = engine.OnList(patterns, c.Name);
+                bool listed = over || engine.OnList(patterns, c.Name);
 
                 if (firstSweep)
                 {
@@ -2380,6 +2449,9 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         // mode where nobody is watching, the lists decide on their own.
         private Verdict Consult(Candidate c, bool listed)
         {
+            // Overclocked means away: nobody would answer a toast, and the whole
+            // point is that everything unprotected dies.
+            if (cfg.OverclockedSentry) return Verdict.Kill;
             if (!cfg.AskBeforeKill || Ask == null || mode == "idle" || stopping)
                 return listed ? Verdict.Kill : Verdict.Keep;
 
@@ -2460,6 +2532,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         private static string LogPath { get { return Path.Combine(Dir, "idlemaster.log"); } }
 
+        // The tail that follows another process's sentry needs to know where
+        // everybody writes.
+        public static string LogFile { get { return LogPath; } }
+
         public static void FileLog(string line)
         {
             try
@@ -2480,7 +2556,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 string s = a.TrimStart('-', '/').ToLowerInvariant();
                 if (s == "boost" || s == "idle" || s == "restore" || s == "report" || s == "help"
                     || s == "unwatch" || s == "stopwatch" || s == "installtask" || s == "removetask"
-                    || s == "cleanup-report" || s == "debloat-report" || s == "network" || s == "guard")
+                    || s == "cleanup-report" || s == "debloat-report" || s == "network" || s == "guard"
+                    || s == "startup")
                     mode = s;
                 else if (s == "remote") mode = "network";     // 0.7.0's name for it
                 else if (s == "watch" || s == "hunt")
@@ -2496,6 +2573,29 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             {
                 MessageBox.Show("Bad idlemaster.ini:\n\n" + ex.Message, "Idle Master");
                 return 2;
+            }
+
+            // One Idle Master per machine. Every long-lived shape of the app -
+            // the window, --watch, --guard, --startup - claims the same global
+            // slot before it puts anything in the tray, so a logon task plus a
+            // manual launch can never stack two icons again. The loser of the
+            // race does not run: a window launch wakes the running copy and
+            // brings ITS window to the front instead.
+            bool longLived = mode == "" || mode == "watch" || mode == "guard" || mode == "startup";
+            if (longLived && !SoloInstance.Claim())
+            {
+                if (mode == "" || mode == "startup")
+                {
+                    SoloInstance.PokeRunning();
+                    return 0;
+                }
+                // --watch / --guard come from scheduled tasks: no window is
+                // popped, just a line for whoever reads the task's output.
+                Native.AttachConsole(-1);
+                Console.WriteLine(Sentry.IsRunningSomewhere()
+                    ? "an Idle Master is already running and its sentry has the watch - nothing to do."
+                    : "an Idle Master is already running - use it instead of starting a second copy.");
+                return 1;
             }
 
             if (mode == "")
@@ -2540,6 +2640,17 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Application.Run(g);
                     return 0;
                 }
+                case "startup":
+                {
+                    // The logon task (StartWithWindows). The window opens like a
+                    // normal launch, and StartupAction says what it does next.
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    MainForm sf = new MainForm(cfg);
+                    sf.RunOnLogon();
+                    Application.Run(sf);
+                    return 0;
+                }
                 case "watch": break;          // no mode run, just take up the watch
                 case "unwatch":
                 case "stopwatch":
@@ -2560,6 +2671,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Console.WriteLine("  --debloat-report  list the preinstalled Store apps and which are known bloat");
                     Console.WriteLine("  --network         check link + internet + Tailscale + Sunshine now, fix what is down");
                     Console.WriteLine("  --guard           sit in the tray running only the network guard");
+                    Console.WriteLine("  --startup         what the StartWithWindows logon task runs: open the window,");
+                    Console.WriteLine("                    then run StartupAction (none/boost/idle) from the ini");
                     Console.WriteLine("  no arguments = open the window");
                     return 0;
             }
@@ -2576,7 +2689,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
                 if (Sentry.IsRunningSomewhere())
                 {
-                    Console.WriteLine("a sentry is already on watch - nothing to do.");
+                    Console.WriteLine("sentry found - one is already on watch. Its log: " + LogPath);
                     return 1;
                 }
 
@@ -2678,6 +2791,37 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             }
             log("   = " + found.Count + " removable apps; " + bloat
                 + " known bloat. The window ('Debloat') does the actual removing.");
+        }
+
+        // Keeps the StartWithWindows logon task in step with the setting: made
+        // when it goes on, removed when it goes off. Quiet about a delete that
+        // finds nothing - that is not news.
+        public static void SyncStartupTask(bool on, Action<string> log)
+        {
+            string name = "IdleMaster Startup";
+            string args = on
+                ? "/Create /TN \"" + name + "\" /TR \"\\\"" + Application.ExecutablePath
+                  + "\\\" --startup\" /SC ONLOGON /RL HIGHEST /F"
+                : "/Delete /TN \"" + name + "\" /F";
+            string outp;
+            int rc = NetGuard.Exec("schtasks.exe", args, 20000, out outp);
+            if (on && rc == 0)
+                log("Idle Master now starts as you log in (scheduled task '" + name + "').");
+            else if (on)
+                log("! could not create the logon task: " + FirstLine(outp));
+            else if (rc == 0)
+                log("Idle Master no longer starts at logon.");
+        }
+
+        private static string FirstLine(string s)
+        {
+            if (s == null) return "";
+            foreach (string line in s.Split('\n'))
+            {
+                string t = line.Trim();
+                if (t.Length > 0) return t;
+            }
+            return "";
         }
 
         // Optional: a logon task so the watch - or just the guard - survives a

@@ -257,6 +257,37 @@ now*. Closing the window while it guards hides to the tray. `--network` does one
 check-and-fix from a script, `--guard` sits in the tray running only the guard,
 and `--installtask --guard` makes that happen at every logon.
 
+## Disk cleanup
+
+RAM comes back on its own; disk junk sits there until somebody weighs it. **Disk
+cleanup** reads each NTFS drive's own file table (the MFT) raw — the WizTree
+trick, and the app's elevation is exactly what raw volume reads need — so the
+whole of `C:` is sized in seconds, then sorted into a tree you can judge:
+
+- **Known junk spots** — temp folders, browser caches, crash dumps, update
+  leftovers, thumbnail caches. Pre-ticked, because the answer is known.
+- **Old installers**, **possible leftovers** (folders no installed program
+  claims), **big folders** — listed, never pre-ticked. Your call.
+- **Disk map** — the whole drive at the bottom, browsable, biggest first.
+
+Every row opens into what is actually *inside* it, biggest first, each line with
+its size, its share-of-parent bar, and an **owner** column that names the app
+(or the person, or Windows) the bytes belong to — so you can tell somebody's
+droppings from a load-bearing part of an app before you tick it.
+
+Filters up top: minimum size, safe/review, type-to-filter by name. **ticked
+only** flips the tree into a flat review list of exactly what Clean will take,
+full paths shown — untick a row there and it leaves the plan. **Clean checked**
+sends everything to the Recycle Bin — nested ticks collapse into their parent,
+one shell call, one undo — and the tree updates without a rescan. The bin row
+itself is the one *permanent* action, says so in as many words, and goes last.
+
+`[cleanup.protect]` wins over everything, and the deep guardrails are in code:
+the map refuses to tick `\Windows`, a whole drive, a whole profile, the pagefile
+and its friends, however hard you click. A drive that is not NTFS — or a table
+read whose total does not add up against the drive's own used-space number —
+falls back to a parallel walk that builds the same tree, just slower.
+
 ## Debloat
 
 The sentry fights the junk that runs; **Debloat** removes the junk that is merely
@@ -406,7 +437,8 @@ will catch that and scream in the log, but test it once while you're awake.
 src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
 src/NetGuard.cs             the network guard: WLAN API, measuring, the repair ladder
 src/Ui.cs                 every window: main, task manager, settings, ask toast
-src/Cleanup.cs            the disk cleanup scanner
+src/Cleanup.cs            the disk cleanup scanner: junk spots, leftovers, owners
+src/DiskScan.cs           the disk mapper: raw MFT reader + parallel-walk fallback
 src/Debloat.cs            the debloater: Store-app inventory, known-bloat table, removal
 src/Backup.cs             the backup kit: app inventory, zip writer, window
 src/Rebuild.cs            the standalone exe that ships inside a kit

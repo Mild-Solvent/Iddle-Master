@@ -3,3 +3,6 @@ dist/idlemaster.state
 dist/IdleMaster.old*.exe
 dist/*.old-*
 *.pdb
+iso/usb/
+iso/*.iso
+iso/

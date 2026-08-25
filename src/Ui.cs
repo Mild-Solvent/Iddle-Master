@@ -7,7 +7,7 @@
 //   QuickSettingsForm : the handful of switches most people actually touch.
 //   ConfigForm        : the whole config - reached via "Advanced settings".
 //   EatersForm        : the live task manager behind "What's eating RAM?".
-//   CleanupForm       : the disk scanner and review table behind "Disk cleanup".
+//   CleanupForm       : the disk-map tree behind "Disk cleanup".
 //   MainForm          : gauge, mode buttons, and the log console front and centre.
 //
 // Same compiler rules as the rest: C# 5, in-box .NET Framework csc.
@@ -30,8 +30,27 @@ namespace IdleMaster
     // Bottom-right, always on top, shows the app's own icon and what it is, and
     // counts down. Four answers, two of them "trash": once, or every time.
     // No answer means whatever AskTimeoutAction says (trash once, by default).
+    //
+    // Deliberately mute: it never takes keyboard focus, so it cannot interrupt
+    // typing or knock a fullscreen game out of exclusive mode. Even clicking a
+    // button leaves the foreground window alone (WS_EX_NOACTIVATE); the only
+    // way to answer is with the mouse, and silence is already an answer.
     internal sealed class AskForm : Form
     {
+        private const int WS_EX_NOACTIVATE = 0x08000000;
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= WS_EX_NOACTIVATE;
+                return cp;
+            }
+        }
+
         private static readonly List<AskForm> Open = new List<AskForm>();
 
         private readonly System.Windows.Forms.Timer countdown;
@@ -326,6 +345,7 @@ namespace IdleMaster
 
             if (kind == "svc") FillServices();
             else if (kind == "wifi") FillWifi();
+            else if (kind == "remote") FillRemote();
             else FillProcesses();
 
             Button ok = Theme.Action("Add selected");
@@ -333,7 +353,9 @@ namespace IdleMaster
             ok.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             ok.Click += delegate
             {
-                foreach (int i in box.CheckedIndices) Picked.Add(values[i]);
+                // Heading rows carry an empty value and are not picks.
+                foreach (int i in box.CheckedIndices)
+                    if (values[i].Length > 0) Picked.Add(values[i]);
                 DialogResult = DialogResult.OK;
                 Close();
             };
@@ -353,6 +375,29 @@ namespace IdleMaster
             {
                 values.Add(r.Name);
                 box.Items.Add(string.Format(CultureInfo.InvariantCulture, "{0,-34} {1,8}  {2}",
+                    r.Name, Engine.Size(r.Bytes), r.Count > 1 ? "x" + r.Count : ""));
+            }
+        }
+
+        // The common remote-desktop stacks first, detected ones marked - and
+        // then everything running, because literally any app can be watched.
+        private void FillRemote()
+        {
+            values.Add("");
+            box.Items.Add("--- common remote desktop services ('*' = found on this machine) ---");
+            foreach (string[] c in RemoteApps.Common)
+            {
+                values.Add(c[0]);
+                box.Items.Add(string.Format(CultureInfo.InvariantCulture, "{0} {1,-16} {2}",
+                    RemoteApps.Detected(c[0], c[2]) ? "*" : " ", c[0],
+                    c[1] + (c[2].Length > 0 ? "   (service " + c[2] + ")" : "")));
+            }
+            values.Add("");
+            box.Items.Add("--- everything running right now ---");
+            foreach (ProcRow r in Engine.Snapshot(null))
+            {
+                values.Add(r.Name);
+                box.Items.Add(string.Format(CultureInfo.InvariantCulture, "  {0,-34} {1,8}  {2}",
                     r.Name, Engine.Size(r.Bytes), r.Count > 1 ? "x" + r.Count : ""));
             }
         }
@@ -421,11 +466,15 @@ namespace IdleMaster
 
     // One editable list: everything in a section, commented-out entries included
     // as unchecked rows so you can see what the config ships and turn it on.
+    // Every row says where it came from - the shipped base kit, a toast answer
+    // ("Always trash" written by the ask dialog), or added by you - and wears
+    // that origin's colour.
     internal sealed class ListPane : Panel
     {
         private readonly string section;
-        private readonly string kind;       // "proc" | "svc" | "wifi" - what "Add from machine" lists
-        private readonly CheckedListBox box = new CheckedListBox();
+        private readonly string kind;       // "proc" | "svc" | "wifi" | "remote" - what "Add from machine" lists
+        private readonly BufferedListView box = new BufferedListView();
+        private readonly ColumnHeader colName, colFrom;
         private readonly List<IniFile.Entry> before;
 
         public ListPane(IniFile ini, string sectionName, string caption, bool isServices)
@@ -449,14 +498,26 @@ namespace IdleMaster
             head.AutoEllipsis = true;
             Controls.Add(head);
 
+            box.View = View.Details;
+            box.CheckBoxes = true;
+            box.FullRowSelect = true;
+            box.HideSelection = false;
+            box.HeaderStyle = ColumnHeaderStyle.None;
+            box.BorderStyle = BorderStyle.FixedSingle;
+            box.BackColor = Theme.Input;
+            box.ForeColor = Theme.ListFg;
+            box.Font = Theme.Mono();
+            colName = box.Columns.Add("Entry", 280);
+            colFrom = box.Columns.Add("From", 66, HorizontalAlignment.Right);
             box.SetBounds(6, 28, 354, 300);
             box.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            box.Font = Theme.Mono();
-            box.CheckOnClick = true;
-            Theme.Input_(box);
+            box.Resize += delegate { SizeColumns(); };
             Controls.Add(box);
+            SizeColumns();
 
-            foreach (IniFile.Entry e in before) box.Items.Add(e.Text, e.Enabled);
+            foreach (IniFile.Entry e in before)
+                AddRow(e.Text, e.Enabled,
+                    e.Chosen ? "toast" : Config.IsKitEntry(section, e.Text) ? "kit" : "added");
 
             Button add = Btn(kind == "wifi" ? "Pick a saved network" : "Add from machine", 6, 130);
             add.Click += delegate { Pick(); };
@@ -468,8 +529,28 @@ namespace IdleMaster
             del.Click += delegate
             {
                 for (int i = box.Items.Count - 1; i >= 0; i--)
-                    if (box.SelectedIndices.Contains(i)) box.Items.RemoveAt(i);
+                    if (box.Items[i].Selected) box.Items.RemoveAt(i);
             };
+        }
+
+        private void SizeColumns()
+        {
+            int w = box.ClientSize.Width - colFrom.Width - 4;
+            if (w > 60) colName.Width = w;
+        }
+
+        // The origin decides the colour: base-kit rows in the list's usual pale
+        // blue, toast answers in the accent, your own additions in white.
+        private void AddRow(string text, bool check, string origin)
+        {
+            ListViewItem it = new ListViewItem(text);
+            it.UseItemStyleForSubItems = false;
+            it.ForeColor = origin == "kit" ? Theme.ListFg
+                         : origin == "toast" ? Theme.Accent : Theme.Fg;
+            ListViewItem.ListViewSubItem from = it.SubItems.Add(origin);
+            from.ForeColor = origin == "toast" ? Theme.Accent : Theme.Dim;
+            box.Items.Add(it);
+            it.Checked = check;
         }
 
         private Button Btn(string text, int x, int w)
@@ -483,14 +564,15 @@ namespace IdleMaster
 
         private void Pick()
         {
-            string title = kind == "svc" ? "Running services" : kind == "wifi" ? "Saved Wi-Fi networks" : "Running processes";
+            string title = kind == "svc" ? "Running services" : kind == "wifi" ? "Saved Wi-Fi networks"
+                : kind == "remote" ? "Remote desktop apps" : "Running processes";
             using (PickForm f = new PickForm(title, kind))
             {
                 if (f.ShowDialog(this) != DialogResult.OK) return;
                 foreach (string v in f.Picked)
                 {
                     if (Has(v)) continue;
-                    box.Items.Add(v, true);
+                    AddRow(v, true, "added");
                 }
             }
         }
@@ -526,21 +608,31 @@ namespace IdleMaster
                 if (f.ShowDialog(this) != DialogResult.OK) return;
                 string v = t.Text.Trim();
                 if (v.Length == 0 || Has(v)) return;
-                box.Items.Add(v, true);
+                AddRow(v, true, "added");
             }
         }
 
         private bool Has(string v)
         {
-            foreach (object o in box.Items)
-                if (string.Equals(o.ToString(), v, StringComparison.OrdinalIgnoreCase)) return true;
+            foreach (ListViewItem it in box.Items)
+                if (string.Equals(it.Text, v, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
+        }
+
+        // The ticked names, for callers that want the list as it stands on
+        // screen (the remote page calibrates against it before saving).
+        public List<string> CheckedNames()
+        {
+            List<string> names = new List<string>();
+            foreach (ListViewItem it in box.Items)
+                if (it.Checked) names.Add(it.Text);
+            return names;
         }
 
         public void Save(IniFile ini)
         {
             List<string> now = new List<string>();
-            for (int i = 0; i < box.Items.Count; i++) now.Add(box.Items[i].ToString());
+            for (int i = 0; i < box.Items.Count; i++) now.Add(box.Items[i].Text);
 
             foreach (IniFile.Entry e in before)
             {
@@ -549,7 +641,7 @@ namespace IdleMaster
                     if (now[i].Equals(e.Text, StringComparison.OrdinalIgnoreCase)) { at = i; break; }
 
                 if (at < 0) { ini.Remove(section, e.Text); continue; }
-                bool on = box.GetItemChecked(at);
+                bool on = box.Items[at].Checked;
                 if (on != e.Enabled) ini.SetEnabled(section, e.Text, on);
             }
 
@@ -560,8 +652,14 @@ namespace IdleMaster
                     if (now[i].Equals(e.Text, StringComparison.OrdinalIgnoreCase)) { old = true; break; }
                 if (old) continue;
                 ini.Add(section, now[i]);
-                if (!box.GetItemChecked(i)) ini.SetEnabled(section, now[i], false);
+                if (!box.Items[i].Checked) ini.SetEnabled(section, now[i], false);
             }
+
+            // A pane can be saved twice (Calibrate saves, then Save saves again);
+            // 'before' has to move with the file or the second pass double-adds.
+            before.Clear();
+            for (int i = 0; i < box.Items.Count; i++)
+                before.Add(new IniFile.Entry(box.Items[i].Text, box.Items[i].Checked));
         }
     }
 
@@ -576,7 +674,9 @@ namespace IdleMaster
             new string[] { "AskBeforeKill",        "Ask before killing anything that started after the boost" },
             new string[] { "SentrySkipForeground", "Never kill the window you are using (boost only)" },
             new string[] { "SkipOpenApps",         "Never kill an app with a window open (boost only)" },
+            new string[] { "OverclockedSentry",    "Overclocked sentry - while hunting, kill EVERYTHING not protected (no asking, no sparing)" },
             new string[] { "Tray",                 "Tray icon - closing the window hides to it" },
+            new string[] { "StartWithWindows",     "Start Idle Master as you log in (saving here makes/removes the logon task)" },
             new string[] { "KillExplorer",         "Absolute idle also closes the shell (taskbar, desktop)" },
             new string[] { "NetworkGuard",         "Network guard - keep the link, Tailscale and Sunshine up; fix and reconnect when they drop" },
             new string[] { "TrimWorkingSets",      "Squeeze the working set of every surviving process" },
@@ -612,13 +712,29 @@ namespace IdleMaster
         public const int AskCount = 4;
         public const int CleanupCount = 2;
 
+        // Which flags ship OFF; everything else defaults on when the key is
+        // missing from the ini. Has to match the Config field initialisers.
+        public static bool FlagDefault(string key)
+        {
+            return key != "OverclockedSentry" && key != "StartWithWindows"
+                && key != "NetworkGuardScan" && key != "CloseBrowsersInBoost";
+        }
+
         // key, label, choices (value|label)
         public static readonly string[] TimeoutAction = new string[]
         {
             "trash|trash it once", "keep|leave it alone", "always|trash it every time",
         };
 
-        public static ComboBox Choice(string current)
+        // What the StartWithWindows logon start runs on its own.
+        public static readonly string[] StartupActions = new string[]
+        {
+            "none|nothing", "boost|BOOST NOW", "idle|ABSOLUTE IDLE",
+        };
+
+        public static ComboBox Choice(string current) { return ChoiceOf(TimeoutAction, current); }
+
+        public static ComboBox ChoiceOf(string[] pairs, string current)
         {
             ComboBox c = new ComboBox();
             c.DropDownStyle = ComboBoxStyle.DropDownList;
@@ -626,9 +742,9 @@ namespace IdleMaster
             c.BackColor = Theme.Input;
             c.ForeColor = Theme.Fg;
             int sel = 0;
-            for (int i = 0; i < TimeoutAction.Length; i++)
+            for (int i = 0; i < pairs.Length; i++)
             {
-                string[] kv = TimeoutAction[i].Split('|');
+                string[] kv = pairs[i].Split('|');
                 c.Items.Add(kv[1]);
                 if (current != null && kv[0].Equals(current.Trim(), StringComparison.OrdinalIgnoreCase)) sel = i;
             }
@@ -636,10 +752,12 @@ namespace IdleMaster
             return c;
         }
 
-        public static string ChoiceValue(ComboBox c)
+        public static string ChoiceValue(ComboBox c) { return ChoiceValueOf(TimeoutAction, c); }
+
+        public static string ChoiceValueOf(string[] pairs, ComboBox c)
         {
             int i = c.SelectedIndex < 0 ? 0 : c.SelectedIndex;
-            return TimeoutAction[i].Split('|')[0];
+            return pairs[i].Split('|')[0];
         }
 
         public static string[] Number(string key)
@@ -677,6 +795,7 @@ namespace IdleMaster
         private readonly Dictionary<string, CheckBox> flags = new Dictionary<string, CheckBox>();
         private readonly Dictionary<string, NumericUpDown> numbers = new Dictionary<string, NumericUpDown>();
         private ComboBox timeoutAction;
+        private ComboBox startupAction;
 
         public bool Saved;
 
@@ -687,7 +806,7 @@ namespace IdleMaster
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = MaximizeBox = false;
-            ClientSize = new Size(460, 472);
+            ClientSize = new Size(460, 552);
 
             int y = 16;
             y = Flag("Sentry", "Keep hunting after a boost",
@@ -698,6 +817,17 @@ namespace IdleMaster
                 "Closing the window hides Idle Master instead of quitting it.", y);
             y = Flag("NetworkGuard", "Network guard - never lose the way back in",
                 "Checks Wi-Fi, internet, Tailscale and Sunshine; reconnects what drops.", y);
+            y = Flag("StartWithWindows", "Start with Windows as I log in",
+                "A logon task opens Idle Master; the choice below says what it runs.", y);
+
+            Label sl = new Label();
+            sl.Text = "On that logon start, run";
+            sl.SetBounds(20, y + 3, 330, 20);
+            Controls.Add(sl);
+            startupAction = SettingSpec.ChoiceOf(SettingSpec.StartupActions, ini.GetSetting("StartupAction"));
+            startupAction.SetBounds(290, y, 150, 22);
+            Controls.Add(startupAction);
+            y += 32;
 
             y += 8;
             y = Number("AskTimeoutSeconds", y);
@@ -713,17 +843,17 @@ namespace IdleMaster
             y = Number("TrimWhenFreeBelowMb", y);
 
             Button advanced = Theme.Quiet("Advanced settings...");
-            advanced.SetBounds(20, 424, 150, 30);
+            advanced.SetBounds(20, 504, 150, 30);
             advanced.Click += delegate { OpenAdvanced(); };
             Controls.Add(advanced);
 
             Button save = Theme.Action("Save");
-            save.SetBounds(252, 424, 90, 30);
+            save.SetBounds(252, 504, 90, 30);
             save.Click += delegate { Persist(); };
             Controls.Add(save);
 
             Button cancel = Theme.Quiet("Cancel");
-            cancel.SetBounds(350, 424, 90, 30);
+            cancel.SetBounds(350, 504, 90, 30);
             cancel.Click += delegate { Close(); };
             Controls.Add(cancel);
             CancelButton = cancel;
@@ -733,7 +863,7 @@ namespace IdleMaster
         {
             CheckBox c = new CheckBox();
             c.Text = label;
-            c.Checked = SettingSpec.Truthy(ini.GetSetting(key), true);
+            c.Checked = SettingSpec.Truthy(ini.GetSetting(key), SettingSpec.FlagDefault(key));
             c.SetBounds(20, y, 420, 22);
             Controls.Add(c);
             flags[key] = c;
@@ -787,6 +917,7 @@ namespace IdleMaster
                 foreach (KeyValuePair<string, NumericUpDown> kv in numbers)
                     ini.SetSetting(kv.Key, ((int)kv.Value.Value).ToString(CultureInfo.InvariantCulture));
                 ini.SetSetting("AskTimeoutAction", SettingSpec.ChoiceValue(timeoutAction));
+                ini.SetSetting("StartupAction", SettingSpec.ChoiceValueOf(SettingSpec.StartupActions, startupAction));
                 ini.Save();
                 Saved = true;
                 Close();
@@ -891,7 +1022,7 @@ namespace IdleMaster
             {
                 CheckBox c = new CheckBox();
                 c.Text = f[1];
-                c.Checked = SettingSpec.Truthy(ini.GetSetting(f[0]), true);
+                c.Checked = SettingSpec.Truthy(ini.GetSetting(f[0]), SettingSpec.FlagDefault(f[0]));
                 c.SetBounds(16, y, 700, 24);
                 c.ForeColor = Theme.Fg;
                 page.Controls.Add(c);
@@ -1298,27 +1429,91 @@ namespace IdleMaster
 
     // ----------------------------------------------------------- disk cleanup
 
-    // The review table behind "Disk cleanup". Scan fills it on a worker thread,
-    // you tick what goes, Clean sends the ticked rows to the Recycle Bin.
-    // Nothing is deleted on its own, and nothing is deleted anywhere else.
+    // One row that lives directly in the disk map: a (tree, node) pair. The
+    // path and size are read from the map on demand, never copied.
+    internal sealed class FsRef
+    {
+        public readonly DiskTree Tree;
+        public readonly int Node;
+        public FsRef(DiskTree t, int n) { Tree = t; Node = n; }
+        public string Path { get { return Tree.PathOf(Node); } }
+        public long Bytes { get { return Tree.Bytes[Node]; } }
+    }
+
+    // A TreeView that repaints without flicker and never grows a horizontal
+    // scrollbar - the columns painted on the right need a stable width. The
+    // dark Explorer theme gives it dark scrollbars and visible glyphs.
+    internal sealed class CleanTree : TreeView
+    {
+        private const int TVS_NOHSCROLL = 0x8000;
+        private const int TVM_SETEXTENDEDSTYLE = 0x112C;
+        private const int TVS_EX_DOUBLEBUFFER = 0x0004;
+
+        [System.Runtime.InteropServices.DllImport("uxtheme.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr h, string app, string idList);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr wp, IntPtr lp);
+
+        public CleanTree() { DoubleBuffered = true; }
+
+        protected override CreateParams CreateParams
+        {
+            get { CreateParams cp = base.CreateParams; cp.Style |= TVS_NOHSCROLL; return cp; }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try { SetWindowTheme(Handle, "DarkMode_Explorer", null); } catch (Exception) { }
+            try
+            {
+                SendMessage(Handle, TVM_SETEXTENDEDSTYLE,
+                    (IntPtr)TVS_EX_DOUBLEBUFFER, (IntPtr)TVS_EX_DOUBLEBUFFER);
+            }
+            catch (Exception) { }
+        }
+    }
+
+    // The window behind "Disk cleanup". Scan reads each drive's file table in
+    // seconds, then everything is a tree: categories hold findings, findings
+    // open into what is actually inside them, and the disk map at the bottom
+    // holds the whole drive. Tick what goes - known junk arrives pre-ticked -
+    // and Clean sends it to the Recycle Bin. Nothing is deleted on its own.
     internal sealed class CleanupForm : Form
     {
-        // Fixed order so the table reads top-down from "obviously junk" to
-        // "you decide": the same journey the scanner itself takes.
+        // Fixed order so the tree reads top-down from "obviously junk" to
+        // "you decide" - the same journey the scanner itself takes.
         private static readonly string[] CategoryOrder = new string[]
         {
             "Temp files", "Caches", "Crash dumps", "Windows update",
             "Old installers", "Recycle bin", "Possible leftovers", "Big folders",
         };
+        private const string DiskMapCat = "Disk map";
+
+        // Names that read as junk wherever they appear - the class column
+        // marks them "junk?" inside the map so the eye lands on them first.
+        private static readonly string[] JunkNames = new string[]
+        {
+            "temp", "tmp", "cache", "caches", "cache2", "code cache", "gpucache",
+            "shadercache", "dxcache", "d3dscache", "crashdumps", "crash reports",
+            "minidump", "dumps", "logs", "log",
+        };
+
+        private const int MaxKids = 400;    // rows shown per expanded level
 
         private readonly Config cfg;
         private readonly Action<string> log;
-        private readonly BufferedListView list;
-        private readonly ColumnHeader colName, colCat, colWhere, colSize, colClass;
+        private readonly CleanTree tree;
+        private readonly ComboBox cmbSize, cmbClass;
+        private readonly TextBox txtName;
+        private readonly CheckBox chkTicked;
         private readonly Button btnScan, btnStop, btnClean;
         private readonly Label progress;
         private readonly System.Windows.Forms.Timer timer;
         private readonly ToolStripMenuItem miOpen, miCleanOne, miProtect, miCopy;
+        private readonly Font mono, small;
 
         // The worker drops findings here; a 200 ms timer drains them onto the
         // UI thread in batches, so a fast scan cannot flood BeginInvoke.
@@ -1327,17 +1522,26 @@ namespace IdleMaster
         private string phase = "";
         private CleanupScanner scanner;
         private bool working;
-        private bool filling;
+        private bool syncing;       // programmatic check changes, ignore events
+
+        // The model the tree is rebuilt from: every finding the scan produced
+        // (filters only hide, never forget), and every tick the user made,
+        // keyed by lowercased path. Ticks survive filter changes and rebuilds.
+        private readonly List<CleanupItem> model = new List<CleanupItem>();
+        private readonly Dictionary<string, object> picked
+            = new Dictionary<string, object>();
 
         public CleanupForm(Config c, Action<string> logger)
         {
             cfg = c;
             log = logger;
+            mono = Theme.Mono();
+            small = Theme.Small();
 
             Theme.Form(this);
             Text = "IDLE MASTER - disk cleanup";
-            Size = new Size(760, 620);
-            MinimumSize = new Size(620, 420);
+            Size = new Size(860, 640);
+            MinimumSize = new Size(680, 440);
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
 
@@ -1345,39 +1549,89 @@ namespace IdleMaster
             cap.SetBounds(16, 12, 180, 18);
             Controls.Add(cap);
 
-            Label hint = Theme.Hint("scan, tick what goes - Clean sends it to the Recycle Bin");
-            hint.Font = Theme.Small();
+            Label hint = Theme.Hint("scan, open anything to see what is inside, tick what goes - Clean sends it to the Recycle Bin");
+            hint.Font = small;
             hint.TextAlign = ContentAlignment.MiddleRight;
-            hint.SetBounds(200, 12, 528, 18);
+            hint.SetBounds(200, 12, 628, 18);
             hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(hint);
 
-            list = new BufferedListView();
-            list.View = View.Details;
-            list.CheckBoxes = true;
-            list.FullRowSelect = true;
-            list.MultiSelect = false;
-            list.HideSelection = false;
-            list.ShowItemToolTips = true;
-            list.HeaderStyle = ColumnHeaderStyle.Nonclickable;
-            list.BorderStyle = BorderStyle.FixedSingle;
-            list.BackColor = Theme.Input;
-            list.ForeColor = Theme.Fg;
-            list.OwnerDraw = true;
-            list.DrawColumnHeader += DrawHeader;
-            list.DrawItem += delegate(object s, DrawListViewItemEventArgs a) { a.DrawDefault = true; };
-            list.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs a) { a.DrawDefault = true; };
-            colName = list.Columns.Add("Item", 236);
-            colCat = list.Columns.Add("Category", 108);
-            colWhere = list.Columns.Add("Where", 200);
-            colSize = list.Columns.Add("Size", 88, HorizontalAlignment.Right);
-            colClass = list.Columns.Add("Class", 64);
-            list.SetBounds(16, 36, 712, 488);
-            list.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            list.Resize += delegate { SizeColumns(); };
-            list.ItemChecked += delegate { if (!filling) UpdateCleanButton(); };
-            Controls.Add(list);
-            SizeColumns();
+            // ---- the filter bar
+
+            Label lf = Theme.Hint("show");
+            lf.SetBounds(16, 40, 34, 22);
+            lf.TextAlign = ContentAlignment.MiddleLeft;
+            Controls.Add(lf);
+
+            cmbSize = new ComboBox();
+            cmbSize.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbSize.FlatStyle = FlatStyle.Flat;
+            Theme.Input_(cmbSize);
+            cmbSize.Items.AddRange(new object[]
+                { "any size", "over 10 MB", "over 100 MB", "over 1 GB" });
+            cmbSize.SelectedIndex = 0;
+            cmbSize.SetBounds(52, 39, 104, 24);
+            cmbSize.SelectedIndexChanged += delegate { RebuildTree(); };
+            Controls.Add(cmbSize);
+
+            cmbClass = new ComboBox();
+            cmbClass.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbClass.FlatStyle = FlatStyle.Flat;
+            Theme.Input_(cmbClass);
+            cmbClass.Items.AddRange(new object[]
+                { "safe + review", "safe only", "review only" });
+            cmbClass.SelectedIndex = 0;
+            cmbClass.SetBounds(164, 39, 110, 24);
+            cmbClass.SelectedIndexChanged += delegate { RebuildTree(); };
+            Controls.Add(cmbClass);
+
+            txtName = new TextBox();
+            Theme.Input_(txtName);
+            txtName.SetBounds(282, 40, 160, 22);
+            txtName.TextChanged += delegate { RebuildTree(); };
+            Controls.Add(txtName);
+
+            Label lt = Theme.Hint("type to filter by name");
+            lt.Font = small;
+            lt.SetBounds(448, 42, 140, 18);
+            lt.TextAlign = ContentAlignment.MiddleLeft;
+            Controls.Add(lt);
+
+            // The review switch: a flat list of exactly what Clean will take,
+            // paths and all, so nothing hides in a collapsed branch.
+            chkTicked = new CheckBox();
+            chkTicked.Text = "ticked only";
+            chkTicked.ForeColor = Theme.Fg;
+            chkTicked.FlatStyle = FlatStyle.Flat;
+            chkTicked.SetBounds(Width - 142, 40, 110, 22);
+            chkTicked.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            chkTicked.CheckedChanged += delegate { RebuildTree(); };
+            Controls.Add(chkTicked);
+
+            // ---- the tree
+
+            tree = new CleanTree();
+            tree.CheckBoxes = true;
+            tree.ShowLines = false;
+            tree.ShowPlusMinus = true;
+            tree.ShowRootLines = false;
+            tree.FullRowSelect = true;
+            tree.HideSelection = false;
+            tree.ShowNodeToolTips = true;
+            tree.BorderStyle = BorderStyle.FixedSingle;
+            tree.BackColor = Theme.Input;
+            tree.ForeColor = Theme.Fg;
+            tree.ItemHeight = 20;
+            tree.Indent = 18;
+            tree.DrawMode = TreeViewDrawMode.OwnerDrawText;
+            tree.DrawNode += DrawNode;
+            tree.BeforeExpand += BeforeExpand;
+            tree.AfterCheck += AfterCheck;
+            tree.AfterSelect += delegate { tree.Invalidate(); };
+            tree.SetBounds(16, 70, 812, 454);
+            tree.Anchor = AnchorStyles.Top | AnchorStyles.Bottom
+                | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(tree);
 
             ContextMenuStrip menu = new ContextMenuStrip();
             Theme.Menu(menu);
@@ -1395,32 +1649,36 @@ namespace IdleMaster
             menu.Items.Add(miProtect);
             menu.Items.Add(miCopy);
             menu.Opening += MenuOpening;
-            list.ContextMenuStrip = menu;
+            tree.ContextMenuStrip = menu;
+            tree.NodeMouseClick += delegate(object s, TreeNodeMouseClickEventArgs a)
+            { if (a.Button == MouseButtons.Right) tree.SelectedNode = a.Node; };
+
+            // ---- the buttons
 
             btnScan = Theme.Action("Scan");
-            btnScan.SetBounds(16, 536, 100, 30);
+            btnScan.SetBounds(16, 556, 100, 30);
             btnScan.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             btnScan.Click += delegate { StartScan(); };
             Controls.Add(btnScan);
 
             btnStop = Theme.Quiet("Stop scan");
-            btnStop.SetBounds(124, 536, 100, 30);
+            btnStop.SetBounds(124, 556, 100, 30);
             btnStop.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             btnStop.Visible = false;
             btnStop.Click += delegate { if (scanner != null) scanner.Cancel(); };
             Controls.Add(btnStop);
 
             progress = Theme.Hint("no scan yet");
-            progress.Font = Theme.Small();
-            progress.SetBounds(232, 541, 220, 20);
+            progress.Font = small;
+            progress.SetBounds(232, 561, 320, 20);
             progress.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             Controls.Add(progress);
 
             btnClean = Theme.Dangerous("Clean checked");
-            btnClean.SetBounds(460, 536, 268, 30);
+            btnClean.SetBounds(560, 556, 268, 30);
             btnClean.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             btnClean.Enabled = false;
-            btnClean.Click += delegate { Clean(Checked()); };
+            btnClean.Click += delegate { Clean(PickedItems()); };
             Controls.Add(btnClean);
 
             timer = new System.Windows.Forms.Timer();
@@ -1429,23 +1687,47 @@ namespace IdleMaster
             timer.Start();
         }
 
-        private void SizeColumns()
+        // ---- filters
+
+        private long MinBytes()
         {
-            int rest = colName.Width + colCat.Width + colSize.Width + colClass.Width;
-            int w = list.ClientSize.Width - rest - 4;
-            if (w > 80) colWhere.Width = w;
+            switch (cmbSize.SelectedIndex)
+            {
+                case 1: return 10L * 1024 * 1024;
+                case 2: return 100L * 1024 * 1024;
+                case 3: return 1024L * 1024 * 1024;
+                default: return 0;
+            }
         }
 
-        private void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        private bool PassesClass(bool safe)
         {
-            using (SolidBrush b = new SolidBrush(Theme.Panel))
-                e.Graphics.FillRectangle(b, e.Bounds);
-            TextFormatFlags align = e.ColumnIndex == 3
-                ? TextFormatFlags.Right : TextFormatFlags.Left;
-            Rectangle r = e.Bounds;
-            r.Inflate(-6, 0);
-            TextRenderer.DrawText(e.Graphics, e.Header.Text, list.Font, r, Theme.Dim,
-                align | TextFormatFlags.VerticalCenter);
+            if (cmbClass.SelectedIndex == 1) return safe;
+            if (cmbClass.SelectedIndex == 2) return !safe;
+            return true;
+        }
+
+        private bool PassesName(string name, string path)
+        {
+            string f = txtName.Text.Trim();
+            if (f.Length == 0) return true;
+            if (name != null && name.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            return path != null && path.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private bool PassesFilters(CleanupItem it)
+        {
+            return it.Bytes >= MinBytes() && PassesClass(it.Safe)
+                && PassesName(it.Name, it.Path);
+        }
+
+        private static bool IsJunkName(string name)
+        {
+            foreach (string j in JunkNames)
+                if (name.Equals(j, StringComparison.OrdinalIgnoreCase)) return true;
+            return name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".dmp", StringComparison.OrdinalIgnoreCase);
         }
 
         // ---- scanning
@@ -1456,9 +1738,11 @@ namespace IdleMaster
             working = true;
             scanner = new CleanupScanner(cfg);
 
-            filling = true;
-            list.Items.Clear();
-            filling = false;
+            model.Clear();
+            picked.Clear();
+            syncing = true;
+            tree.Nodes.Clear();
+            syncing = false;
             lock (gate) { arrived.Clear(); phase = "starting..."; }
 
             btnScan.Enabled = false;
@@ -1500,11 +1784,27 @@ namespace IdleMaster
             if (working) progress.Text = where;
             if (take == null) return;
 
-            filling = true;
-            list.BeginUpdate();
-            try { foreach (CleanupItem it in take) AddRow(it); }
-            finally { list.EndUpdate(); filling = false; }
+            tree.BeginUpdate();
+            syncing = true;
+            try
+            {
+                foreach (CleanupItem it in take)
+                {
+                    if (HasFinding(it.Key)) continue;
+                    model.Add(it);
+                    if (it.Safe) picked[it.Key] = it;       // auto-marked - known junk
+                    if (PassesFilters(it) && !chkTicked.Checked) InsertFinding(it);
+                }
+            }
+            finally { syncing = false; tree.EndUpdate(); }
             UpdateCleanButton();
+        }
+
+        private bool HasFinding(string key)
+        {
+            foreach (CleanupItem m in model)
+                if (m.Key == key) return true;
+            return false;
         }
 
         private void ScanDone(List<CleanupItem> all)
@@ -1515,102 +1815,421 @@ namespace IdleMaster
             btnStop.Visible = false;
 
             long junk = 0;
-            foreach (ListViewItem row in list.Items)
-            {
-                CleanupItem it = (CleanupItem)row.Tag;
-                if (it.Safe) junk += it.Bytes;
-            }
+            foreach (CleanupItem it in model) if (it.Safe) junk += it.Bytes;
             bool cancelled = scanner != null && scanner.Cancelled;
+
+            if (chkTicked.Checked) RebuildTree();
+            else AddDiskMap();
             progress.Text = (cancelled ? "cancelled - " : "")
-                + list.Items.Count + " findings, " + CleanupScanner.Nice(junk) + " known junk";
+                + model.Count + " findings, " + CleanupScanner.Nice(junk) + " known junk";
             log("   = scan " + (cancelled ? "cancelled" : "finished") + ": "
-                + list.Items.Count + " findings, " + CleanupScanner.Nice(junk)
+                + model.Count + " findings, " + CleanupScanner.Nice(junk)
                 + " of known junk pre-ticked.");
             UpdateCleanButton();
         }
 
-        private void AddRow(CleanupItem it)
-        {
-            if (list.Items.ContainsKey(it.Key)) return;
+        // ---- building the tree
 
-            ListViewItem row = new ListViewItem(it.Name);
-            row.Name = it.Key;
-            row.Tag = it;
-            row.UseItemStyleForSubItems = false;
-            row.SubItems.Add(it.Category);
-            row.SubItems.Add(it.IsRecycleBin ? "(all drives)" : it.Path);
-            row.SubItems.Add(CleanupScanner.Nice(it.Bytes));
-            row.SubItems.Add(it.Safe ? "safe" : "review");
-            row.SubItems[1].ForeColor = Theme.Dim;
-            row.SubItems[2].ForeColor = Theme.Dim;
-            row.SubItems[4].ForeColor = it.Safe ? Theme.Accent : Theme.Warn;
-            row.ToolTipText = it.Note;
-            list.Items.Insert(InsertAt(it), row);
-            row.Checked = it.Safe;      // known junk arrives ticked, the rest is your call
-                                        // (set after the insert - a detached row forgets it)
-        }
-
-        // Rows stay sorted by category, then by appetite, without groups - the
-        // ListView's own group headers ignore the theme and cannot be recoloured.
-        private int InsertAt(CleanupItem it)
+        private TreeNode CategoryNode(string cat)
         {
-            int mine = Rank(it.Category);
-            for (int i = 0; i < list.Items.Count; i++)
-            {
-                CleanupItem other = (CleanupItem)list.Items[i].Tag;
-                int r = Rank(other.Category);
-                if (r > mine) return i;
-                if (r == mine && other.Bytes < it.Bytes) return i;
-            }
-            return list.Items.Count;
+            foreach (TreeNode n in tree.Nodes)
+                if ((n.Tag as string) == cat) return n;
+
+            int mine = Rank(cat);
+            int at = tree.Nodes.Count;
+            for (int i = 0; i < tree.Nodes.Count; i++)
+                if (Rank((string)tree.Nodes[i].Tag) > mine) { at = i; break; }
+
+            TreeNode node = new TreeNode(cat);
+            node.Tag = cat;
+            tree.Nodes.Insert(at, node);
+            node.Expand();
+            return node;
         }
 
         private static int Rank(string category)
         {
+            if (category == DiskMapCat) return CategoryOrder.Length + 1;
             for (int i = 0; i < CategoryOrder.Length; i++)
                 if (CategoryOrder[i] == category) return i;
             return CategoryOrder.Length;
         }
 
-        // ---- cleaning
-
-        private List<CleanupItem> Checked()
+        private void InsertFinding(CleanupItem it)
         {
-            List<CleanupItem> picked = new List<CleanupItem>();
-            foreach (ListViewItem row in list.Items)
-                if (row.Checked) picked.Add((CleanupItem)row.Tag);
-            return picked;
+            TreeNode cat = CategoryNode(it.Category);
+            TreeNode node = new TreeNode(it.Name);
+            node.Tag = it;
+            node.ToolTipText = (it.Note.Length > 0 ? it.Note + "\r\n" : "")
+                + (it.IsRecycleBin ? "(all drives)" : it.Path);
+            if (it.Parts != null || CanOpen(it)) node.Nodes.Add(MakeDummy());
+
+            int at = cat.Nodes.Count;
+            for (int i = 0; i < cat.Nodes.Count; i++)
+            {
+                CleanupItem other = cat.Nodes[i].Tag as CleanupItem;
+                if (other != null && other.Bytes < it.Bytes) { at = i; break; }
+            }
+            cat.Nodes.Insert(at, node);
+            node.Checked = picked.ContainsKey(it.Key);
+            if (!cat.IsExpanded) cat.Expand();      // a childless Expand() is
+                                                    // a no-op, so re-assert it
+        }
+
+        private bool CanOpen(CleanupItem it)
+        {
+            return it.Tree != null && it.Node >= 0 && it.Tree.IsDir(it.Node)
+                && it.Tree.FirstChild[it.Node] >= 0;
+        }
+
+        private static TreeNode MakeDummy()
+        {
+            TreeNode d = new TreeNode("...");
+            d.Tag = "::dummy";
+            return d;
+        }
+
+        private static bool IsDummy(TreeNode n)
+        {
+            return (n.Tag as string) == "::dummy";
+        }
+
+        private void AddDiskMap()
+        {
+            if (scanner == null || scanner.Trees.Count == 0) return;
+            syncing = true;
+            try
+            {
+                TreeNode cat = CategoryNode(DiskMapCat);
+                cat.Nodes.Clear();
+                foreach (DiskTree t in scanner.Trees)
+                {
+                    TreeNode d = new TreeNode(t.Root);
+                    d.Tag = new FsRef(t, t.RootNode);
+                    d.ToolTipText = t.Items[t.RootNode].ToString("N0") + " entries"
+                        + (t.FromMft ? ", read from the file table" : ", walked");
+                    d.Nodes.Add(MakeDummy());
+                    cat.Nodes.Add(d);
+                }
+                cat.Expand();
+            }
+            finally { syncing = false; }
+        }
+
+        // Rebuilt from the model on any filter change. Expanded map branches
+        // collapse back - the ticks survive, they live in 'picked'.
+        private void RebuildTree()
+        {
+            if (chkTicked.Checked) { BuildReview(); UpdateCleanButton(); return; }
+            tree.BeginUpdate();
+            syncing = true;
+            try
+            {
+                tree.Nodes.Clear();
+                foreach (CleanupItem it in model)
+                    if (PassesFilters(it)) InsertFinding(it);
+            }
+            finally { syncing = false; tree.EndUpdate(); }
+            AddDiskMap();
+            UpdateCleanButton();
+        }
+
+        // "ticked only": the flat review list of what Clean will take, after
+        // nested ticks have collapsed into their parents. Untick a row here
+        // and it leaves the plan on the spot - no scrolling the whole tree.
+        private void BuildReview()
+        {
+            tree.BeginUpdate();
+            syncing = true;
+            try
+            {
+                tree.Nodes.Clear();
+                List<CleanupItem> plan = PickedItems();
+                TreeNode head = new TreeNode("ticked - what Clean will take");
+                head.Tag = "Ticked";
+                tree.Nodes.Add(head);
+                foreach (CleanupItem it in plan)
+                {
+                    TreeNode node = new TreeNode(it.Name);
+                    node.Tag = it;
+                    node.ToolTipText = (it.Note.Length > 0 ? it.Note + "\r\n" : "")
+                        + (it.IsRecycleBin ? "(all drives)" : it.Path);
+                    head.Nodes.Add(node);
+                    node.Checked = true;
+                }
+                head.Expand();
+            }
+            finally { syncing = false; tree.EndUpdate(); }
+        }
+
+        // ---- opening a row: the Revo moment
+
+        private void BeforeExpand(object sender, TreeViewCancelEventArgs e)
+        {
+            TreeNode node = e.Node;
+            if (node.Nodes.Count != 1 || !IsDummy(node.Nodes[0])) return;
+
+            tree.BeginUpdate();
+            syncing = true;
+            try
+            {
+                node.Nodes.Clear();
+                CleanupItem it = node.Tag as CleanupItem;
+                FsRef f = node.Tag as FsRef;
+                if (it != null && it.Parts != null) PopulateParts(node, it);
+                else if (it != null && it.Tree != null && it.Node >= 0)
+                    PopulateFs(node, it.Tree, it.Node);
+                else if (f != null) PopulateFs(node, f.Tree, f.Node);
+            }
+            finally { syncing = false; tree.EndUpdate(); }
+        }
+
+        private void PopulateParts(TreeNode into, CleanupItem it)
+        {
+            foreach (string part in it.Parts)
+            {
+                DiskTree t; int n;
+                if (scanner != null && scanner.Resolve(part, out t, out n))
+                    into.Nodes.Add(FsNode(t, n));
+                else
+                {
+                    TreeNode plain = new TreeNode(part);
+                    plain.Tag = null;
+                    into.Nodes.Add(plain);
+                }
+            }
+        }
+
+        // The children of one mapped folder, biggest first. The size filter
+        // trims the noise but never the headline: the top rows always show,
+        // or opening a temp folder full of small files would show nothing.
+        private void PopulateFs(TreeNode into, DiskTree t, int n)
+        {
+            List<int> kids = t.ChildrenBySize(n);
+            long min = MinBytes();
+            string f = txtName.Text.Trim();
+            int shown = 0;
+            long hiddenBytes = 0;
+            int hidden = 0;
+
+            foreach (int c in kids)
+            {
+                bool pass = (t.Bytes[c] >= min || shown < 20)
+                    && (f.Length == 0
+                        || t.Name[c].IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
+                if (!pass || shown >= MaxKids)
+                {
+                    hidden++;
+                    hiddenBytes += t.Bytes[c];
+                    continue;
+                }
+                into.Nodes.Add(FsNode(t, c));
+                shown++;
+            }
+
+            if (hidden > 0)
+            {
+                TreeNode more = new TreeNode("... " + hidden.ToString("N0")
+                    + " more, " + CleanupScanner.Nice(hiddenBytes)
+                    + "  (hidden by the filters)");
+                more.Tag = null;
+                into.Nodes.Add(more);
+            }
+        }
+
+        private TreeNode FsNode(DiskTree t, int c)
+        {
+            FsRef r = new FsRef(t, c);
+            TreeNode node = new TreeNode(t.Name[c]);
+            node.Tag = r;
+            if (t.IsDir(c))
+                node.ToolTipText = t.Items[c].ToString("N0") + " entries";
+            if (t.IsDir(c) && !t.IsReparse(c) && t.FirstChild[c] >= 0)
+                node.Nodes.Add(MakeDummy());
+            node.Checked = picked.ContainsKey(r.Path.ToLowerInvariant());
+            return node;
+        }
+
+        // ---- ticking
+
+        private void AfterCheck(object sender, TreeViewEventArgs e)
+        {
+            if (syncing) return;
+            TreeNode node = e.Node;
+
+            string cat = node.Tag as string;
+            if (cat != null)
+            {
+                if (IsDummy(node)) return;
+                syncing = true;
+                try
+                {
+                    if (cat == DiskMapCat) { node.Checked = false; return; }
+                    // a category header ticks or unticks every finding under it
+                    foreach (TreeNode child in node.Nodes)
+                    {
+                        CleanupItem it = child.Tag as CleanupItem;
+                        if (it == null) { child.Checked = false; continue; }
+                        child.Checked = node.Checked;
+                        if (node.Checked) picked[it.Key] = it;
+                        else picked.Remove(it.Key);
+                    }
+                }
+                finally { syncing = false; }
+                UpdateCleanButton();
+                if (chkTicked.Checked)
+                    BeginInvoke((Action)delegate { RebuildTree(); });
+                return;
+            }
+
+            CleanupItem item = node.Tag as CleanupItem;
+            FsRef f = node.Tag as FsRef;
+            if (item == null && f == null)
+            {
+                syncing = true;
+                try { node.Checked = false; } finally { syncing = false; }
+                return;
+            }
+
+            string path = item != null ? item.Path : f.Path;
+            string key = item != null ? item.Key : path.ToLowerInvariant();
+
+            if (node.Checked)
+            {
+                string why = ForbidCheck(item, f, path, node);
+                if (why != null)
+                {
+                    syncing = true;
+                    try { node.Checked = false; } finally { syncing = false; }
+                    progress.Text = why;
+                    log("   . " + why);
+                    return;
+                }
+                picked[key] = (object)item ?? (object)f;
+            }
+            else picked.Remove(key);
+            UpdateCleanButton();
+            if (chkTicked.Checked && !node.Checked)
+                BeginInvoke((Action)delegate { RebuildTree(); });   // the row
+                                                    // leaves the review list
+        }
+
+        // The reasons a tick is refused. Findings are curated upstream; this
+        // guards the disk map, where the whole drive is on display - in code,
+        // so no amount of clicking sends the OS itself to the bin.
+        private string ForbidCheck(CleanupItem item, FsRef f, string path, TreeNode node)
+        {
+            if (item != null && item.IsRecycleBin) return null;
+
+            CleanupScanner guard = scanner != null ? scanner : new CleanupScanner(cfg);
+            if (guard.IsProtectedPath(path))
+                return "protected by [cleanup.protect]: " + path;
+            if (item != null) return null;      // a curated finding
+
+            // an ancestor already ticked takes this whole folder with it
+            for (TreeNode p = node.Parent; p != null; p = p.Parent)
+            {
+                CleanupItem pi = p.Tag as CleanupItem;
+                FsRef pf = p.Tag as FsRef;
+                string pp = pi != null ? pi.Key
+                    : (pf != null ? pf.Path.ToLowerInvariant() : null);
+                if (pp != null && picked.ContainsKey(pp))
+                    return "already covered - the ticked parent takes this too";
+            }
+
+            string root = null;
+            try { root = System.IO.Path.GetPathRoot(path); } catch (Exception) { }
+            if (root == null || path.Length <= root.Length)
+                return "not the whole drive - open it and pick what goes";
+            string rest = path.Substring(root.Length);
+            string top = rest.Split('\\')[0];
+            bool topOnly = rest.IndexOf('\\') < 0;
+
+            if (top.Equals("Windows", StringComparison.OrdinalIgnoreCase))
+                return "\\Windows is off limits here - its junk is curated in the categories above";
+            if (top.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("Recovery", StringComparison.OrdinalIgnoreCase))
+                return top + " belongs to Windows - not for the bin";
+            if (topOnly && (top.StartsWith("pagefile", StringComparison.OrdinalIgnoreCase)
+                || top.StartsWith("hiberfil", StringComparison.OrdinalIgnoreCase)
+                || top.StartsWith("swapfile", StringComparison.OrdinalIgnoreCase)))
+                return top + " is Windows memory - it cannot go";
+            if (topOnly && (top.Equals("Users", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("Program Files", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("ProgramData", StringComparison.OrdinalIgnoreCase)))
+                return top + " as a whole is too big a bite - open it and pick";
+            if (top.Equals("Users", StringComparison.OrdinalIgnoreCase)
+                && rest.Split('\\').Length == 2)
+                return "a whole profile is too big a bite - open it and pick";
+            return null;
+        }
+
+        // ---- what is ticked, deduplicated
+
+        private List<CleanupItem> PickedItems()
+        {
+            // nested ticks collapse into the outermost - the parent's delete
+            // already takes the child, and one shell call beats two
+            List<string> keys = new List<string>(picked.Keys);
+            keys.Sort(delegate(string a, string b) { return a.Length.CompareTo(b.Length); });
+            List<CleanupItem> outp = new List<CleanupItem>();
+            List<string> covering = new List<string>();
+
+            foreach (string key in keys)
+            {
+                bool covered = false;
+                foreach (string c in covering)
+                    if (key.StartsWith(c, StringComparison.Ordinal)) { covered = true; break; }
+                if (covered) continue;
+
+                object tag = picked[key];
+                CleanupItem it = tag as CleanupItem;
+                if (it == null)
+                {
+                    FsRef f = (FsRef)tag;
+                    it = new CleanupItem();
+                    it.Name = f.Tree.Name[f.Node];
+                    it.Path = f.Path;
+                    it.Category = DiskMapCat;
+                    it.Bytes = f.Bytes;
+                    it.Tree = f.Tree;
+                    it.Node = f.Node;
+                }
+                outp.Add(it);
+                if (!it.IsRecycleBin && it.Parts == null)
+                    covering.Add(key.TrimEnd('\\') + "\\");
+            }
+            return outp;
         }
 
         private void UpdateCleanButton()
         {
             long bytes = 0;
             int n = 0;
-            foreach (ListViewItem row in list.Items)
-            {
-                if (!row.Checked) continue;
-                bytes += ((CleanupItem)row.Tag).Bytes;
-                n++;
-            }
+            foreach (CleanupItem it in PickedItems()) { bytes += it.Bytes; n++; }
             btnClean.Enabled = n > 0 && !working;
             btnClean.Text = n == 0
                 ? "Clean checked"
                 : "Clean checked  (" + n + " items, " + CleanupScanner.Nice(bytes) + ")";
         }
 
-        private void Clean(List<CleanupItem> picked)
+        // ---- cleaning
+
+        private void Clean(List<CleanupItem> pickedNow)
         {
-            if (working || picked.Count == 0) return;
+            if (working || pickedNow.Count == 0) return;
 
             long bytes = 0;
             bool bin = false;
-            foreach (CleanupItem it in picked)
+            foreach (CleanupItem it in pickedNow)
             {
                 bytes += it.Bytes;
                 if (it.IsRecycleBin) bin = true;
             }
 
-            string msg = "Send " + picked.Count + " item(s) - " + CleanupScanner.Nice(bytes)
+            string msg = "Send " + pickedNow.Count + " item(s) - " + CleanupScanner.Nice(bytes)
                 + " - to the Recycle Bin?\n\nEverything can be restored from the bin afterwards."
                 + (bin ? "\n\nEXCEPT: the Recycle Bin row itself is ticked. Emptying the bin"
                        + " is permanent. It is done last, after everything else has arrived."
@@ -1621,29 +2240,29 @@ namespace IdleMaster
 
             working = true;
             btnScan.Enabled = false;
-            UpdateCleanButton();
+            btnClean.Enabled = false;
             progress.Text = "cleaning...";
             log("-- disk cleanup");
 
             // The bin is emptied LAST: it is where everything else is headed,
             // and emptying it first would burn the undo for this very batch.
-            picked.Sort(delegate(CleanupItem a, CleanupItem b)
+            pickedNow.Sort(delegate(CleanupItem a, CleanupItem b)
                 { return (a.IsRecycleBin ? 1 : 0) - (b.IsRecycleBin ? 1 : 0); });
 
             CleanupScanner guard = scanner != null ? scanner : new CleanupScanner(cfg);
             Thread t = new Thread(delegate()
             {
                 long freed = 0;
-                List<string> gone = new List<string>();
-                foreach (CleanupItem it in picked)
+                List<CleanupItem> gone = new List<CleanupItem>();
+                foreach (CleanupItem it in pickedNow)
                 {
                     if (!CleanupActions.Recycle(it, guard, log)) continue;
                     freed += it.Bytes;
-                    gone.Add(it.Key);
+                    gone.Add(it);
                 }
                 log("   = " + CleanupScanner.Nice(freed) + " reclaimed ("
-                    + gone.Count + " of " + picked.Count + " items).");
-                try { BeginInvoke((Action)delegate { CleanDone(gone, picked.Count); }); }
+                    + gone.Count + " of " + pickedNow.Count + " items).");
+                try { BeginInvoke((Action)delegate { CleanDone(gone, pickedNow.Count); }); }
                 catch (Exception) { }
             });
             t.SetApartmentState(ApartmentState.STA);    // the shell is happier there
@@ -1651,64 +2270,247 @@ namespace IdleMaster
             t.Start();
         }
 
-        private void CleanDone(List<string> gone, int asked)
+        private void CleanDone(List<CleanupItem> gone, int asked)
         {
-            filling = true;
-            foreach (string key in gone)
+            foreach (CleanupItem it in gone)
             {
-                int at = list.Items.IndexOfKey(key);
-                if (at >= 0) list.Items.RemoveAt(at);
+                picked.Remove(it.Key);
+                for (int i = model.Count - 1; i >= 0; i--)
+                    if (model[i].Key == it.Key) model.RemoveAt(i);
+
+                // keep the map honest without a rescan
+                if (it.Tree != null && it.Node >= 0 && !it.IsRecycleBin)
+                {
+                    if (it.Parts != null)
+                    {
+                        foreach (string part in it.Parts)
+                        {
+                            DiskTree pt; int pn;
+                            if (scanner != null && scanner.Resolve(part, out pt, out pn))
+                                pt.Deduct(pn);
+                        }
+                    }
+                    else it.Tree.Deduct(it.Node);
+                }
             }
-            filling = false;
             working = false;
             btnScan.Enabled = true;
+            RebuildTree();
             progress.Text = gone.Count == asked
                 ? "cleaned - check the Recycle Bin"
                 : "partly cleaned - what refused is still listed";
-            UpdateCleanButton();
+        }
+
+        // ---- painting: name, owner, size, share bar, class
+
+        private void DrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            e.DrawDefault = false;
+            if (e.Bounds.Height <= 0) return;
+            Graphics g = e.Graphics;
+            int right = tree.ClientSize.Width - 4;
+            bool selected = (e.State & TreeNodeStates.Selected) != 0;
+
+            Rectangle row = new Rectangle(e.Bounds.X, e.Bounds.Y,
+                right - e.Bounds.X, e.Bounds.Height);
+            if (row.Width <= 0) return;
+            using (SolidBrush b = new SolidBrush(selected ? Theme.Neutral : Theme.Input))
+                g.FillRectangle(b, row);
+
+            // column layout, right to left; the review list trades the owner
+            // and the bar for the full path - that is what it is FOR
+            bool review = chkTicked.Checked;
+            int classW = 52;
+            int barW = !review && tree.ClientSize.Width > 620 ? 64 : 0;
+            int sizeW = 84;
+            int ownerW = review
+                ? Math.Max(220, tree.ClientSize.Width - 440)
+                : (tree.ClientSize.Width > 720 ? 170 : 0);
+            int xClass = right - classW;
+            int xBar = xClass - (barW > 0 ? barW + 8 : 0);
+            int xSize = xBar - sizeW - 8;
+            int xOwner = xSize - (ownerW > 0 ? ownerW + 10 : 0);
+            int nameRight = (ownerW > 0 ? xOwner : xSize) - 8;
+
+            string cat = e.Node.Tag as string;
+            CleanupItem it = e.Node.Tag as CleanupItem;
+            FsRef f = e.Node.Tag as FsRef;
+
+            if (cat != null && !IsDummy(e.Node))
+            {
+                long total = 0;
+                int count = 0;
+                foreach (TreeNode child in e.Node.Nodes)
+                {
+                    CleanupItem ci = child.Tag as CleanupItem;
+                    FsRef cf = child.Tag as FsRef;
+                    if (ci != null) { total += ci.Bytes; count++; }
+                    else if (cf != null) { total += cf.Bytes; count++; }
+                }
+                TextRenderer.DrawText(g, cat.ToUpperInvariant(), tree.Font,
+                    new Rectangle(e.Bounds.X, row.Y, nameRight - e.Bounds.X, row.Height),
+                    Theme.Accent, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                TextRenderer.DrawText(g, CleanupScanner.Nice(total), mono,
+                    new Rectangle(xSize, row.Y, sizeW, row.Height),
+                    Theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                return;
+            }
+
+            string name, owner = "", size = "", cls = "";
+            Color nameCol = Theme.ListFg, clsCol = Theme.Dim;
+            double share = -1;
+
+            if (it != null)
+            {
+                name = it.Name;
+                size = CleanupScanner.Nice(it.Bytes);
+                cls = it.Safe ? "safe" : "review";
+                clsCol = it.Safe ? Theme.Accent : Theme.Warn;
+                nameCol = Theme.Fg;
+                if (review)
+                    owner = it.IsRecycleBin ? "(all drives)" : it.Path;
+                else if (!it.IsRecycleBin && scanner != null && ownerW > 0)
+                    owner = scanner.OwnerOf(it.Path);
+                if (it.Tree != null && it.Node >= 0)
+                    share = Share(it.Tree, it.Node);
+            }
+            else if (f != null)
+            {
+                name = f.Tree.Name[f.Node];
+                size = CleanupScanner.Nice(f.Bytes);
+                if (f.Tree.IsDir(f.Node)) nameCol = Theme.Fg;
+                if (scanner != null && ownerW > 0) owner = scanner.OwnerOf(f.Path);
+                if (IsJunkName(name)) { cls = "junk?"; clsCol = Theme.Accent; }
+                share = Share(f.Tree, f.Node);
+            }
+            else
+            {
+                // a dummy or a "... more" row
+                TextRenderer.DrawText(g, e.Node.Text, tree.Font,
+                    new Rectangle(e.Bounds.X, row.Y, right - e.Bounds.X, row.Height),
+                    Theme.Dim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                return;
+            }
+
+            TextRenderer.DrawText(g, name, tree.Font,
+                new Rectangle(e.Bounds.X, row.Y, Math.Max(nameRight - e.Bounds.X, 20), row.Height),
+                nameCol, TextFormatFlags.Left | TextFormatFlags.VerticalCenter
+                | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+
+            if (ownerW > 0 && owner.Length > 0)
+                TextRenderer.DrawText(g, owner, small,
+                    new Rectangle(xOwner, row.Y, ownerW, row.Height),
+                    Theme.Dim, TextFormatFlags.Left | TextFormatFlags.VerticalCenter
+                    | (review ? TextFormatFlags.PathEllipsis : TextFormatFlags.EndEllipsis)
+                    | TextFormatFlags.NoPrefix);
+
+            TextRenderer.DrawText(g, size, mono,
+                new Rectangle(xSize, row.Y, sizeW, row.Height),
+                Theme.Fg, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+
+            if (barW > 0 && share >= 0)
+            {
+                Rectangle track = new Rectangle(xBar, row.Y + row.Height / 2 - 3, barW, 6);
+                using (SolidBrush b = new SolidBrush(Theme.Track)) g.FillRectangle(b, track);
+                int w = (int)(track.Width * Math.Min(share, 1.0));
+                if (w > 0)
+                    using (SolidBrush b = new SolidBrush(Theme.GaugeOk))
+                        g.FillRectangle(b, new Rectangle(track.X, track.Y, w, track.Height));
+            }
+
+            if (cls.Length > 0)
+                TextRenderer.DrawText(g, cls, small,
+                    new Rectangle(xClass, row.Y, classW, row.Height),
+                    clsCol, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+
+        // How much of its parent this node is - the little bar. The root is
+        // measured against the drive's own capacity.
+        private static double Share(DiskTree t, int n)
+        {
+            try
+            {
+                if (n == t.RootNode)
+                {
+                    System.IO.DriveInfo d = new System.IO.DriveInfo(t.Root.Substring(0, 1));
+                    return d.TotalSize > 0 ? (double)t.Bytes[n] / d.TotalSize : 0;
+                }
+                long parent = t.Bytes[t.Parent[n]];
+                return parent > 0 ? (double)t.Bytes[n] / parent : 0;
+            }
+            catch (Exception) { return 0; }
         }
 
         // ---- the right-click verdicts
 
-        private CleanupItem Selected()
+        private object SelectedTag()
         {
-            if (list.SelectedItems.Count == 0) return null;
-            return (CleanupItem)list.SelectedItems[0].Tag;
+            return tree.SelectedNode == null ? null : tree.SelectedNode.Tag;
+        }
+
+        private string SelectedPath()
+        {
+            CleanupItem it = SelectedTag() as CleanupItem;
+            if (it != null) return it.IsRecycleBin ? null : it.Path;
+            FsRef f = SelectedTag() as FsRef;
+            return f != null ? f.Path : null;
         }
 
         private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            CleanupItem it = Selected();
-            if (it == null) { e.Cancel = true; return; }
+            CleanupItem it = SelectedTag() as CleanupItem;
+            FsRef f = SelectedTag() as FsRef;
+            if (it == null && f == null) { e.Cancel = true; return; }
+
+            long bytes = it != null ? it.Bytes : f.Bytes;
+            bool bin = it != null && it.IsRecycleBin;
+            bool driveRoot = f != null && f.Node == f.Tree.RootNode;
             miOpen.Enabled = true;
-            miCleanOne.Enabled = !working;
-            miCleanOne.Text = it.IsRecycleBin
+            miCleanOne.Enabled = !working && !driveRoot;
+            miCleanOne.Text = bin
                 ? "Empty the Recycle Bin (permanent)"
-                : "Clean just this one  (" + CleanupScanner.Nice(it.Bytes) + ")";
-            miProtect.Enabled = !it.IsRecycleBin;
-            miCopy.Enabled = !it.IsRecycleBin;
+                : "Clean just this one  (" + CleanupScanner.Nice(bytes) + ")";
+            miProtect.Enabled = !bin && !driveRoot;
+            miCopy.Enabled = !bin;
         }
 
         private void OpenSelected()
         {
-            CleanupItem it = Selected();
-            if (it == null) return;
+            CleanupItem it = SelectedTag() as CleanupItem;
             try
             {
-                if (it.IsRecycleBin)
+                if (it != null && it.IsRecycleBin)
+                {
                     Process.Start(new ProcessStartInfo("explorer.exe", "shell:RecycleBinFolder")
                         { UseShellExecute = true });
-                else
-                    Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + it.Path + "\"")
-                        { UseShellExecute = true });
+                    return;
+                }
+                string path = SelectedPath();
+                if (path == null) return;
+                Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"")
+                    { UseShellExecute = true });
             }
             catch (Exception) { }
         }
 
         private void CleanSelectedOnly()
         {
-            CleanupItem it = Selected();
-            if (it == null) return;
+            CleanupItem it = SelectedTag() as CleanupItem;
+            FsRef f = SelectedTag() as FsRef;
+            if (it == null && f == null) return;
+            if (it == null)
+            {
+                if (f.Node == f.Tree.RootNode) return;
+                string why = ForbidCheck(null, f, f.Path, tree.SelectedNode);
+                if (why != null) { progress.Text = why; log("   . " + why); return; }
+                it = new CleanupItem();
+                it.Name = f.Tree.Name[f.Node];
+                it.Path = f.Path;
+                it.Category = DiskMapCat;
+                it.Bytes = f.Bytes;
+                it.Tree = f.Tree;
+                it.Node = f.Node;
+            }
             List<CleanupItem> one = new List<CleanupItem>();
             one.Add(it);
             Clean(one);
@@ -1718,31 +2520,33 @@ namespace IdleMaster
         // decision into the ini, reload the running config, drop the row.
         private void ProtectSelected()
         {
-            CleanupItem it = Selected();
-            if (it == null || it.IsRecycleBin) return;
+            string path = SelectedPath();
+            if (path == null) return;
 
-            if (!Config.Append("cleanup.protect", it.Path))
+            if (!Config.Append("cleanup.protect", path))
             {
-                log("   ! could not write " + it.Path + " into [cleanup.protect].");
+                log("   ! could not write " + path + " into [cleanup.protect].");
                 return;
             }
             try
             {
                 cfg.CopyFrom(Config.Load());
-                log(it.Path + " added to [cleanup.protect] - cleanup will never touch it.");
+                log(path + " added to [cleanup.protect] - cleanup will never touch it.");
             }
             catch (Exception ex) { log("   ! could not reload the config: " + ex.Message); }
 
-            int at = list.Items.IndexOfKey(it.Key);
-            if (at >= 0) list.Items.RemoveAt(at);
-            UpdateCleanButton();
+            string key = path.ToLowerInvariant();
+            picked.Remove(key);
+            for (int i = model.Count - 1; i >= 0; i--)
+                if (model[i].Key == key) model.RemoveAt(i);
+            RebuildTree();
         }
 
         private void CopySelected()
         {
-            CleanupItem it = Selected();
-            if (it == null || it.IsRecycleBin) return;
-            try { Clipboard.SetText(it.Path); }
+            string path = SelectedPath();
+            if (path == null) return;
+            try { Clipboard.SetText(path); }
             catch (Exception) { }
         }
 
@@ -2495,7 +3299,7 @@ namespace IdleMaster
         {
             CheckBox c = new CheckBox();
             c.Text = label;
-            c.Checked = SettingSpec.Truthy(ini.GetSetting(key), key != "NetworkGuardScan");
+            c.Checked = SettingSpec.Truthy(ini.GetSetting(key), SettingSpec.FlagDefault(key));
             c.SetBounds(x + 4, y, 380, 22);
             c.ForeColor = Theme.Fg;
             Controls.Add(c);
@@ -2581,6 +3385,212 @@ namespace IdleMaster
         }
     }
 
+    // ------------------------------------------------- remote desktop setup
+
+    // The remote-desktop page: the network guard's live picture on top, and
+    // under it the apps that must stay connected - the common remote stacks
+    // are offered first in the picker, but literally any app can be chosen.
+    // Calibrate snapshots "connected" as it looks right now (exe, service,
+    // listening ports per app); from then on the guard reconnects whatever
+    // drifts from that picture.
+    internal sealed class RemoteForm : Form
+    {
+        private readonly IniFile ini = new IniFile();
+        private readonly Func<NetGuard> live;
+        private readonly Action checkNow;
+        private readonly Action<List<string>> calibrate;
+        private readonly Label status;
+        private readonly TextBox report;
+        private readonly ListPane apps;
+        private readonly System.Windows.Forms.Timer timer;
+
+        public bool Saved;
+
+        public RemoteForm(Func<NetGuard> liveGuard, Action checkNowAction, Action<List<string>> calibrateAction)
+        {
+            live = liveGuard; checkNow = checkNowAction; calibrate = calibrateAction;
+
+            Theme.Form(this);
+            Text = "IDLE MASTER - remote desktop setup";
+            Size = new Size(820, 660);
+            MinimumSize = new Size(760, 600);
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+
+            Label cap = Theme.Caption("REMOTE DESKTOP SETUP");
+            cap.SetBounds(16, 12, 300, 18);
+            Controls.Add(cap);
+
+            status = Theme.Hint("");
+            status.Font = Theme.Small();
+            status.TextAlign = ContentAlignment.MiddleRight;
+            status.SetBounds(320, 12, 468, 18);
+            status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            Controls.Add(status);
+
+            Label hint = Theme.Hint("The network guard keeps the link, Tailscale and Sunshine alive on its own. "
+                + "This page adds YOUR apps to that watch.");
+            hint.Font = Theme.Small();
+            hint.SetBounds(16, 32, 780, 16);
+            hint.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(hint);
+
+            // The live picture: the guard's four lines, then one line per app.
+            report = new TextBox();
+            report.Multiline = true;
+            report.ReadOnly = true;
+            report.ScrollBars = ScrollBars.Vertical;
+            report.BackColor = Theme.LogBg;
+            report.ForeColor = Theme.LogFg;
+            report.Font = Theme.Mono();
+            report.BorderStyle = BorderStyle.FixedSingle;
+            report.SetBounds(12, 54, 784, 148);
+            report.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(report);
+
+            apps = new ListPane(ini, "remote.apps",
+                "Apps that must stay connected  [remote.apps]", "remote");
+            apps.SetBounds(12, 214, 388, 366);
+            apps.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(apps);
+
+            int x = 412, y = 220;
+            Label t = Theme.Caption("Calibrated reconnects");
+            t.SetBounds(x + 4, y, 300, 18);
+            Controls.Add(t);
+            y += 24;
+
+            Label how = Theme.Hint("Get everything connected the way you like it - stream running, apps "
+                + "signed in - then hit Calibrate. The guard remembers each app's exe, its service and "
+                + "the ports it is listening on. From then on, every check also checks this list: an app "
+                + "that is gone, or no longer on its calibrated ports, is restarted or relaunched until "
+                + "the picture matches again.");
+            how.Font = Theme.Small();
+            how.SetBounds(x + 4, y, 380, 96);
+            Controls.Add(how);
+            y += 104;
+
+            Button cal = Theme.Action("Calibrate now");
+            cal.SetBounds(x + 4, y, 130, 30);
+            cal.Click += delegate { Calibrate(); };
+            Controls.Add(cal);
+
+            Button check = Theme.Quiet("Check now");
+            check.SetBounds(x + 144, y, 110, 30);
+            check.Click += delegate { checkNow(); };
+            Controls.Add(check);
+            y += 38;
+
+            Label ch = Theme.Hint("Calibrate saves the list first, so what you see ticked is what gets "
+                + "calibrated. Apps that are not running are skipped - start them, then calibrate again.");
+            ch.Font = Theme.Small();
+            ch.SetBounds(x + 4, y, 380, 44);
+            Controls.Add(ch);
+            y += 52;
+
+            Label nb = Theme.Hint("Timing, Wi-Fi and the guard's own switches live on its page - the "
+                + "'Network guard' button in the main window.");
+            nb.Font = Theme.Small();
+            nb.SetBounds(x + 4, y, 380, 32);
+            Controls.Add(nb);
+
+            Button save = Theme.Action("Save");
+            save.SetBounds(796 - 208, 660 - 76, 100, 30);
+            save.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            save.Click += delegate { Persist(); };
+            Controls.Add(save);
+
+            Button cancel = Theme.Quiet("Close");
+            cancel.SetBounds(796 - 100, 660 - 76, 100, 30);
+            cancel.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            cancel.Click += delegate { Close(); };
+            Controls.Add(cancel);
+            CancelButton = cancel;
+
+            timer = new System.Windows.Forms.Timer();
+            timer.Interval = 1000;
+            timer.Tick += delegate { Refresh_(); };
+            timer.Start();
+            Refresh_();
+        }
+
+        // Calibrate against what is ticked on screen: persist the list, then
+        // let the owner snapshot it. Saved is set so the main window reloads.
+        private void Calibrate()
+        {
+            try
+            {
+                apps.Save(ini);
+                ini.Save();
+                Saved = true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the list first:\n\n" + ex.Message,
+                    "Idle Master", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            calibrate(apps.CheckedNames());
+        }
+
+        private void Refresh_()
+        {
+            NetGuard g = live();
+            NetReport r = g != null ? g.Last : null;
+
+            if (g != null && g.Alive)
+            {
+                status.Text = "guard on watch since " + g.Since.ToString("HH:mm") + "  -  "
+                    + g.Checks + " check" + (g.Checks == 1 ? "" : "s") + ", " + g.FixCount + " fix" + (g.FixCount == 1 ? "" : "es")
+                    + (g.AppsOk ? "" : "  -  AN APP NEEDS ATTENTION");
+                status.ForeColor = g.AppsOk ? Theme.Accent : Theme.Warn;
+            }
+            else
+            {
+                status.Text = "guard not on watch - the app checkers run with it (turn the network guard on)";
+                status.ForeColor = Theme.Dim;
+            }
+
+            List<string> lines = new List<string>();
+            if (r == null)
+                lines.Add("(nothing measured yet - Check now, or wait for the guard's next look)");
+            else
+                lines.AddRange(r.Lines());
+            string[] appLines = g != null ? g.AppLines : new string[0];
+            if (appLines.Length > 0)
+            {
+                lines.Add("");
+                lines.AddRange(appLines);
+            }
+            else if (r != null)
+                lines.Add("(no apps on the watch yet - add some below and Save)");
+            string text = string.Join(Environment.NewLine, lines.ToArray());
+            if (report.Text != text) report.Text = text;
+        }
+
+        private void Persist()
+        {
+            try
+            {
+                apps.Save(ini);
+                ini.Save();
+                Saved = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not save the config:\n\n" + ex.Message,
+                    "Idle Master", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            timer.Stop();
+            base.OnFormClosed(e);
+        }
+    }
+
     // ------------------------------------------------------------------- gui
 
     internal sealed class MainForm : Form
@@ -2589,13 +3599,15 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic;
         private readonly CheckBox chkSentry;
+        private readonly CheckBox chkOverclock;
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
         private readonly System.Windows.Forms.Timer updateTimer;
         private Sentry sentry;
+        private LogTail tail;                   // following another process's sentry log
         private NetGuard guard;                 // the standing watch, when this window holds it
         private NetGuard lastOnce;              // a check by hand while the guard was off
         private bool forceGuard;                // --guard: on whatever the ini says
@@ -2620,8 +3632,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 778);
-            MinimumSize = new Size(560, 592);
+            Size = new Size(700, 806);
+            MinimumSize = new Size(560, 620);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -2647,7 +3659,7 @@ namespace IdleMaster
             btnBoost.Click += delegate { Run("boost"); };
 
             btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to Windows vitals + Sunshine + Tailscale. For sleep.", Theme.Danger, 218);
+                "Strip to Windows vitals", Theme.Danger, 218);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
             btnRestore = SmallButton("Restore desktop", 22, 306);
@@ -2678,6 +3690,15 @@ namespace IdleMaster
             btnDebloat = SmallButton("Debloat", 22, 378);
             btnDebloat.Click += delegate { OpenDebloat(); };
 
+            btnRemote = SmallButton("Remote desktop setup", 182, 378);
+            btnRemote.Click += delegate { OpenRemote(); };
+
+            // Two doors to other people's debloaters - launched, not imitated.
+            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 378);
+            btnWinUtil.Click += delegate { RunWinUtil(); };
+            btnZoic = SmallButton("Zoicware", 502, 378);
+            btnZoic.Click += delegate { RunZoicware(); };
+
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
             updateLabel.SetBounds(22, 420, 640, 20);
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -2704,6 +3725,19 @@ namespace IdleMaster
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
 
+            // The away switch: red when armed, because it means "kill everything
+            // not protected, no questions asked". Toggle it, click ABSOLUTE
+            // IDLE, walk away.
+            chkOverclock = new CheckBox();
+            chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
+            chkOverclock.Checked = cfg.OverclockedSentry;
+            chkOverclock.SetBounds(24, 484, 636, 22);
+            chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
+            chkOverclock.FlatStyle = FlatStyle.Flat;
+            chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            chkOverclock.Click += delegate { ToggleOverclock(); };
+            Controls.Add(chkOverclock);
+
             logBox = new TextBox();
             logBox.Multiline = true;
             logBox.ReadOnly = true;
@@ -2712,7 +3746,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 484, 640, 212);
+            logBox.SetBounds(22, 512, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -2740,9 +3774,14 @@ namespace IdleMaster
 
             if (cfg.Tray) BuildTray();
 
-            // A mode was run earlier and never restored - pick the watch back up.
-            if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry && !Sentry.IsRunningSomewhere())
-                StartSentry(st.Mode);
+            // A mode was run earlier and never restored - pick the watch back
+            // up. If some other process already holds it, this window does not
+            // start a second one: it follows that sentry's log instead.
+            if (st.Mode.Length > 0 && st.SentryArmed && cfg.Sentry)
+            {
+                if (!Sentry.IsRunningSomewhere()) StartSentry(st.Mode);
+                else FollowForeignSentry();
+            }
 
             // The guard does not wait for a mode: the connection matters from
             // the moment the app is up.
@@ -2750,6 +3789,15 @@ namespace IdleMaster
             UpdateGuard();
 
             FormClosing += OnClosing;
+
+            // A second launch of the exe does not run: it fires the global
+            // "show yourself" flag and this - the one Idle Master - comes to
+            // the front instead.
+            SoloInstance.WatchForShow(delegate
+            {
+                try { BeginInvoke((MethodInvoker)delegate { ShowWindow(); }); }
+                catch (Exception) { }
+            });
         }
 
         // --guard: the guard alone, whatever the ini says about it.
@@ -2835,6 +3883,77 @@ namespace IdleMaster
             catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
         }
 
+        // The remote-desktop page: the guard's picture, the apps that must stay
+        // connected, and the Calibrate button. Saved straight to the ini.
+        private void OpenRemote()
+        {
+            using (RemoteForm f = new RemoteForm(GuardForPage, CheckConnection, CalibrateRemote))
+            {
+                f.Location = new Point(Location.X + Width - 40, Location.Y + 60);
+                f.ShowDialog(this);
+                if (!f.Saved) return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                AppendLog("Remote desktop setup saved - " + cfg.RemoteApps.Count
+                    + " app" + (cfg.RemoteApps.Count == 1 ? "" : "s") + " on the watch"
+                    + (cfg.NetworkGuard || forceGuard
+                        ? "; checked with the guard every " + cfg.NetworkGuardSeconds + " s."
+                        : ". The network guard is OFF - turn it on for the watch to run."));
+            }
+            catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
+        }
+
+        // The form saved its list before asking; snapshot against it and give
+        // the running guard a nudge so the page shows the result right away.
+        private void CalibrateRemote(List<string> names)
+        {
+            try { cfg.CopyFrom(Config.Load()); } catch (Exception) { }
+            RemoteApps.Calibrate(names.Count > 0 ? names : cfg.RemoteApps, AppendLog);
+            if (guard != null && guard.Alive) guard.CheckNow();
+        }
+
+        // Chris Titus Tech's WinUtil, launched the way its README says to.
+        // Their tool, their window - Idle Master only opens the door.
+        private void RunWinUtil()
+        {
+            if (MessageBox.Show(this,
+                "This launches Chris Titus Tech's Windows Utility (WinUtil) in its own elevated PowerShell:\n\n"
+                + "    irm christitus.com/win | iex\n\n"
+                + "That downloads the latest WinUtil from christitus.com and runs it - tweaks, debloat, "
+                + "installs, all theirs. Close its window when you are done.\n\nLaunch it?",
+                "ChrisTitus WinUtil", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            try
+            {
+                Process.Start(new ProcessStartInfo("powershell.exe",
+                    "-NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://christitus.com/win' | iex\"")
+                { UseShellExecute = true });
+                AppendLog("ChrisTitus WinUtil launched in its own PowerShell window.");
+            }
+            catch (Exception ex) { AppendLog("! could not launch WinUtil: " + ex.Message.Split('\n')[0]); }
+        }
+
+        // Zoicware ships as a release you download and run - no one-liner to
+        // pipe, so the button opens the door to the right place instead.
+        private void RunZoicware()
+        {
+            if (MessageBox.Show(this,
+                "Zoicware is a Windows tweak/debloat pack that ships as a downloadable release.\n\n"
+                + "This opens its GitHub releases page in your browser - grab the latest zip, extract it, "
+                + "and run ZOICWARE.exe as admin. Their tool, their rules.\n\nOpen the page?",
+                "Zoicware", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            try
+            {
+                Process.Start(new ProcessStartInfo("https://github.com/zoicware/ZOICWARE/releases/latest")
+                { UseShellExecute = true });
+                AppendLog("Zoicware releases page opened in the browser.");
+            }
+            catch (Exception ex) { AppendLog("! could not open the page: " + ex.Message.Split('\n')[0]); }
+        }
+
         private void UpdateGuard()
         {
             bool on = guard != null && guard.Alive;
@@ -2854,7 +3973,7 @@ namespace IdleMaster
             }
 
             NetReport r = on ? guard.Last : null;
-            if (on && r != null && !r.Healthy)
+            if (on && r != null && (!r.Healthy || !guard.AppsOk))
                 PaintButton(btnNetGuard, "Network guard: " + (guard.Busy ? "fixing" : "trouble"), Theme.Danger, Color.White);
             else if (!GuardWanted)
                 PaintButton(btnNetGuard, "Network guard: off", Theme.Neutral, Theme.Dim);
@@ -2951,6 +4070,22 @@ namespace IdleMaster
             backupWin.Show(this);
         }
 
+        // The StartWithWindows logon task lands here (--startup): the window is
+        // up like any launch, and StartupAction runs as if you had clicked the
+        // button - no confirmation, because nobody is there to give one.
+        public void RunOnLogon()
+        {
+            // Touching Handle builds the window now so Run's BeginInvoke has
+            // somewhere to land.
+            IntPtr forced = Handle;
+            GC.KeepAlive(forced);
+            AppendLog("Started at logon (StartWithWindows)."
+                + (cfg.StartupAction == "boost" ? " Running BOOST NOW."
+                 : cfg.StartupAction == "idle" ? " Running ABSOLUTE IDLE." : ""));
+            if (cfg.StartupAction == "boost" || cfg.StartupAction == "idle")
+                Run(cfg.StartupAction);
+        }
+
         // Started by --watch: no window, just the tray icon and the sentry.
         public void HideOnStart(string enforce)
         {
@@ -3004,6 +4139,7 @@ namespace IdleMaster
             menu.Items.Add("Debloat...", null, delegate { ShowWindow(); OpenDebloat(); });
             menu.Items.Add("Backup kit...", null, delegate { ShowWindow(); OpenBackup(); });
             menu.Items.Add("Sentry lists && timers...", null, delegate { ShowWindow(); OpenSentry(); });
+            menu.Items.Add("Remote desktop setup...", null, delegate { ShowWindow(); OpenRemote(); });
             menu.Items.Add("Network guard...", null, delegate { ShowWindow(); OpenNetGuard(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
@@ -3059,7 +4195,11 @@ namespace IdleMaster
             if (sentry != null && sentry.Alive) return;
             sentry = new Sentry(cfg, engine, AppendLog, mode);
             sentry.Ask = AskOnUiThread;
-            if (!sentry.Start()) sentry = null;
+            if (!sentry.Start())
+            {
+                sentry = null;
+                FollowForeignSentry();
+            }
             UpdateSentry();
         }
 
@@ -3072,9 +4212,18 @@ namespace IdleMaster
                 try { return (Verdict)Invoke((Func<Question, Verdict>)AskOnUiThread, q); }
                 catch (Exception) { return Verdict.Keep; }
             }
+            // Show, not ShowDialog: modal would activate the toast and steal the
+            // foreground from whatever you are typing or playing. The loop keeps
+            // this call blocking (the sentry thread is parked in Invoke above)
+            // while the rest of the UI stays alive.
             using (AskForm f = new AskForm(q, cfg.AskTimeoutSeconds, cfg.AskTimeoutAction))
             {
-                f.ShowDialog();
+                f.Show();
+                while (f.Visible && !f.IsDisposed)
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(30);
+                }
                 return f.Choice;
             }
         }
@@ -3097,6 +4246,31 @@ namespace IdleMaster
             UpdateSentry();
         }
 
+        // Saved straight to the ini; a hunting sentry reads cfg every sweep, so
+        // it goes overclocked (or calms down) without being restarted.
+        private void ToggleOverclock()
+        {
+            cfg.OverclockedSentry = chkOverclock.Checked;
+            chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
+            try
+            {
+                IniFile ini = new IniFile();
+                ini.SetSetting("OverclockedSentry", cfg.OverclockedSentry ? "1" : "0");
+                ini.Save();
+            }
+            catch (Exception ex) { AppendLog("! could not save OverclockedSentry: " + ex.Message.Split('\n')[0]); }
+
+            if (cfg.OverclockedSentry)
+            {
+                AppendLog("OVERCLOCKED SENTRY ON - while hunting, everything not on the protect list dies."
+                    + " No questions, no sparing open windows. Meant for ABSOLUTE IDLE while you are away.");
+                if (sentry != null && sentry.Alive)
+                    AppendLog("The sentry goes overclocked from its next sweep.");
+            }
+            else
+                AppendLog("Overclocked sentry off - back to the normal lists and questions.");
+        }
+
         private void ToggleSentry()
         {
             if (chkSentry.Checked)
@@ -3115,6 +4289,21 @@ namespace IdleMaster
 
         private void UpdateSentry()
         {
+            // Following another process's sentry: stop the tail the moment the
+            // watch is ours, or the moment nobody holds it any more.
+            if (tail != null)
+            {
+                bool ours = sentry != null && sentry.Alive;
+                if (ours || !Sentry.IsRunningSomewhere())
+                {
+                    tail.Stop();
+                    tail = null;
+                    AppendLog(ours
+                        ? "The watch is ours now - stopped following the other log."
+                        : "The other sentry stood down - its log went quiet. Arm the sentry here to take the watch.");
+                }
+            }
+
             bool on = sentry != null && sentry.Alive;
             if (!on && sentry != null)
             {
@@ -3132,6 +4321,11 @@ namespace IdleMaster
                     + sentry.Reaped + " reaped, " + Engine.Size(sentry.Reclaimed) + " held off";
                 if (sentry.Restopped > 0) txt += ", " + sentry.Restopped + " services re-stopped";
                 sentryLabel.Text = txt;
+                sentryLabel.ForeColor = Theme.Accent;
+            }
+            else if (tail != null)
+            {
+                sentryLabel.Text = "sentry found in another process - following its log";
                 sentryLabel.ForeColor = Theme.Accent;
             }
             else if (chkSentry.Checked)
@@ -3306,10 +4500,15 @@ namespace IdleMaster
                 f.ShowDialog(this);
                 if (!f.Saved) return;
             }
+            bool wasStartup = cfg.StartWithWindows;
             try
             {
                 cfg.CopyFrom(Config.Load());
                 chkSentry.Checked = cfg.Sentry;
+                chkOverclock.Checked = cfg.OverclockedSentry;
+                chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
+                if (cfg.StartWithWindows != wasStartup)
+                    App.SyncStartupTask(cfg.StartWithWindows, AppendLog);
                 AppendLog("Config saved. " + cfg.Protect.Count + " protected names, "
                     + cfg.BoostKill.Count + " on the boost list, "
                     + cfg.IdleKill.Count + " more on the idle list.");
@@ -3344,11 +4543,14 @@ namespace IdleMaster
 
         private void ConfirmIdle()
         {
-            string msg = "This closes your browsers, Claude, and everything else you have open."
-                + (cfg.KillExplorer ? "\n\nIt also closes the Windows shell (taskbar and desktop disappear)." : "")
+            string msg = "This closes every app you have open - browsers, Claude, all of it - and strips"
+                + " the machine to Windows vitals."
+                + (cfg.KillExplorer
+                    ? "\n\nThe screen flashes black for a moment while the shell goes down; the desktop"
+                      + " stays usable afterwards."
+                    : "")
                 + "\n\nSunshine and Tailscale stay up, so you can still reach this machine."
-                + "\n\nTo get the desktop back: press Ctrl+Shift+Esc, then File > Run new task,"
-                + " and run this exe again -> Restore desktop."
+                + " 'Restore desktop' brings everything back."
                 + "\n\nGo idle now?";
             if (MessageBox.Show(this, msg, "Absolute Idle",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
@@ -3393,6 +4595,16 @@ namespace IdleMaster
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
         }
 
+        // A sentry in some other process already has the watch. Nothing starts
+        // here - "sentry found" - and that sentry's log (the shared
+        // idlemaster.log) plays live in this console instead.
+        private void FollowForeignSentry()
+        {
+            if (tail != null) return;
+            AppendLog("Sentry found - another Idle Master already has the watch. Following its log:");
+            tail = new LogTail(App.LogFile, AppendScreenOnly);
+        }
+
         // Everything the engine and the sentry say arrives here, from any thread.
         // The file write happens on the UI hop only - doing it before the hop as
         // well is what put every line in the log twice.
@@ -3405,6 +4617,19 @@ namespace IdleMaster
                 return;
             }
             App.FileLog(line);
+            if (tail != null) tail.NoteLocal(line);   // so the tail does not echo it back
+            logBox.AppendText(line + Environment.NewLine);
+        }
+
+        // Lines that CAME from the shared log must not be written back into it.
+        private void AppendScreenOnly(string line)
+        {
+            if (logBox.InvokeRequired)
+            {
+                try { logBox.BeginInvoke((Action<string>)AppendScreenOnly, line); }
+                catch (Exception) { }
+                return;
+            }
             logBox.AppendText(line + Environment.NewLine);
         }
 

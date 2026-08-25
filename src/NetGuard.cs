@@ -756,8 +756,17 @@ namespace IdleMaster
         // Measure; if something is wrong and 'repair' is on, walk the ladder and
         // measure again. Returns the last measurement. 'loud' prints the whole
         // picture even when it is fine - the button and --network want that; the
-        // timer only wants to hear about trouble.
+        // timer only wants to hear about trouble. The remote-desktop app watch
+        // rides along on every check.
         public NetReport Check(bool repair, bool loud)
+        {
+            NetReport r = CheckNet(repair, loud);
+            try { WatchApps(repair, loud); }
+            catch (Exception ex) { log("[guard] remote app watch failed: " + ex.Message.Split('\n')[0]); }
+            return r;
+        }
+
+        private NetReport CheckNet(bool repair, bool loud)
         {
             NetReport r = Measure();
             Checks++;
@@ -1583,6 +1592,157 @@ namespace IdleMaster
             return now;
         }
 
+        // ---- the remote-desktop watch: user-picked apps that must stay connected
+
+        // What the pages read: one line per app, and whether all of them look
+        // the way the calibration says they should.
+        public string[] AppLines = new string[0];
+        public bool AppsOk = true;
+
+        private readonly Dictionary<string, DateTime> appFixAt =
+            new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> appSaid =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Every [remote.apps] entry, measured against its calibrated state:
+        // running, and still listening on the ports it had when calibrated.
+        // Anything that drifted gets put back - service restarted, or the exe
+        // relaunched - at most once per app per two minutes.
+        public void WatchApps(bool repair, bool loud)
+        {
+            List<RemoteApp> apps = RemoteApps.Load(cfg);
+            if (apps.Count == 0) { AppLines = new string[0]; AppsOk = true; return; }
+
+            Dictionary<int, List<int>> listening = RemoteApps.ListeningByPid();
+            List<string> lines = new List<string>();
+            bool allOk = true;
+
+            foreach (RemoteApp a in apps)
+            {
+                if (stopping) break;
+                string exeSeen;
+                List<int> pids = RemoteApps.PidsMatching(a.Name, out exeSeen);
+                List<int> ports = new List<int>();
+                foreach (int pid in pids)
+                {
+                    List<int> l;
+                    if (!listening.TryGetValue(pid, out l)) continue;
+                    foreach (int p in l) if (!ports.Contains(p)) ports.Add(p);
+                }
+
+                bool running = pids.Count > 0;
+                List<int> missing = new List<int>();
+                if (a.Calibrated)
+                    foreach (int p in a.Ports) if (!ports.Contains(p)) missing.Add(p);
+                bool ok = running && missing.Count == 0;
+
+                string state;
+                if (!running)
+                    state = "NOT running";
+                else if (missing.Count > 0)
+                    state = "running, but calibrated port" + (missing.Count == 1 ? " " : "s ")
+                        + Ports_(missing) + (missing.Count == 1 ? " is" : " are") + " gone";
+                else
+                    state = "connected" + (ports.Count > 0 ? ", listening on " + Ports_(ports) : "")
+                        + (a.Calibrated ? "" : "  (not calibrated yet)");
+
+                string fixed_ = "";
+                if (!ok)
+                {
+                    allOk = false;
+                    DateTime lastFix;
+                    bool may = !appFixAt.TryGetValue(a.Name, out lastFix)
+                        || (DateTime.Now - lastFix).TotalMinutes >= 2;
+                    if (repair && may)
+                    {
+                        appFixAt[a.Name] = DateTime.Now;
+                        fixed_ = FixApp(a, running, pids);
+                    }
+                }
+
+                // Say it once per change of picture, not once per minute.
+                string said;
+                bool news = !appSaid.TryGetValue(a.Name, out said) || said != state;
+                appSaid[a.Name] = state;
+                if (fixed_.Length > 0)
+                    log("[guard] " + a.Name + ": " + state + " - " + fixed_);
+                else if (news && !ok)
+                    log("[guard] " + a.Name + ": " + state);
+                else if (news && ok && said != null)
+                    log("[guard] " + a.Name + " is back - " + state);
+
+                lines.Add((ok ? "+ " : "! ") + Pad(a.Name) + " " + state
+                    + (fixed_.Length > 0 ? "  * " + fixed_ : ""));
+            }
+
+            AppLines = lines.ToArray();
+            AppsOk = allOk;
+            if (loud)
+            {
+                log("-- remote desktop apps");
+                foreach (string l in lines) log("   " + l);
+            }
+        }
+
+        private static string Pad(string s) { return s.Length >= 14 ? s : s.PadRight(14); }
+
+        private static string Ports_(List<int> ports)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (int p in ports)
+            {
+                if (sb.Length > 0) sb.Append(",");
+                sb.Append(p.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        // Put one drifted app back: its service if it has one, else the exe the
+        // calibration remembered. "Running but deaf" means kill it first - a
+        // relaunch on top of a wedged copy just fails quietly.
+        private string FixApp(RemoteApp a, bool running, List<int> pids)
+        {
+            if (a.Service.Length > 0 && Engine.ServiceExists(a.Service))
+            {
+                bool ok = running ? engine.RestartService(a.Service) : engine.EnsureService(a.Service, false);
+                if (ok) { FixCount++; return (running ? "restarted" : "started") + " the " + a.Service + " service"; }
+                return "could not " + (running ? "restart" : "start") + " the " + a.Service + " service";
+            }
+
+            if (a.Exe.Length > 0 && File.Exists(a.Exe))
+            {
+                if (running)
+                {
+                    foreach (int pid in pids)
+                    {
+                        try
+                        {
+                            using (Process p = Process.GetProcessById(pid))
+                            {
+                                if (engine.IsProtectedProcess(p.ProcessName)) continue;
+                                p.Kill();
+                                p.WaitForExit(3000);
+                            }
+                        }
+                        catch (Exception) { }
+                    }
+                    Thread.Sleep(1500);
+                }
+                try
+                {
+                    Process.Start(new ProcessStartInfo(a.Exe) { UseShellExecute = true });
+                    FixCount++;
+                    return (running ? "relaunched " : "launched ") + a.Exe;
+                }
+                catch (Exception ex)
+                {
+                    return "could not launch " + a.Exe + " (" + ex.Message.Split('\n')[0] + ")";
+                }
+            }
+
+            return "no service or calibrated exe to start it with - open 'Remote desktop setup' and Calibrate while it is running";
+        }
+
         // ---- the tools the rungs use
 
         private void Flush(List<string> done)
@@ -1703,6 +1863,256 @@ namespace IdleMaster
                 output = ex.Message;
                 return -2;
             }
+        }
+    }
+
+    // -------------------------------------------------------- remote apps
+
+    // One app the remote-desktop watch keeps connected, and what "connected"
+    // looked like the last time the user pressed Calibrate: the exe to relaunch
+    // it with, the service that owns it (if any), and the TCP ports it was
+    // listening on. No calibration = "just keep it running".
+    internal sealed class RemoteApp
+    {
+        public string Name = "";
+        public string Exe = "";
+        public string Service = "";
+        public readonly List<int> Ports = new List<int>();
+        public bool Calibrated;
+    }
+
+    internal static class RemoteApps
+    {
+        // process name pattern | what it is | the service behind it ("" = none).
+        // The pick dialog offers these first, detected ones marked - but any
+        // process on the machine can be chosen instead.
+        public static readonly string[][] Common = new string[][]
+        {
+            new string[] { "sunshine",      "Sunshine game-stream host",  "SunshineService" },
+            new string[] { "tailscaled",    "Tailscale daemon",           "Tailscale" },
+            new string[] { "tailscale-ipn", "Tailscale tray app",         "" },
+            new string[] { "parsecd",       "Parsec host",                "Parsec" },
+            new string[] { "TeamViewer",    "TeamViewer",                 "TeamViewer" },
+            new string[] { "AnyDesk",       "AnyDesk",                    "AnyDesk" },
+            new string[] { "RustDesk",      "RustDesk",                   "RustDesk" },
+            new string[] { "remoting_host", "Chrome Remote Desktop",      "chromoting" },
+            new string[] { "tvnserver",     "TightVNC server",            "tvnserver" },
+            new string[] { "winvnc",        "UltraVNC server",            "uvnc_service" },
+            new string[] { "vncserver",     "RealVNC server",             "vncserver" },
+            new string[] { "nxservice64",   "NoMachine",                  "nxservice" },
+            new string[] { "moonlight",     "Moonlight (client side)",    "" },
+        };
+
+        public static bool Detected(string process, string service)
+        {
+            try { if (Process.GetProcessesByName(process).Length > 0) return true; }
+            catch (Exception) { }
+            return service.Length > 0 && Engine.ServiceExists(service);
+        }
+
+        // The service behind a name: the Common table first, then a service
+        // that simply shares the process name.
+        public static string ServiceFor(string name)
+        {
+            foreach (string[] c in Common)
+                if (Engine.Match(c[0], name) || Engine.Match(name, c[0]))
+                    return c[2];
+            return Engine.ServiceExists(name) ? name : "";
+        }
+
+        // Calibrations live next to the ini in their own file - they are machine
+        // state, not configuration, and the windows must not clobber them.
+        private static string CalibPath { get { return Path.Combine(App.Dir, "idlemaster.remote"); } }
+
+        // One RemoteApp per enabled [remote.apps] entry, calibration merged in.
+        public static List<RemoteApp> Load(Config cfg)
+        {
+            Dictionary<string, RemoteApp> calib = ReadCalib();
+            List<RemoteApp> apps = new List<RemoteApp>();
+            foreach (string name in cfg.RemoteApps)
+            {
+                RemoteApp a;
+                if (calib.TryGetValue(name.ToLowerInvariant(), out a))
+                    apps.Add(a);
+                else
+                {
+                    a = new RemoteApp();
+                    a.Name = name;
+                    a.Service = ServiceFor(name);
+                    apps.Add(a);
+                }
+            }
+            return apps;
+        }
+
+        private static Dictionary<string, RemoteApp> ReadCalib()
+        {
+            Dictionary<string, RemoteApp> map =
+                new Dictionary<string, RemoteApp>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (!File.Exists(CalibPath)) return map;
+                foreach (string line in File.ReadAllLines(CalibPath))
+                {
+                    string[] p = line.Split('|');
+                    if (p.Length < 5 || p[0] != "app") continue;
+                    RemoteApp a = new RemoteApp();
+                    a.Name = p[1];
+                    a.Exe = p[2];
+                    a.Service = p[3];
+                    foreach (string port in p[4].Split(','))
+                    {
+                        int n;
+                        if (int.TryParse(port.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out n))
+                            a.Ports.Add(n);
+                    }
+                    a.Calibrated = true;
+                    if (a.Name.Length > 0) map[a.Name.ToLowerInvariant()] = a;
+                }
+            }
+            catch (Exception) { }
+            return map;
+        }
+
+        // "This is what connected looks like": snapshot every named app that is
+        // running right now - exe, service, listening ports - and remember it.
+        // Apps not running are left uncalibrated (and said so), because a
+        // snapshot of a dead app would teach the guard nothing.
+        public static void Calibrate(List<string> names, Action<string> log)
+        {
+            Dictionary<string, RemoteApp> calib = ReadCalib();
+            Dictionary<int, List<int>> listening = ListeningByPid();
+            int done = 0;
+
+            foreach (string name in names)
+            {
+                string exe;
+                List<int> pids = PidsMatching(name, out exe);
+                if (pids.Count == 0)
+                {
+                    log("[calibrate] " + name + " is not running - start and connect it, then calibrate again");
+                    continue;
+                }
+                RemoteApp a = new RemoteApp();
+                a.Name = name;
+                a.Exe = exe ?? "";
+                a.Service = ServiceFor(name);
+                foreach (int pid in pids)
+                {
+                    List<int> l;
+                    if (!listening.TryGetValue(pid, out l)) continue;
+                    foreach (int p in l) if (!a.Ports.Contains(p)) a.Ports.Add(p);
+                }
+                a.Ports.Sort();
+                a.Calibrated = true;
+                calib[name.ToLowerInvariant()] = a;
+                done++;
+                log("[calibrate] " + name + ": " + pids.Count + " process" + (pids.Count == 1 ? "" : "es")
+                    + (a.Service.Length > 0 ? ", service " + a.Service : "")
+                    + (a.Ports.Count > 0 ? ", listening on " + PortsText(a.Ports) : ", no listening ports")
+                    + (a.Exe.Length > 0 ? "" : ", exe path not readable"));
+            }
+
+            try
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("# what 'connected' looks like, written by Calibrate - delete to forget");
+                foreach (KeyValuePair<string, RemoteApp> kv in calib)
+                {
+                    RemoteApp a = kv.Value;
+                    sb.AppendLine("app|" + a.Name + "|" + a.Exe + "|" + a.Service + "|" + PortsText(a.Ports));
+                }
+                File.WriteAllText(CalibPath, sb.ToString(), new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                log("[calibrate] ! could not save the calibration: " + ex.Message.Split('\n')[0]);
+                return;
+            }
+            log("[calibrate] " + done + " app" + (done == 1 ? "" : "s") + " calibrated - the guard now"
+                + " holds them to this picture and reconnects whatever drifts.");
+        }
+
+        private static string PortsText(List<int> ports)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (int p in ports)
+            {
+                if (sb.Length > 0) sb.Append(",");
+                sb.Append(p.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        // Pids whose process name matches the pattern, and the first exe path
+        // we are allowed to read (the relaunch handle).
+        public static List<int> PidsMatching(string pattern, out string exe)
+        {
+            exe = "";
+            List<int> pids = new List<int>();
+            foreach (Process p in Process.GetProcesses())
+            {
+                try
+                {
+                    string name;
+                    int pid;
+                    try { name = p.ProcessName; pid = p.Id; }
+                    catch (Exception) { continue; }
+                    if (!Engine.Match(pattern, name)) continue;
+                    pids.Add(pid);
+                    if (exe.Length == 0)
+                    {
+                        try { exe = p.MainModule.FileName; }
+                        catch (Exception) { }
+                    }
+                }
+                finally { try { p.Dispose(); } catch (Exception) { } }
+            }
+            return pids;
+        }
+
+        // ---- who is listening on what
+
+        [DllImport("iphlpapi.dll")]
+        private static extern uint GetExtendedTcpTable(IntPtr table, ref int size, bool sort,
+            int family, int tableClass, uint reserved);
+
+        private const int AF_INET = 2;
+        private const int TCP_TABLE_OWNER_PID_LISTENER = 3;
+
+        // Listening TCP ports per owning pid, straight from iphlpapi - the only
+        // way to tie a port to a process without shelling out to netstat.
+        public static Dictionary<int, List<int>> ListeningByPid()
+        {
+            Dictionary<int, List<int>> map = new Dictionary<int, List<int>>();
+            IntPtr table = IntPtr.Zero;
+            try
+            {
+                int size = 0;
+                GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0);
+                if (size <= 0) return map;
+                table = Marshal.AllocHGlobal(size);
+                if (GetExtendedTcpTable(table, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) != 0)
+                    return map;
+                int n = Marshal.ReadInt32(table);
+                for (int i = 0; i < n; i++)
+                {
+                    // MIB_TCPROW_OWNER_PID: state, localAddr, localPort, remoteAddr, remotePort, pid
+                    long row = table.ToInt64() + 4 + (long)i * 24;
+                    int portRaw = Marshal.ReadInt32(new IntPtr(row + 8));
+                    int pid = Marshal.ReadInt32(new IntPtr(row + 20));
+                    int port = ((portRaw & 0xFF) << 8) | ((portRaw >> 8) & 0xFF);
+                    List<int> l;
+                    if (!map.TryGetValue(pid, out l)) { l = new List<int>(); map[pid] = l; }
+                    if (!l.Contains(port)) l.Add(port);
+                }
+            }
+            catch (Exception) { }
+            finally
+            {
+                try { if (table != IntPtr.Zero) Marshal.FreeHGlobal(table); } catch (Exception) { }
+            }
+            return map;
         }
     }
 }

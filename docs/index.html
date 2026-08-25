@@ -137,6 +137,7 @@
     <span class="links">
       <a href="#modes">Modes</a>
       <a href="#sentry">Sentry</a>
+      <a href="#tour">Tour</a>
       <a href="#safety">Safety</a>
       <a href="#faq">FAQ</a>
       <a class="docs" href="docs.html">Docs</a>
@@ -165,22 +166,19 @@
       <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">all releases</a>
     </p>
 
-    <div class="console" style="margin-top:38px">
-      <div class="bar">
-        <i class="dot"></i><i class="dot"></i><i class="dot"></i>
-        <span class="t">idlemaster.log</span>
+    <figure class="clip hero-clip">
+      <div class="shot">
+        <div class="bar">
+          <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">Idle Master</span>
+          <span class="live">BOOST NOW</span>
+        </div>
+        <img src="media/boost.webp" width="684" height="703" loading="eager" decoding="async"
+             alt="Idle Master running a boost: the RAM gauge falls from 11.4 GB to 9.7 GB used while the log lists each process and service it closes, then the sentry arms and starts reaping respawns.">
       </div>
-<pre><span class="d">23:41:02</span>  BOOST NOW <span class="d">— 11.4 GB in use, 15.9 GB total</span>
-<span class="d">23:41:02</span>  killed <span class="a">msedgewebview2</span> ×17 <span class="d">(540 MB)</span>
-<span class="d">23:41:03</span>  killed <span class="a">RazerCortex</span>, <span class="a">RazerCentral</span>, <span class="a">GameManagerService3</span> <span class="d">(305 MB)</span>
-<span class="d">23:41:03</span>  stopped service <span class="a">WSearch</span> <span class="d">(60 MB)</span>
-<span class="d">23:41:04</span>  <span class="a">WhatsApp.Root</span> has a window open <span class="d">- leaving it alone</span>
-<span class="d">23:41:05</span>  trimmed working sets, purged standby list
-<span class="d">23:41:05</span>  remote access guard: <span class="a">all protected services up</span>
-<span class="d">23:41:05</span>  <span class="a">1.9 GB freed.</span> sentry armed <span class="d">— sweeping every 20 s</span>
-<span class="d">00:07:19</span>  <span class="a">reaped 6 respawns</span> <span class="d">— still 1.9 GB down</span>
-<span class="d">03:12:44</span>  <span class="w">NvContainerLocalSystem respawned 6× — backing off 30 min</span></pre>
-    </div>
+      <figcaption>One click, recorded on a real machine: <b>1.9&nbsp;GB freed in about three
+        seconds</b>, then the sentry keeps hunting so it stays freed.</figcaption>
+    </figure>
   </div>
 </header>
 
@@ -254,12 +252,18 @@
            be the reason you lost work while you were away from the keyboard.</p>
       </div>
       <div>
-        <div class="toast">
-          <p class="h">Docker Desktop just started</p>
-          <p class="b">4 processes, 512 MB. It is on your BOOST kill list, so the sentry
-             is about to close it.</p>
-          <div class="row"><span class="k">Keep it</span><span>Always keep</span><span class="t">Trash it</span></div>
-        </div>
+        <figure class="clip inline">
+          <div class="shot">
+            <div class="bar">
+              <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+              <span class="t">Idle Master — a newcomer appears</span>
+            </div>
+            <img src="media/toast.webp" width="480" height="240" loading="lazy" decoding="async"
+                 alt="The sentry's toast: it names the process, shows its real icon, publisher and path, and offers Keep it, Always keep, Trash once, or Always trash, counting down before it decides for you.">
+          </div>
+          <figcaption>The real toast — the app's own icon, its publisher, and a countdown.
+            <b>No answer leaves it alone.</b></figcaption>
+        </figure>
 
         <h3>Two brakes</h3>
         <ul>
@@ -308,6 +312,91 @@
       1.5–2&nbsp;GB in use total; that floor is Windows kernel and Defender, and there is no
       honest way below it.
     </p>
+
+    <figure class="clip" style="margin-top:30px">
+      <div class="shot">
+        <div class="bar">
+          <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">Idle Master — task manager</span>
+          <span class="live">LIVE</span>
+        </div>
+        <img src="media/eaters.webp" width="624" height="521" loading="lazy" decoding="async"
+             alt="The What's-eating-RAM window: a live table of processes sorted by memory, each tagged BOOST, IDLE or KEEP, with a right-click menu offering End it now, Close on every boost, Also close on absolute idle, or Never touch.">
+      </div>
+      <figcaption><b>What's eating RAM</b> — the same numbers <code>--report</code> prints, live and
+        sorted, every row tagged with the mode that would close it. Right-click writes your
+        choice straight into the config.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <p class="kicker">The whole tour</p>
+    <h2>One 50&nbsp;KB window. Rather a lot behind it.</h2>
+    <p class="lead">Two buttons and a log are the front door. Behind them is a task manager, a
+       tuning page for the sentry, a review-first disk cleaner, and a one-zip backup kit —
+       every one of them the real window, recorded on this machine.</p>
+
+    <div class="gallery">
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — sentry</span>
+          </div>
+          <img src="media/sentry.webp" width="804" height="621" loading="lazy" decoding="async"
+               alt="The sentry page: the boost kill list and the services it re-stops shown as checklists you can add to, remove from or comment out, beside every timer — sweep interval, re-stop interval, re-trim interval, backoff — and the 'ask first' knobs.">
+        </div>
+        <figcaption><b>Sentry lists &amp; timers.</b> What it hunts and how often, as checklists
+          and dials. Untick to comment out; a running sentry picks up the change on its next
+          sweep.</figcaption>
+      </figure>
+
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — disk cleanup</span>
+          </div>
+          <img src="media/cleanup.png" width="744" height="554" loading="lazy" decoding="async"
+               alt="The disk cleanup window as a tree: a temp-files finding opened into the folders actually inside it, biggest first, each row with a checkbox, an owner column naming the app the bytes belong to, its size, and a share-of-parent bar — plus filters for minimum size, safe or review, and a name search.">
+        </div>
+        <figcaption><b>Disk cleanup.</b> The drive's own file table is read raw — the whole of
+          C: sized in seconds — and every finding opens into what is actually inside it, with an
+          owner column naming whose bytes they are. Known junk arrives pre-ticked; everything
+          else is your call. Nothing is deleted — it all goes to the <b>Recycle Bin</b>, so a
+          wrong tick is one restore away.</figcaption>
+      </figure>
+
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — backup kit</span>
+          </div>
+          <img src="media/backup.webp" width="824" height="661" loading="lazy" decoding="async"
+               alt="The backup kit window: installed apps listed with their winget ids and pre-ticked, folders to keep with their sizes, and options to reinstall Idle Master, strip the Windows AI, and apply a WinUtil preset on the new machine — all written into one zip.">
+        </div>
+        <figcaption><b>Backup kit.</b> For the day you reinstall Windows: apps by winget id,
+          the folders you name, and the whole setup written to <b>one zip</b> that puts a fresh
+          install back the way this one is.</figcaption>
+      </figure>
+
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — settings</span>
+          </div>
+          <img src="media/settings.webp" width="460" height="424" loading="lazy" decoding="async"
+               alt="The settings dialog: plain-language switches for the sentry, ask-before-kill and tray, the dialog timeout in seconds with a choice for what no answer means, the sweep interval, and an emergency-trim threshold, with an Advanced settings button behind it.">
+        </div>
+        <figcaption><b>Settings, in plain words.</b> The switches most people touch — and
+          <b>Advanced</b> behind it opens every list, interval and default, no text editor in
+          sight.</figcaption>
+      </figure>
+    </div>
   </div>
 </section>
 

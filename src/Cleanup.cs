@@ -3,8 +3,11 @@
 // weighing. Nothing here touches a window - CleanupForm (Ui.cs) owns the
 // checkboxes, this owns the facts.
 //
+//   Phase 0: the disk map      - DiskScan.cs reads each drive's file table,
+//                                so every phase after it looks sizes up in
+//                                memory instead of stat-ing files one by one.
 //   Phase 1: known junk spots  - temp, caches, dumps, update leftovers.
-//   Phase 2: big folders       - WizTree by hand: walk, weigh, point.
+//   Phase 2: big folders       - queried straight out of the map.
 //   Phase 3: possible leftovers - folders no installed program claims.
 //
 // Everything found is a SUGGESTION until you tick it and press Clean, every
@@ -39,6 +42,11 @@ namespace IdleMaster
         public string Note = "";
         public List<string> Parts;      // explicit targets; overrides the above
 
+        // Where this finding lives in the disk map, when the map has it -
+        // the window uses it to open the row into a tree of what is inside.
+        public DiskTree Tree;
+        public int Node = -1;
+
         public string Key { get { return Path.ToLowerInvariant(); } }
     }
 
@@ -52,6 +60,13 @@ namespace IdleMaster
 
         private readonly Config cfg;
         private volatile bool cancel;
+        private List<string[]> programs;    // installed apps, for orphans and owners
+        private readonly Dictionary<string, string> ownerCache
+            = new Dictionary<string, string>();
+
+        // One map per fixed drive, filled by phase 0. The window reads these
+        // too - they are what the "disk map" rows open into.
+        public readonly List<DiskTree> Trees = new List<DiskTree>();
 
         public CleanupScanner(Config c) { cfg = c; }
 
@@ -68,15 +83,64 @@ namespace IdleMaster
                 if (cancel) return;
                 if (it.Bytes <= 0) return;
                 if (!it.IsRecycleBin && IsProtectedPath(it.Path)) return;
+                if (it.Node < 0) Resolve(it);
                 all.Add(it);
                 found(it);
             };
 
-            ScanKnownSpots(progress, keep);
+            MapDrives(progress);
+            if (!cancel) ScanKnownSpots(progress, keep);
             if (!cancel) ScanOrphans(progress, keep);
             if (!cancel) ScanBigFolders(progress, keep);
             progress(cancel ? "scan cancelled" : "scan finished");
             return all;
+        }
+
+        // ---- phase 0: the disk map
+
+        private void MapDrives(Action<string> progress)
+        {
+            Trees.Clear();
+            ownerCache.Clear();
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (cancel) return;
+                try
+                {
+                    if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
+                }
+                catch (Exception) { continue; }
+
+                progress(drive.Name + " reading the file table...");
+                try
+                {
+                    DiskTree t = DiskScanner.ScanDrive(drive, progress,
+                        delegate() { return cancel; });
+                    if (t != null && t.RootNode >= 0) Trees.Add(t);
+                }
+                catch (Exception) { }
+            }
+        }
+
+        // Find a path in whichever map covers it.
+        public bool Resolve(string path, out DiskTree tree, out int node)
+        {
+            tree = null; node = -1;
+            if (path == null || path.Length < 2) return false;
+            foreach (DiskTree t in Trees)
+            {
+                if (!path.StartsWith(t.Root, StringComparison.OrdinalIgnoreCase)) continue;
+                int n = t.Lookup(path);
+                if (n >= 0) { tree = t; node = n; return true; }
+                return false;
+            }
+            return false;
+        }
+
+        private void Resolve(CleanupItem it)
+        {
+            DiskTree t; int n;
+            if (Resolve(it.Path, out t, out n)) { it.Tree = t; it.Node = n; }
         }
 
         // The protect list wins - checked before a finding is shown AND again
@@ -373,18 +437,12 @@ namespace IdleMaster
         {
             long minBytes = (long)cfg.CleanupBigDirMinMb * 1024 * 1024;
 
-            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            foreach (DiskTree tree in Trees)
             {
                 if (cancel) return;
-                try
-                {
-                    if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
-                }
-                catch (Exception) { continue; }
-
-                progress("weighing " + drive.Name + " ...");
+                progress("picking the big folders on " + tree.Root + " ...");
                 List<CleanupItem> big = new List<CleanupItem>();
-                WalkBig(drive.RootDirectory.FullName, 0, minBytes, progress, big);
+                PickBig(tree, tree.RootNode, 0, minBytes, big);
                 if (cancel) return;
 
                 // When one child carries >= 90% of a folder, the child is the
@@ -410,64 +468,47 @@ namespace IdleMaster
             }
         }
 
-        // One walk per drive; sizes bubble up so every folder is weighed once.
-        // Reparse points are skipped everywhere - following junctions is how a
-        // scan loops forever and how one file gets counted three times.
-        private long WalkBig(string path, int depth, long minBytes,
-                             Action<string> progress, List<CleanupItem> big)
+        // The walk already happened in phase 0 - this just reads the map.
+        private void PickBig(DiskTree tree, int node, int depth, long minBytes,
+                             List<CleanupItem> big)
         {
-            if (cancel) return 0;
-            long total = 0;
-            try
+            if (cancel) return;
+            for (int c = tree.FirstChild[node]; c >= 0; c = tree.NextSibling[c])
             {
-                foreach (string f in Directory.EnumerateFiles(path))
-                {
-                    try { total += new FileInfo(f).Length; }
-                    catch (Exception) { }
-                }
-                foreach (string d in Directory.EnumerateDirectories(path))
-                {
-                    if (cancel) break;
-                    if (SkipForBig(d, depth + 1)) continue;
-                    if (depth < 2) progress(d);
-                    total += WalkBig(d, depth + 1, minBytes, progress, big);
-                }
-            }
-            catch (Exception) { }
+                if (!tree.IsDir(c) || tree.IsReparse(c)) continue;
+                if (tree.Bytes[c] < minBytes) continue;
+                if (SkipForBig(tree.Name[c], depth + 1)) continue;
 
-            if (!cancel && depth >= 1 && depth <= ReportDepth
-                && total >= minBytes && !IsProtectedPath(path))
-            {
-                CleanupItem it = new CleanupItem();
-                it.Name = System.IO.Path.GetFileName(path);
-                it.Path = path;
-                it.Category = "Big folders";
-                it.Bytes = total;
-                it.Safe = false;
-                it.Note = "big, not necessarily junk - your call";
-                big.Add(it);
+                string path = tree.PathOf(c);
+                if (depth + 1 <= ReportDepth && !IsProtectedPath(path))
+                {
+                    CleanupItem it = new CleanupItem();
+                    it.Name = tree.Name[c];
+                    it.Path = path;
+                    it.Category = "Big folders";
+                    it.Bytes = tree.Bytes[c];
+                    it.Safe = false;
+                    it.Note = "big, not necessarily junk - your call";
+                    it.Tree = tree;
+                    it.Node = c;
+                    big.Add(it);
+                }
+                if (depth + 1 < ReportDepth) PickBig(tree, c, depth + 1, minBytes, big);
             }
-            return total;
         }
 
         // Hard exclusions, in code so no ini edit can point the scanner at the
         // OS itself. \Windows junk is phase 1's job, piece by careful piece.
-        private static bool SkipForBig(string path, int depth)
+        private static bool SkipForBig(string name, int depth)
         {
-            try
+            if (depth == 1)
             {
-                if (IsReparse(path)) return true;
-                string name = System.IO.Path.GetFileName(path);
-                if (depth == 1)
-                {
-                    if (name.Equals("Windows", StringComparison.OrdinalIgnoreCase)) return true;
-                    if (name.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase)) return true;
-                    if (name.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)) return true;
-                    if (name.Equals("Recovery", StringComparison.OrdinalIgnoreCase)) return true;
-                }
-                return false;
+                if (name.Equals("Windows", StringComparison.OrdinalIgnoreCase)) return true;
+                if (name.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase)) return true;
+                if (name.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)) return true;
+                if (name.Equals("Recovery", StringComparison.OrdinalIgnoreCase)) return true;
             }
-            catch (Exception) { return true; }
+            return false;
         }
 
         // ---- phase 3: possible leftovers
@@ -491,7 +532,7 @@ namespace IdleMaster
         private void ScanOrphans(Action<string> progress, Action<CleanupItem> found)
         {
             progress("reading the installed-programs list...");
-            List<string[]> programs = InstalledPrograms();
+            List<string[]> programs = Programs();
             if (programs.Count == 0) return;    // a broken registry read would
                                                 // flag EVERYTHING - stand down
 
@@ -554,10 +595,12 @@ namespace IdleMaster
             return false;
         }
 
-        // [ normalized DisplayName, lowercased InstallLocation ] per program,
-        // from every Uninstall hive - 64-bit, 32-bit, and per-user installs.
-        private static List<string[]> InstalledPrograms()
+        // [ normalized DisplayName, lowercased InstallLocation, DisplayName ]
+        // per program, from every Uninstall hive - 64-bit, 32-bit, per-user.
+        // Loaded once per scanner; the owner column asks about it constantly.
+        private List<string[]> Programs()
         {
+            if (programs != null) return programs;
             List<string[]> list = new List<string[]>();
             ReadUninstall(Registry.LocalMachine,
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", list);
@@ -565,7 +608,133 @@ namespace IdleMaster
                 @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", list);
             ReadUninstall(Registry.CurrentUser,
                 @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", list);
+            programs = list;
             return list;
+        }
+
+        // ---- whose poop is it
+        //
+        // Best-effort name of the app (or person, or Windows) a path belongs
+        // to, for the owner column. A heuristic, not a verdict - it points,
+        // the human decides.
+
+        public string OwnerOf(string path)
+        {
+            if (path == null || path.Length < 4) return "";
+            string key = path.ToLowerInvariant();
+            string owner;
+            lock (ownerCache)
+            {
+                if (ownerCache.TryGetValue(key, out owner)) return owner;
+            }
+            owner = OwnerWork(path);
+            lock (ownerCache)
+            {
+                if (ownerCache.Count > 200000) ownerCache.Clear();
+                ownerCache[key] = owner;
+            }
+            return owner;
+        }
+
+        private string OwnerWork(string path)
+        {
+            string[] seg;
+            try { seg = path.Substring(System.IO.Path.GetPathRoot(path).Length).Split('\\'); }
+            catch (Exception) { return ""; }
+            if (seg.Length == 0 || seg[0].Length == 0) return "";
+            string top = seg[0];
+
+            // Steam libraries live anywhere; the game name is two hops down.
+            for (int i = 0; i + 2 < seg.Length; i++)
+                if (seg[i].Equals("steamapps", StringComparison.OrdinalIgnoreCase)
+                    && seg[i + 1].Equals("common", StringComparison.OrdinalIgnoreCase))
+                    return seg[i + 2] + " (Steam)";
+
+            if (top.Equals("Windows", StringComparison.OrdinalIgnoreCase)) return "Windows";
+            if (top.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase)) return "Recycle Bin";
+            if (top.StartsWith("pagefile", StringComparison.OrdinalIgnoreCase)
+                || top.StartsWith("hiberfil", StringComparison.OrdinalIgnoreCase)
+                || top.StartsWith("swapfile", StringComparison.OrdinalIgnoreCase)) return "Windows";
+
+            if (top.Equals("Program Files", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase)
+                || top.Equals("ProgramData", StringComparison.OrdinalIgnoreCase))
+            {
+                if (seg.Length < 2) return "";
+                string claimed = ClaimedBy(path, seg[1], seg.Length > 2 ? seg[2] : null);
+                return claimed.Length > 0 ? claimed : seg[1] + " (unclaimed)";
+            }
+
+            if (top.Equals("Users", StringComparison.OrdinalIgnoreCase))
+            {
+                if (seg.Length < 3) return seg.Length > 1 ? seg[1] : "";
+                string user = seg[1];
+                if (!seg[2].Equals("AppData", StringComparison.OrdinalIgnoreCase))
+                    return user;                             // their Documents, Desktop, ...
+                // Users\u\AppData\{Local,Roaming,LocalLow}\Vendor\App\...
+                if (seg.Length < 5) return user;
+                string vendor = seg[4];
+                string app = seg.Length > 5 ? seg[5] : null;
+                string claimed = ClaimedBy(path, vendor, app);
+                if (claimed.Length == 0 || claimed == vendor)
+                    return vendor + " (" + user + ")";
+                return claimed;
+            }
+
+            return top;
+        }
+
+        // Umbrella vendor folders shared by many programs. Matching these
+        // against the programs list by name would credit the first
+        // "Microsoft anything" install with half the disk.
+        private static readonly string[] UmbrellaVendors = new string[]
+        {
+            "microsoft", "windows", "google", "adobe", "nvidia", "nvidiacorporation",
+            "intel", "amd", "apple", "mozilla", "oracle", "razer", "lenovo",
+            "commonfiles", "packages", "temp", "programs", "cache", "caches",
+        };
+
+        private static bool IsUmbrella(string norm)
+        {
+            foreach (string u in UmbrellaVendors)
+                if (norm == u) return true;
+            return false;
+        }
+
+        // Match a vendor/app folder pair against the installed-programs list:
+        // install path first (the strong claim), then name similarity. Empty
+        // string when nobody claims it - the caller picks the fallback.
+        private string ClaimedBy(string path, string vendor, string app)
+        {
+            List<string[]> progs = Programs();
+            string low = path.ToLowerInvariant();
+            foreach (string[] p in progs)
+            {
+                if (p[1].Length <= 3 || !low.StartsWith(p[1])) continue;
+                if (low.Length > p[1].Length && low[p[1].Length] != '\\') continue;
+                if (p[2].Length > 0) return p[2];
+            }
+
+            string normApp = app == null ? "" : Norm(app);
+            string normVendor = vendor == null ? "" : Norm(vendor);
+            if (normApp.Length >= 3 && !IsUmbrella(normApp))
+            {
+                foreach (string[] p in progs)
+                {
+                    if (p[0].Length < 3 || p[2].Length == 0) continue;
+                    if (p[0].Contains(normApp) || normApp.Contains(p[0])) return p[2];
+                }
+            }
+            if (normVendor.Length >= 3)
+            {
+                if (IsUmbrella(normVendor)) return vendor;
+                foreach (string[] p in progs)
+                {
+                    if (p[0].Length < 3 || p[2].Length == 0) continue;
+                    if (p[0].Contains(normVendor) || normVendor.Contains(p[0])) return p[2];
+                }
+            }
+            return "";
         }
 
         private static void ReadUninstall(RegistryKey root, string path, List<string[]> into)
@@ -590,6 +759,7 @@ namespace IdleMaster
                                 {
                                     name == null ? "" : Norm(name),
                                     loc == null ? "" : loc.Trim().TrimEnd('\\').ToLowerInvariant(),
+                                    name == null ? "" : name.Trim(),
                                 });
                             }
                         }
@@ -657,11 +827,14 @@ namespace IdleMaster
             catch (Exception) { return true; }
         }
 
-        // Everything under 'path', counted iteratively. Access-denied and
-        // too-long paths mean "count what we can see and move on" - a partial
-        // number beats an exception, and this runs on other people's disks.
+        // Everything under 'path'. The disk map answers instantly when it
+        // covers the path; the walk below is the fallback for whatever it
+        // does not (scan cancelled mid-map, exotic mounts).
         public long DirSize(string path)
         {
+            DiskTree t; int n;
+            if (Resolve(path, out t, out n)) return t.Bytes[n];
+
             long total = 0;
             Stack<string> work = new Stack<string>();
             work.Push(path);
