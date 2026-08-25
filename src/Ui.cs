@@ -3599,7 +3599,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
         private readonly Label sentryLabel;
@@ -3700,9 +3700,19 @@ namespace IdleMaster
             btnZoic.Click += delegate { RunZoicware(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(22, 420, 640, 20);
+            updateLabel.SetBounds(22, 420, 480, 20);
+            updateLabel.AutoEllipsis = true;
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
+
+            // The bug report door: whatever looked wrong, say so from right
+            // here. Opens a pre-typed GitHub issue - the preview shows every
+            // byte first, and nothing is sent until Submit in the browser.
+            btnFeedback = Theme.Quiet("Report a bug");
+            btnFeedback.SetBounds(510, 414, 152, 30);
+            btnFeedback.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnFeedback.Click += delegate { OpenFeedback(); };
+            Controls.Add(btnFeedback);
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
@@ -3912,6 +3922,21 @@ namespace IdleMaster
             try { cfg.CopyFrom(Config.Load()); } catch (Exception) { }
             RemoteApps.Calibrate(names.Count > 0 ? names : cfg.RemoteApps, AppendLog);
             if (guard != null && guard.Alive) guard.CheckNow();
+        }
+
+        // The report page hands the report to the browser (or the clipboard);
+        // the log notes which door it went out of.
+        private void OpenFeedback()
+        {
+            using (FeedbackForm f = new FeedbackForm())
+            {
+                f.Location = new Point(Location.X + Width - 40, Location.Y + 60);
+                f.ShowDialog(this);
+                if (f.Opened)
+                    AppendLog("Bug report opened on github.com - press Submit there to send it.");
+                else if (f.Copied)
+                    AppendLog("Bug report copied - paste it at " + Feedback.NewIssueUrl);
+            }
         }
 
         // Chris Titus Tech's WinUtil, launched the way its README says to.
@@ -4143,6 +4168,7 @@ namespace IdleMaster
             menu.Items.Add("Network guard...", null, delegate { ShowWindow(); OpenNetGuard(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
+            menu.Items.Add("Report a bug...", null, delegate { ShowWindow(); OpenFeedback(); });
             trayUpdate = new ToolStripMenuItem("Update now");
             trayUpdate.Visible = false;
             trayUpdate.Click += delegate { InstallPending(); };

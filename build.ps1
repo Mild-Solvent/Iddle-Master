@@ -61,7 +61,7 @@ $resIcon = "/resource:$icon,idlemaster.ico"
   /win32manifest:"$root\src\app.manifest" $iconArg $resRebuild $resIcon `
   /out:"$out" $refs "$root\src\IdleMaster.cs" "$root\src\Theme.cs" "$root\src\Ui.cs" `
   "$root\src\Cleanup.cs" "$root\src\DiskScan.cs" "$root\src\Debloat.cs" "$root\src\Backup.cs" `
-  "$root\src\NetGuard.cs" "$root\src\SoloInstance.cs"
+  "$root\src\NetGuard.cs" "$root\src\SoloInstance.cs" "$root\src\Feedback.cs"
 if ($LASTEXITCODE -ne 0) { throw "app build failed ($LASTEXITCODE)" }
 
 $resource = "/resource:$out,IdleMaster.exe"
