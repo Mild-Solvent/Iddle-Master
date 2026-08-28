@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.12.0.0")]
-[assembly: AssemblyFileVersion("0.12.0.0")]
+[assembly: AssemblyVersion("0.13.0.0")]
+[assembly: AssemblyFileVersion("0.13.0.0")]
 
 namespace IdleMaster
 {
@@ -139,6 +139,68 @@ namespace IdleMaster
         internal static extern bool CloseHandle(IntPtr handle);
 
         internal const uint TH32CS_SNAPPROCESS = 0x2;
+
+        // Is anybody actually there. ABSOLUTE IDLE is built on "nobody is
+        // watching"; this is the only thing on the machine that can tell the
+        // sentry when that stops being true. Keyboard and mouse for this
+        // session, streamed input included - Sunshine/Moonlight inject through
+        // the same path, so a human on the other end of a stream counts as
+        // present, which is exactly right.
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct LASTINPUTINFO
+        {
+            public uint cbSize;
+            public uint dwTime;
+        }
+
+        [DllImport("user32.dll")]
+        internal static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+
+        internal static int IdleSeconds()
+        {
+            LASTINPUTINFO i = new LASTINPUTINFO();
+            i.cbSize = (uint)Marshal.SizeOf(typeof(LASTINPUTINFO));
+            // Cannot tell = assume somebody is here. The safe answer is always
+            // the one that does not kill the app you are looking at.
+            if (!GetLastInputInfo(ref i)) return 0;
+            unchecked
+            {
+                // Both are tick counts, so the subtraction survives the 49.7-day
+                // wrap that catches everyone who compares them as unsigned.
+                int ms = Environment.TickCount - (int)i.dwTime;
+                return ms < 0 ? 0 : ms / 1000;
+            }
+        }
+
+        // Where a running process was launched from. A name is not always an
+        // app: "claude" is the desktop app AND the Claude Code CLI, "node" is
+        // whatever anyone happens to be running. The path is what tells them
+        // apart, and [protect.path] is the list that reads it.
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        internal static extern bool QueryFullProcessImageName(
+            IntPtr h, uint flags, StringBuilder name, ref int size);
+
+        // PROCESS_QUERY_LIMITED_INFORMATION: enough for the path, and the one
+        // right that still works against a process running as somebody else.
+        internal const uint ProcessQueryLimited = 0x1000;
+
+        internal static string ImagePath(int pid)
+        {
+            IntPtr h = IntPtr.Zero;
+            try
+            {
+                h = OpenProcess(ProcessQueryLimited, false, pid);
+                if (h == IntPtr.Zero) return null;
+                StringBuilder sb = new StringBuilder(1024);
+                int len = sb.Capacity;
+                return QueryFullProcessImageName(h, 0, sb, ref len) ? sb.ToString() : null;
+            }
+            catch (Exception) { return null; }
+            finally { if (h != IntPtr.Zero) try { CloseHandle(h); } catch (Exception) { } }
+        }
 
         [DllImport("advapi32.dll", SetLastError = true)]
         internal static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
@@ -267,6 +329,9 @@ namespace IdleMaster
         public bool SentrySkipForeground = true;    // never kill what you are actively looking at
         public bool SkipOpenApps = true;            // never kill any app with a window open (boost only)
         public bool OverclockedSentry = false;      // away mode: the sentry kills EVERYTHING not protected - no asking, no sparing
+        public bool SentryStandDown = true;         // ...and all of that stops the moment somebody touches the keyboard
+        public int SentryAwaySeconds = 120;         // ...which counts as over after this long with no input at all
+        public int CloseGraceMs = 3000;             // ask a window to close, and wait this long, before terminating. 0 = terminate outright
         public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
         public int SentryFullPassMinutes = 0;       // a whole boost pass (services + trim + guard) every N min. 0 = off
         public int BoostWhenFreeBelowMb = 0;        // ...and one right now when free RAM drops under this. 0 = off
@@ -298,6 +363,7 @@ namespace IdleMaster
         public readonly List<string> Protect = new List<string>();
         public readonly List<string> ProtectServices = new List<string>();
         public readonly List<string> ProtectTree = new List<string>();   // the app AND its helper processes
+        public readonly List<string> ProtectPath = new List<string>();   // ...and by where it was launched from, when the name is shared
         public readonly List<string> BoostKill = new List<string>();
         public readonly List<string> BoostServices = new List<string>();
         public readonly List<string> IdleKill = new List<string>();
@@ -314,6 +380,8 @@ namespace IdleMaster
         {
             if (!File.Exists(Path_))
                 File.WriteAllText(Path_, DefaultIni, new UTF8Encoding(false));
+            else
+                AddShippedSection("[protect.path]");
 
             Config c = new Config();
             string section = "";
@@ -345,6 +413,8 @@ namespace IdleMaster
                         case "sentryskipforeground": c.SentrySkipForeground = b; break;
                         case "skipopenapps": c.SkipOpenApps = b; break;
                         case "overclockedsentry": c.OverclockedSentry = b; break;
+                        case "sentrystanddown": c.SentryStandDown = b; break;
+                        case "sentryawayseconds": c.SentryAwaySeconds = Int(v, c.SentryAwaySeconds, 15); break;
                         case "startwithwindows": c.StartWithWindows = b; break;
                         case "startupaction":
                         {
@@ -358,6 +428,7 @@ namespace IdleMaster
                         case "sentryguardminutes": c.SentryGuardMinutes = Int(v, c.SentryGuardMinutes, 1); break;
                         case "sentryrespawnlimit": c.SentryRespawnLimit = Int(v, c.SentryRespawnLimit, 1); break;
                         case "sentrybackoffminutes": c.SentryBackoffMinutes = Int(v, c.SentryBackoffMinutes, 1); break;
+                        case "closegracems": c.CloseGraceMs = Int(v, c.CloseGraceMs, 0); break;
                         case "trimwhenfreebelowmb": c.TrimWhenFreeBelowMb = Int(v, c.TrimWhenFreeBelowMb, 0); break;
                         case "sentryfullpassminutes": c.SentryFullPassMinutes = Int(v, c.SentryFullPassMinutes, 0); break;
                         case "boostwhenfreebelowmb": c.BoostWhenFreeBelowMb = Int(v, c.BoostWhenFreeBelowMb, 0); break;
@@ -390,6 +461,8 @@ namespace IdleMaster
                     case "protect": c.Protect.Add(item); break;
                     case "protect.services": c.ProtectServices.Add(line); break;
                     case "protect.tree": c.ProtectTree.Add(item); break;
+                    // Paths, not process names - StripExe must not touch these.
+                    case "protect.path": c.ProtectPath.Add(line); break;
                     case "boost.kill": c.BoostKill.Add(item); break;
                     case "boost.services": c.BoostServices.Add(line); break;
                     case "idle.kill": c.IdleKill.Add(item); break;
@@ -432,7 +505,10 @@ namespace IdleMaster
             SentryBackoffMinutes = o.SentryBackoffMinutes;
             SentrySkipForeground = o.SentrySkipForeground;
             SkipOpenApps = o.SkipOpenApps;
+            CloseGraceMs = o.CloseGraceMs;
             OverclockedSentry = o.OverclockedSentry;
+            SentryStandDown = o.SentryStandDown;
+            SentryAwaySeconds = o.SentryAwaySeconds;
             StartWithWindows = o.StartWithWindows;
             StartupAction = o.StartupAction;
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
@@ -452,6 +528,7 @@ namespace IdleMaster
 
             Swap(Protect, o.Protect); Swap(ProtectServices, o.ProtectServices);
             Swap(ProtectTree, o.ProtectTree);
+            Swap(ProtectPath, o.ProtectPath);
             Swap(BoostKill, o.BoostKill); Swap(BoostServices, o.BoostServices);
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
@@ -479,6 +556,49 @@ namespace IdleMaster
         {
             mine.Clear();
             mine.AddRange(theirs);
+        }
+
+        // An ini written before a section existed never gains it: the default is
+        // only laid down when the file is absent, and an update deliberately
+        // leaves your config alone. So a section that ships LATER is copied in
+        // once, comments and all, exactly as a fresh install would have it -
+        // additive, at the end, and never again once the header is there. Delete
+        // the header and it comes back; comment its entries out and it does not.
+        private static void AddShippedSection(string header)
+        {
+            try
+            {
+                string[] lines = File.ReadAllLines(Path_);
+                foreach (string l in lines)
+                    if (l.Trim().Equals(header, StringComparison.OrdinalIgnoreCase)) return;
+
+                string block = DefaultSection(header);
+                if (block == null) return;
+                File.AppendAllText(Path_, Environment.NewLine + block, new UTF8Encoding(false));
+            }
+            catch (Exception) { }   // read-only ini: the code defaults still stand
+        }
+
+        // That section as the shipped default spells it - its explanatory banner
+        // above it, its entries below, up to wherever the next section begins.
+        private static string DefaultSection(string header)
+        {
+            string[] lines = DefaultIni.Replace("\r\n", "\n").Split('\n');
+            int at = -1;
+            for (int i = 0; i < lines.Length; i++)
+                if (lines[i].Trim().Equals(header, StringComparison.OrdinalIgnoreCase)) { at = i; break; }
+            if (at < 0) return null;
+
+            int from = at;
+            while (from > 0 && lines[from - 1].TrimStart().StartsWith("#")) from--;
+            int to = at + 1;
+            while (to < lines.Length
+                   && !lines[to].StartsWith("# ---")
+                   && !lines[to].TrimStart().StartsWith("[")) to++;
+
+            StringBuilder sb = new StringBuilder();
+            for (int i = from; i < to; i++) sb.AppendLine(lines[i].TrimEnd());
+            return sb.ToString();
         }
 
         // Writes a decision you made in a dialog straight back into the ini, so it
@@ -580,11 +700,31 @@ SentrySkipForeground=1
 # and killing those crashes the app even though its own name is not listed.
 # Boost only; ABSOLUTE IDLE still closes everything.
 SkipOpenApps=1
+# Close, then terminate. An app with a window on screen is asked to shut itself
+# down first and given this many milliseconds to do it; only if it is still
+# there afterwards is it terminated. This is what stops Electron apps - Claude,
+# the browsers, Discord - coming back broken: terminated outright they never let
+# go of the singleton lock in their profile, and the next launch refuses to
+# start and says another copy is already running. 0 = terminate outright, the
+# old behaviour.
+CloseGraceMs=3000
 # The away switch: while this is 1, a hunting sentry kills EVERYTHING that is
 # not on [protect] - no questions, no sparing open windows, no foreground mercy.
 # Toggle it in the window, click ABSOLUTE IDLE, walk away. Turn it off (or hit
 # Restore) when you are back at the keyboard.
 OverclockedSentry=0
+# The way back. ABSOLUTE IDLE is built on ""nobody is watching"", and idle mode
+# spares neither the window in front nor the ones you have open - so a watch left
+# enforcing it while you are at the keyboard reaps every app you open inside 20
+# seconds, until the respawn backoff above gives up on it and it finally sticks.
+# That is not a mode, that is a fight. With this on, the sentry follows the room:
+# any keyboard or mouse input and it drops to BOOST rules (front window spared,
+# open windows spared, newcomers asked about) and Overclocked is suspended; go
+# quiet for SentryAwaySeconds and the idle rules come back on their own. Restore
+# is still what ends the watch altogether.
+SentryStandDown=1
+# How long with no input at all counts as ""away"" again.
+SentryAwaySeconds=120
 # Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
 TrimWhenFreeBelowMb=0
 # Repeated boost: every N minutes do a WHOLE pass at once - re-stop services,
@@ -596,7 +736,8 @@ SentryFullPassMinutes=0
 BoostWhenFreeBelowMb=0
 # The repeat loop: the window clicks BOOST NOW for you every N minutes, for as
 # long as it is open. A whole boost each time - the same lists, the same asking -
-# not the sentry's sweep. The countdown sits next to the button. 0 = off.
+# not the sentry's sweep. Set from the refresh arrow on the button, whose ring
+# is the countdown to the next one. 0 = off.
 RepeatBoostMinutes=0
 
 # --- ASK FIRST --------------------------------------------------------------
@@ -784,6 +925,23 @@ TextInputManagementService
 WhatsApp*
 
 # ---------------------------------------------------------------------------
+# NEVER touched - judged by WHERE it was launched from, not what it is called.
+#
+# Every list above matches a process NAME, and a name is not always an app.
+# 'claude' is two different programs: the desktop app, which is 3 GB of Electron
+# and belongs on the idle list, and the Claude Code CLI, which is the work you
+# left running in a terminal. Same name, same kill list, and the list only ever
+# meant the first one. Same story for node, python, java and any other runtime.
+#
+# Full paths, '*' works, and a path protects everything underneath it - the same
+# spelling [cleanup.protect] uses. Matched against the process's own exe path.
+[protect.path]
+# The Claude Code CLI. Installed per-user under the desktop app's data folder,
+# but it is a terminal session doing your work, not the app's RAM.
+*\claude-code\*
+#C:\Users\*\my-tools\*
+
+# ---------------------------------------------------------------------------
 # BOOST NOW - background junk that has no business running while you work.
 # ---------------------------------------------------------------------------
 [boost.kill]
@@ -864,7 +1022,11 @@ UsoSvc
 # ABSOLUTE IDLE - applied ON TOP of the boost lists. Nobody is watching.
 # ---------------------------------------------------------------------------
 [idle.kill]
-# the actual monsters: ~5.0 GB of Brave, ~3.0 GB of Claude
+# the actual monsters: ~5.0 GB of Brave, ~3.0 GB of Claude. All of these are one
+# main process with a dozen same-named helpers under it; they are ended from the
+# root down, in one move, so nothing is left alive to respawn what just died.
+# 'claude' here is the DESKTOP APP. The Claude Code CLI is claude.exe too and is
+# spared by [protect.path] above - it is a terminal session doing your work.
 brave
 chrome
 msedge
@@ -1519,12 +1681,14 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly HashSet<int> treeUnknown = new HashSet<int>();
 
         // Called once at the top of a sweep, so every pid it judges is weighed
-        // against the same tree.
+        // against the same tree. Taken unconditionally: [protect.tree] is not
+        // the only reader any more - RootFirst needs to know who is whose
+        // parent to end an app from the top down.
         public void RefreshTree()
         {
-            if (cfg.ProtectTree.Count == 0) return;
             tree = ProcTree.Snapshot();
             treeUnknown.Clear();
+            pathOf.Clear();
         }
 
         public bool IsProtectedTree(int pid)
@@ -1544,6 +1708,100 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     if (Match(p, n)) return true;
             }
             return false;
+        }
+
+        // ---- [protect.path]: the same name, launched from somewhere else
+
+        // A name says what a program is called; a path says which program it is.
+        // 'claude' is the desktop app and it is also the Claude Code CLI running
+        // in a terminal, and the idle list only ever meant the first one. Asked
+        // at the moment of the kill rather than during the census: reading an
+        // image path costs a handle per process, and the census walks all of
+        // them while this list, when it is used at all, holds two entries.
+        private readonly Dictionary<int, string> pathOf = new Dictionary<int, string>();
+
+        public bool IsProtectedPath(int pid)
+        {
+            if (cfg.ProtectPath.Count == 0) return false;
+            string path;
+            if (!pathOf.TryGetValue(pid, out path))
+            {
+                path = Native.ImagePath(pid);
+                pathOf[pid] = path;
+            }
+            if (string.IsNullOrEmpty(path)) return false;
+            foreach (string p in cfg.ProtectPath)
+                if (Match(p, path)) return true;
+            return false;
+        }
+
+        // ---- ending a process family from the top
+
+        // Chromium and Electron apps - Claude, the browsers, Discord, Teams -
+        // are one main process and a dozen helpers that ALL carry the same name,
+        // so the lists see a dozen claudes and the census hands them over in
+        // whatever order the kernel listed them. Killing a helper first is the
+        // worst of both worlds: the main process notices the hole and spawns a
+        // replacement, the replacement is reaped on the next sweep, and after a
+        // few rounds the respawn counter decides "something wants it alive" and
+        // backs off for half an hour - leaving the app running with half of its
+        // helpers dead. That is the state you find it in afterwards.
+        //
+        // Ending the root first settles it in one move: Chromium keeps its
+        // children in a job object, so they go down with it and there is nothing
+        // left to respawn anything. Depth is counted WITHIN the set being killed,
+        // not in the machine's tree, so the answer does not depend on how deep
+        // the app happens to sit under explorer.
+        private List<int> RootFirst(List<int> pids)
+        {
+            if (pids.Count < 2) return pids;
+            ProcTree t = tree;
+            if (t == null) { t = ProcTree.Snapshot(); tree = t; }
+
+            HashSet<int> family = new HashSet<int>(pids);
+            List<int[]> keyed = new List<int[]>();      // { depth, original order, pid }
+            for (int i = 0; i < pids.Count; i++)
+            {
+                int depth = 0;
+                List<int> line = t.Lineage(pids[i]);
+                for (int j = 1; j < line.Count; j++)    // skip [0] - that is the pid itself
+                    if (family.Contains(line[j])) depth++;
+                keyed.Add(new int[] { depth, i, pids[i] });
+            }
+            keyed.Sort(delegate(int[] a, int[] b)
+            {
+                int c = a[0].CompareTo(b[0]);
+                return c != 0 ? c : a[1].CompareTo(b[1]);
+            });
+
+            List<int> ordered = new List<int>(keyed.Count);
+            foreach (int[] k in keyed) ordered.Add(k[2]);
+            return ordered;
+        }
+
+        // Terminate is the right end for something that is only holding RAM. An
+        // app with a window on screen is a different animal: Electron writes its
+        // session state on the way out and holds a singleton lock in its profile
+        // while it runs, and TerminateProcess leaves both behind. The lock
+        // outlives the process, so the next launch refuses to start and says
+        // another copy is already running - the red error you get the morning
+        // after. Asking the window to close costs a couple of seconds and gives
+        // the app the chance to let go of its own lock. Anything still standing
+        // when the grace runs out is terminated exactly as before.
+        private void EndProcess(Process p)
+        {
+            if (cfg.CloseGraceMs > 0)
+            {
+                try
+                {
+                    if (p.MainWindowHandle != IntPtr.Zero
+                        && p.CloseMainWindow()
+                        && p.WaitForExit(cfg.CloseGraceMs)) return;
+                }
+                catch (Exception) { }        // no window, gone already, or refuses to be asked
+            }
+            p.Kill();
+            p.WaitForExit(3000);
         }
 
         // One census of what is running, grouped by name, so the sentry can ask
@@ -1649,29 +1907,68 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return rows;
         }
 
-        // Kills everything a Candidate covers. Returns only what actually died -
-        // a process can exit or refuse between the census and here, and a window
-        // can open in that gap too, so the guard is re-checked per pid.
+        // Kills everything a Candidate covers, root of the family first (see
+        // RootFirst). Returns only what actually died - a process can exit or
+        // refuse between the census and here, and a window can open in that gap
+        // too, so the guard is re-checked per pid. Once the root is gone the
+        // helpers under it usually are too, and their turn here is a no-op.
         public List<KillHit> Reap(Candidate c, WindowGuard guard = null)
         {
+            // Weigh the whole family before touching any of it. Killing the root
+            // takes its helpers with it, and a helper that is already gone when
+            // its turn comes cannot be asked how much RAM it was holding - so
+            // the sizes are read up front and counted afterwards, by who is
+            // actually gone. Reading them one at a time under-reported an
+            // Electron app by everything except its (small) main process.
+            // The handles stay open across all three passes: let one go and the
+            // pid can be reissued to something else the instant its owner dies.
+            List<int> targets = new List<int>();
+            Dictionary<int, Process> live = new Dictionary<int, Process>();
+            Dictionary<int, long> weight = new Dictionary<int, long>();
             List<KillHit> hits = new List<KillHit>();
-            foreach (int pid in c.Pids)
+
+            try
             {
-                Process p = null;
-                try
+                foreach (int pid in c.Pids)
                 {
-                    p = Process.GetProcessById(pid);
-                    long ws = p.WorkingSet64;
-                    if (IsProtectedProcess(p.ProcessName)) continue;
-                    if (IsProtectedTree(pid)) continue;
-                    if (guard != null && guard.Spares(pid, p.ProcessName)) continue;
-                    p.Kill();
-                    p.WaitForExit(3000);
-                    hits.Add(new KillHit(c.Name, ws));
+                    Process p = null;
+                    bool keep = false;
+                    try
+                    {
+                        p = Process.GetProcessById(pid);
+                        if (IsProtectedProcess(p.ProcessName)) continue;
+                        if (IsProtectedTree(pid)) continue;
+                        if (IsProtectedPath(pid)) continue;
+                        if (guard != null && guard.Spares(pid, p.ProcessName)) continue;
+                        weight[pid] = p.WorkingSet64;
+                        targets.Add(pid);
+                        live[pid] = p;
+                        keep = true;
+                    }
+                    catch (Exception) { /* gone between the census and here */ }
+                    finally { if (p != null && !keep) { try { p.Dispose(); } catch (Exception) { } } }
                 }
-                catch (Exception) { /* gone already, or refuses - the next sweep retries */ }
-                finally { if (p != null) { try { p.Dispose(); } catch (Exception) { } } }
+
+                foreach (int pid in RootFirst(targets))
+                {
+                    try { EndProcess(live[pid]); }
+                    catch (Exception) { /* gone with its parent, or refuses - the next sweep retries */ }
+                }
+
+                foreach (int pid in targets)
+                {
+                    bool gone;
+                    try { gone = live[pid].HasExited; }
+                    catch (Exception) { gone = true; }
+                    if (gone) hits.Add(new KillHit(c.Name, weight[pid]));
+                }
             }
+            finally
+            {
+                foreach (KeyValuePair<int, Process> kv in live)
+                    try { kv.Value.Dispose(); } catch (Exception) { }
+            }
+
             freedBytes += TotalOf(hits);
             return hits;
         }
@@ -1699,36 +1996,82 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             RefreshTree();
             Dictionary<string, long> perName = new Dictionary<string, long>();
 
-            foreach (Process p in Process.GetProcesses())
+            // Two passes, for the same reason Reap takes two: decide and weigh
+            // everything against one instant, then end the families from their
+            // roots down, so an Electron app cannot respawn the helper that was
+            // killed a moment before its own main process.
+            // The handles are held open across both passes on purpose: a pid
+            // whose Process object has been let go can be handed to something
+            // else the moment its owner dies, and the second pass would then be
+            // killing a stranger.
+            List<int> targets = new List<int>();
+            Dictionary<int, Process> live = new Dictionary<int, Process>();
+            Dictionary<int, string> nameOf = new Dictionary<int, string>();
+            Dictionary<int, long> weight = new Dictionary<int, long>();
+
+            try
             {
-                string name;
-                long ws;
-                try { name = p.ProcessName; ws = p.WorkingSet64; }
-                catch (Exception) { continue; }
-
-                if (p.Id == me) continue;
-                if (IsProtectedProcess(name)) continue;
-
-                bool hit = false;
-                foreach (string pat in pats)
-                    if (Match(pat, name)) { hit = true; break; }
-                if (!hit) continue;
-
-                if (IsProtectedTree(p.Id)) continue;
-                if (guard != null && guard.Spares(p.Id, name)) continue;
-
-                try
+                foreach (Process p in Process.GetProcesses())
                 {
-                    p.Kill();
-                    p.WaitForExit(3000);
+                    bool keep = false;
+                    try
+                    {
+                        string name;
+                        long ws;
+                        try { name = p.ProcessName; ws = p.WorkingSet64; }
+                        catch (Exception) { continue; }
+
+                        if (p.Id == me) continue;
+                        if (IsProtectedProcess(name)) continue;
+
+                        bool hit = false;
+                        foreach (string pat in pats)
+                            if (Match(pat, name)) { hit = true; break; }
+                        if (!hit) continue;
+
+                        if (IsProtectedTree(p.Id)) continue;
+                        if (IsProtectedPath(p.Id)) continue;
+                        if (guard != null && guard.Spares(p.Id, name)) continue;
+
+                        nameOf[p.Id] = name;
+                        weight[p.Id] = ws;
+                        targets.Add(p.Id);
+                        live[p.Id] = p;
+                        keep = true;
+                    }
+                    finally { if (!keep) try { p.Dispose(); } catch (Exception) { } }
+                }
+
+                foreach (int pid in RootFirst(targets))
+                {
+                    try { EndProcess(live[pid]); }
+                    catch (Exception ex)
+                    {
+                        // Gone with its parent is the normal case for a helper,
+                        // and not worth a line.
+                        if (!(ex is InvalidOperationException))
+                            log("   ! could not stop " + nameOf[pid] + " (" + ex.GetType().Name + ")");
+                    }
+                }
+
+                foreach (int pid in targets)
+                {
+                    bool gone;
+                    try { gone = live[pid].HasExited; }
+                    catch (Exception) { gone = true; }
+                    if (!gone) continue;
+
+                    string name = nameOf[pid];
+                    long ws = weight[pid];
                     freed += ws;
                     count++;
                     if (perName.ContainsKey(name)) perName[name] += ws; else perName[name] = ws;
                 }
-                catch (Exception ex)
-                {
-                    log("   ! could not stop " + name + " (" + ex.GetType().Name + ")");
-                }
+            }
+            finally
+            {
+                foreach (KeyValuePair<int, Process> kv in live)
+                    try { kv.Value.Dispose(); } catch (Exception) { }
             }
 
             foreach (KeyValuePair<string, long> kv in perName)
@@ -2314,6 +2657,50 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public bool Alive { get { return thread != null && thread.IsAlive; } }
         public string Mode { get { return mode; } }
 
+        // ---- following the room
+
+        // ABSOLUTE IDLE is built on "nobody is watching". Idle mode spares
+        // neither the window in front nor the ones you have open, and Overclocked
+        // spares nothing at all - which is correct for an empty chair and plainly
+        // wrong for an occupied one. Left enforcing idle rules with somebody at
+        // the keyboard, the watch reaps every app they open inside 20 seconds
+        // until the respawn backoff gives up on it, so the app appears to need
+        // opening five times before it "lives". Restore was the only way out, and
+        // a window hidden in the tray does not make that discoverable.
+        //
+        // So the watch follows the room instead. Input in the last
+        // SentryAwaySeconds and it enforces BOOST rules - foreground spared, open
+        // windows spared, newcomers asked about - with Overclocked suspended. Go
+        // quiet again and the idle rules come back on their own. It never ends
+        // the watch; that is still Restore's job, and services stay stopped
+        // either way.
+        private bool standingDown;
+        public bool StandingDown { get { return standingDown; } }
+
+        // What this sweep actually enforces, which is not always what was armed.
+        private string Enforcing { get { return (mode == "idle" && standingDown) ? "boost" : mode; } }
+        private bool Overclocked { get { return cfg.OverclockedSentry && !standingDown; } }
+
+        // Called once per sweep. Only says anything when the answer changes, and
+        // only when there was something to stand down FROM - a plain boost watch
+        // already spares you, so it has no business narrating an empty chair.
+        private void UpdateStandDown()
+        {
+            bool matters = mode == "idle" || cfg.OverclockedSentry;
+            bool here = cfg.SentryStandDown && matters
+                        && Native.IdleSeconds() < cfg.SentryAwaySeconds;
+            if (here == standingDown) return;
+
+            standingDown = here;
+            if (here)
+                log("[sentry] you are back - idle rules off, boost rules from here."
+                    + " The window in front and anything with a window open are safe"
+                    + " again. Restore still ends the watch.");
+            else
+                log("[sentry] no input for " + cfg.SentryAwaySeconds
+                    + "s - back to " + mode.ToUpperInvariant() + " rules.");
+        }
+
         // name -> when its backoff expires; name -> how many times we have killed it
         private readonly Dictionary<string, DateTime> cooling = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, int> tally = new Dictionary<string, int>();
@@ -2405,6 +2792,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             tally.Clear();
             sparedAnnounced.Clear();
 
+            // Seeded before the first sweep, silently: you have just clicked a
+            // button, so input was a second ago and the watch would otherwise
+            // open by announcing that you are back. Let the log's first word on
+            // the subject be a real change of state.
+            standingDown = cfg.SentryStandDown && (mode == "idle" || cfg.OverclockedSentry)
+                           && Native.IdleSeconds() < cfg.SentryAwaySeconds;
+
             thread = new Thread(Loop);
             thread.IsBackground = true;
             thread.Start();
@@ -2413,6 +2807,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 + " every " + cfg.SentrySeconds + "s. Restore turns it off.");
             if (cfg.OverclockedSentry)
                 log("[sentry] OVERCLOCKED - everything not on the protect list is fair game.");
+            if (cfg.SentryStandDown && (mode == "idle" || cfg.OverclockedSentry))
+                log(standingDown
+                    ? "[sentry] you are still at the keyboard, so it holds to boost rules -"
+                      + " front window and open windows safe - until " + cfg.SentryAwaySeconds
+                      + "s of quiet."
+                    : "[sentry] ...but only while the chair is empty: touch the keyboard and it"
+                      + " drops to boost rules until " + cfg.SentryAwaySeconds + "s of quiet.");
             return true;
         }
 
@@ -2469,9 +2870,12 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             {
                 try
                 {
+                    // Before anything is judged: is the chair still empty.
+                    UpdateStandDown();
+
                     // Rebuilt every sweep, so edits made in the config window take
                     // effect without restarting the watch.
-                    SweepProcesses(engine.PatternsFor(mode));
+                    SweepProcesses(engine.PatternsFor(Enforcing));
 
                     // The "boost again" timers: a whole pass in one go, on a
                     // schedule and/or when RAM runs low. The processes were
@@ -2493,7 +2897,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     if (why != null)
                     {
                         log("[sentry] full pass - " + why);
-                        SweepServices(engine.ServicesFor(mode));
+                        SweepServices(engine.ServicesFor(Enforcing));
                         long pushed = engine.TrimAll(false);
                         engine.NetworkGuard(false);
                         log("[sentry] full pass done - " + Engine.Size(pushed) + " pushed out");
@@ -2507,7 +2911,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
                     if (DateTime.Now >= nextService)
                     {
-                        SweepServices(engine.ServicesFor(mode));
+                        SweepServices(engine.ServicesFor(Enforcing));
                         nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
                     }
 
@@ -2556,14 +2960,16 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             // Overclocked: nobody is at the keyboard, so nothing is spared and
             // everything not protected counts as listed. [protect] still wins -
-            // Census never hands over a protected name.
-            bool over = cfg.OverclockedSentry;
+            // Census never hands over a protected name. Suspended while somebody
+            // IS at the keyboard: see UpdateStandDown.
+            bool over = Overclocked;
+            string enforcing = Enforcing;
 
             int spare = 0;
-            if (!over && mode == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
+            if (!over && enforcing == "boost" && cfg.SentrySkipForeground) spare = Native.ForegroundPid();
 
             WindowGuard guard = null;
-            if (!over && mode == "boost" && cfg.SkipOpenApps) guard = WindowGuard.Snapshot();
+            if (!over && enforcing == "boost" && cfg.SkipOpenApps) guard = WindowGuard.Snapshot();
 
             List<Candidate> all = engine.Census(skip, spare, guard);
             List<KillHit> hits = new List<KillHit>();
@@ -2698,15 +3104,16 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private Verdict Consult(Candidate c, bool listed)
         {
             // Overclocked means away: nobody would answer a toast, and the whole
-            // point is that everything unprotected dies.
-            if (cfg.OverclockedSentry) return Verdict.Kill;
-            if (!cfg.AskBeforeKill || Ask == null || mode == "idle" || stopping)
+            // point is that everything unprotected dies. Standing down means
+            // somebody is here after all, so the toast is worth putting up.
+            if (Overclocked) return Verdict.Kill;
+            if (!cfg.AskBeforeKill || Ask == null || Enforcing == "idle" || stopping)
                 return listed ? Verdict.Kill : Verdict.Keep;
 
             Question q = new Question();
             q.What = c;
             q.OnKillList = listed;
-            q.Mode = mode;
+            q.Mode = Enforcing;
             log("[sentry] " + c.Name + " showed up (" + Engine.Size(c.Bytes) + ") - asking you");
             try { return Ask(q); }
             catch (Exception) { return Verdict.Keep; }

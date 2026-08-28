@@ -165,16 +165,35 @@ default, or `keep` / `always` if you prefer; the toast's last line tells you whi
 Set `AskAboveMb` and it also asks about newcomers that are on no list at all but
 bigger than that (250 MB by default). Idle mode never asks: nobody is there.
 
-### Two brakes
+### Three brakes
 
 Because "kill it every 20 seconds forever" is a good way to make a machine
-miserable, two more things hold it back:
+miserable, three more things hold it back:
+
+**It stands down when you come back.** Absolute Idle is built on *nobody is
+watching*. Idle mode spares neither the window in front nor the ones you have
+open, and Overclocked spares nothing at all — right for an empty chair, plainly
+wrong for an occupied one. A watch left enforcing idle rules while you are at the
+keyboard reaps every app you open inside 20 seconds, until the respawn backoff
+below gives up on it and it finally sticks: the app appears to need launching
+five times before it lives. That is not a mode, that's a fight.
+
+So the watch follows the room. Any keyboard or mouse input and it drops to
+**boost rules** — front window spared, open windows spared, newcomers asked about
+— with Overclocked suspended, and says so in the log. Go quiet for
+`SentryAwaySeconds` (120) and the idle rules come back on their own. It never
+ends the watch and never restarts a service: that is still Restore's job.
+Streamed input counts as present, so a human on the far end of Sunshine is a
+human. `SentryStandDown=0` restores the old fight-you-forever behaviour.
 
 **Respawn backoff.** If one process name comes back `SentryRespawnLimit` times
 (6 by default), the sentry stops fighting it for 30 minutes and writes a line
 saying so. Something on the machine clearly wants that process alive, and an
 endless kill/respawn loop burns more CPU than the process ever cost you in RAM.
-After the backoff it puts the name back on the list and tries again.
+After the backoff it puts the name back on the list and tries again. It is a
+last resort, not a normal outcome: the usual reason a name used to hit the limit
+was Idle Master killing an Electron app's helpers before its main process, and
+[that no longer happens](#the-safety-story).
 
 **Foreground guard.** In boost mode it never kills the process that owns the
 window you're currently looking at — if you deliberately open Steam, it survives
@@ -194,12 +213,17 @@ Two things worth knowing before you leave it on:
 
 ### Or just run it again, on a clock
 
-The sentry sweeps; the **repeat loop** re-runs the whole thing. Tick **Repeat
-boost every N minutes** under the BOOST NOW button, set the number, and the
+The sentry sweeps; the **repeat loop** re-runs the whole thing. It rides on the
+BOOST NOW button itself: the **refresh arrow at its left edge**, with the
+interval in the middle of the ring. Click the arrow — not the rest of the
+button, which still boosts — and a small menu opens: on/off, a spinner for any
+number of minutes, and the usual 5 / 10 / 15 / 30 / 60 / 120. Pick one and the
 window clicks that button for you on that interval — the same lists, the same
-asking, the sentry re-armed after each pass. The line beside it counts down to
-the next one (*next boost in 4:32*), and a run that is still going just pushes
-the clock: the loop never stacks two boosts.
+asking, the sentry re-armed after each pass.
+
+The ring is the countdown: it fills as the next boost comes round, and hovering
+the arrow says how long is left (*next boost in 4:32*). A run that is still
+going just pushes the clock: the loop never stacks two boosts.
 
 It belongs to the window, so closing Idle Master ends it, and the interval is
 remembered in `RepeatBoostMinutes` — set it there (or in Settings > Advanced) and
@@ -398,6 +422,36 @@ separate list from `[protect]` on purpose: that one holds `svchost`, `services`
 and `explorer`, and every process on the machine descends from one of those, so
 walking ancestors against it would spare the entire session.
 
+**`[protect.path]` tells apart two programs with the same name.** Every other
+list matches a process *name*, and a name is not always an app. `claude` is the
+3 GB Electron desktop app, which belongs on the idle list — and it is also the
+Claude Code CLI, which is the work you left running in a terminal. Same name,
+same kill list, and the list only ever meant the first one. Put a path here
+(full paths, `*` works, a path covers everything under it — the same spelling
+`[cleanup.protect]` uses) and any process launched from there is off limits
+whatever it is called. It ships with `*\claude-code\*`; `node`, `python` and
+`java` are the same shape of problem if you ever list them.
+
+**Families are ended from the root down.** A Chromium or Electron app is one
+main process and a dozen helpers that *all carry the same name*, and the kernel
+does not list them parent-first — on this machine Claude's main process sat
+sixth of seventeen. Kill a helper first and the main process notices the hole
+and spawns a replacement, which is reaped on the next sweep, until the respawn
+backoff below decides something wants it alive and gives up for half an hour —
+leaving the app running with half its helpers dead. Idle Master now sorts a
+family by depth and ends the root first; Chromium keeps its children in a job
+object, so they go down with it and there is nothing left to respawn anything.
+
+**Close first, terminate second.** An app with a window on screen is asked to
+shut itself down and given `CloseGraceMs` (3 s by default) to do it; only what is
+still standing afterwards is terminated. This is what stops Electron apps coming
+back broken the next morning: terminated outright they never release the
+singleton lock in their own profile, and the next launch refuses to start and
+says another copy is already running. Set `CloseGraceMs=0` for the old
+terminate-outright behaviour. The Windows shell is exempt — Absolute Idle
+*terminates* explorer on purpose, because asking it politely is what leaves a
+taskbar whose Start button answers nothing.
+
 **Network guard.** Before finishing (and mid-run, in idle mode) it verifies that
 `SunshineService` and `Tailscale` are running, that something is listening on a
 Sunshine port, and that the Tailscale adapter is up. If a service died as
@@ -474,7 +528,10 @@ could bite you from bed:
   NVENC when it's gone, and a black stream is exactly what you can't debug asleep.
   Test a stream without it before enabling.
 - `powershell` / `WindowsTerminal` in `[idle.kill]` — enable only if you never
-  leave a long job running overnight.
+  leave a long job running overnight. Note that the terminal being spared does
+  not automatically spare what is *running in* it: a CLI is a process of its own
+  with a name of its own. `[protect.path]` is how you spare one by where it was
+  installed; that is why the Claude Code CLI ships in there.
 
 `nordvpn-service` **is** stopped in idle mode. If you have NordVPN's kill switch
 armed, killing the service can take the whole network with it — the network guard

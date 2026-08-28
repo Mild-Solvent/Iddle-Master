@@ -32,8 +32,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("Idle Master Rebuild")]
 [assembly: AssemblyDescription("Puts a Windows install back together from an Idle Master backup kit")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.12.0.0")]
-[assembly: AssemblyFileVersion("0.12.0.0")]
+[assembly: AssemblyVersion("0.13.0.0")]
+[assembly: AssemblyFileVersion("0.13.0.0")]
 
 namespace IdleMasterRebuild
 {

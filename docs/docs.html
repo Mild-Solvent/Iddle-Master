@@ -417,14 +417,16 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         the new lists on its next sweep.</p>
 
       <h3>Repeat boost every N minutes</h3>
-      <p>The row under <strong>BOOST NOW</strong>: tick it, set the minutes, and the window presses
-        that button on that interval — the same lists, the same asking, the sentry re-armed after
-        each pass. The line beside it counts down to the next one, and a boost that is still
-        running only pushes the clock, so two never stack. It lives in the window (close Idle
-        Master and the loop is over), the interval is kept in <code>RepeatBoostMinutes</code> so it
-        arms itself again next launch, and the tray menu carries the same toggle. Not to be
-        confused with <code>SentryFullPassMinutes</code>, which is the <em>sentry</em> doing a full
-        pass inside its own watch.</p>
+      <p>The refresh arrow on the left of <strong>BOOST NOW</strong>, with the interval inside the
+        ring. Clicking the arrow does not boost — it opens a small menu: on/off, a spinner for any
+        number of minutes up to a day, and the usual 5 / 10 / 15 / 30 / 60 / 120. From then on the
+        window presses that button on that interval — the same lists, the same asking, the sentry
+        re-armed after each pass. The ring fills as the next one comes round and the tooltip counts
+        it down; a boost that is still running only pushes the clock, so two never stack. It lives
+        in the window (close Idle Master and the loop is over), the interval is kept in
+        <code>RepeatBoostMinutes</code> so it arms itself again next launch, and the tray menu
+        carries the same toggle. Not to be confused with <code>SentryFullPassMinutes</code>, which
+        is the <em>sentry</em> doing a full pass inside its own watch.</p>
 
       <h3>What's eating RAM?</h3>
       <p>The Master's own little task manager: a live table that refreshes every two seconds and
@@ -570,10 +572,13 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">SentryBackoffMinutes</td><td class="n">30</td><td class="wrap-ok">How long that truce lasts — and how long <em>Keep it</em> buys an app.</td></tr>
             <tr><td class="n">SentrySkipForeground</td><td class="n">1</td><td class="wrap-ok">Never kill the window you are actually using. Boost only; idle ignores it.</td></tr>
             <tr><td class="n">SkipOpenApps</td><td class="n">1</td><td class="wrap-ok">Never kill <em>any</em> app that has a window open, helper processes included. Boost only.</td></tr>
+            <tr><td class="n">SentryStandDown</td><td class="n">1</td><td class="wrap-ok">The watch follows the room. Any keyboard or mouse input and an <strong>idle</strong> watch drops to <em>boost</em> rules — front window spared, open windows spared, newcomers asked about — with Overclocked suspended; go quiet again and the idle rules come back on their own. It never ends the watch (that is Restore) and never restarts a service. <code>0</code> = the old behaviour, which reaps every app you open until the respawn backoff gives up.</td></tr>
+            <tr><td class="n">SentryAwaySeconds</td><td class="n">120</td><td class="wrap-ok">How long with no input at all counts as “away” again.</td></tr>
+            <tr><td class="n">CloseGraceMs</td><td class="n">3000</td><td class="wrap-ok">Ask an app with a window to shut itself down, and wait this long, before terminating it. What stops Electron apps coming back with a stale singleton lock and refusing to start. <code>0</code> = terminate outright.</td></tr>
             <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. <code>0</code> = off.</td></tr>
             <tr><td class="n">SentryFullPassMinutes</td><td class="n">0</td><td class="wrap-ok">Repeat a <em>whole</em> boost pass — re-stop services, trim, purge, check the stream stack — every this many minutes, on top of the 20-second sweep. 0 = off.</td></tr>
             <tr><td class="n">BoostWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">…and do one right now when free RAM drops under this many MB (at most once per 5 minutes). 0 = off.</td></tr>
-            <tr><td class="n">RepeatBoostMinutes</td><td class="n">0</td><td class="wrap-ok">The repeat loop: the window clicks <strong>BOOST NOW</strong> for you every this many minutes, for as long as it is open — a whole boost each time, not the sentry’s sweep. Set from the row under the button, or here. 0 = off.</td></tr>
+            <tr><td class="n">RepeatBoostMinutes</td><td class="n">0</td><td class="wrap-ok">The repeat loop: the window clicks <strong>BOOST NOW</strong> for you every this many minutes, for as long as it is open — a whole boost each time, not the sentry’s sweep. Set from the refresh arrow on the button, or here. 0 = off.</td></tr>
           </tbody>
         </table>
       </div>

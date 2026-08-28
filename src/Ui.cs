@@ -2,6 +2,7 @@
 //
 //   AskForm           : the countdown toast the sentry raises for newcomers.
 //   MemGauge          : the RAM bar, custom-painted so it neither flickers nor lies.
+//   RepeatBadge       : the repeat-boost arrow that rides on the BOOST NOW button.
 //   PickForm          : pick processes/services off the machine for a list.
 //   ListPane          : one editable ini section inside the advanced window.
 //   QuickSettingsForm : the handful of switches most people actually touch.
@@ -301,6 +302,120 @@ namespace IdleMaster
                 Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             TextRenderer.DrawText(g, rightText, Font, new Rectangle(10, 0, bar.Width - 20, bar.Height),
                 Color.White, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+        }
+
+        private static GraphicsPath Rounded(Rectangle r, int radius)
+        {
+            int d = radius * 2;
+            GraphicsPath p = new GraphicsPath();
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+    }
+
+
+    // ------------------------------------------------------------ repeat badge
+
+    // The repeat loop, folded into the BOOST NOW button: a refresh arrow on the
+    // left of the blue slab with the interval in its middle. The ring doubles as
+    // the countdown - it fills as the next automatic boost comes round - and a
+    // click opens the little menu that sets the interval instead of boosting.
+    //
+    // It is a sibling of the button sitting on top of it, not a child, so the
+    // click never reaches the button underneath.
+    internal sealed class RepeatBadge : Control
+    {
+        private int minutes = 30;
+        private bool armed;
+        private double progress;        // 0..1 through the current interval
+        private bool hot;
+
+        public RepeatBadge()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(46, 46);
+            BackColor = Theme.Good;
+            Cursor = Cursors.Hand;
+            TabStop = false;
+        }
+
+        public void Set(bool on, int mins, double through)
+        {
+            if (on == armed && mins == minutes && Math.Abs(through - progress) < 0.005) return;
+            armed = on;
+            minutes = mins;
+            progress = through < 0 ? 0 : (through > 1 ? 1 : through);
+            Invalidate();
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        { hot = true; Invalidate(); base.OnMouseEnter(e); }
+
+        protected override void OnMouseLeave(EventArgs e)
+        { hot = false; Invalidate(); base.OnMouseLeave(e); }
+
+        // Minutes while they fit, hours after that: "30", "90" is "1.5h" only in
+        // theory - the presets are whole, so "2h", "24h".
+        private string Digits()
+        {
+            if (minutes < 100) return minutes.ToString(CultureInfo.InvariantCulture);
+            if (minutes % 60 == 0) return (minutes / 60).ToString(CultureInfo.InvariantCulture) + "h";
+            return (minutes / 60).ToString(CultureInfo.InvariantCulture) + "h+";
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            // The slab behind us is the button; only the hover shade is ours.
+            using (SolidBrush b = new SolidBrush(hot ? Theme.Lift(Theme.Good, 22) : Theme.Good))
+                g.FillRectangle(b, ClientRectangle);
+            if (hot)
+                using (GraphicsPath p = Rounded(new Rectangle(1, 1, Width - 3, Height - 3), 8))
+                using (Pen pen = new Pen(Color.FromArgb(70, 255, 255, 255)))
+                    g.DrawPath(pen, p);
+
+            Rectangle ring = new Rectangle(6, 6, Width - 13, Height - 13);
+            Color live = armed ? Color.White : Color.FromArgb(150, 255, 255, 255);
+
+            // The dim circle first - three quarters of one, the gap at the top
+            // right where the arrow head goes - then the bright arc that has
+            // run so far.
+            const float Start = -40f, Sweep = 290f;
+            using (Pen dim = new Pen(Color.FromArgb(armed ? 70 : 45, 255, 255, 255), 2f))
+                g.DrawArc(dim, ring, Start, Sweep);
+            if (armed && progress > 0.01)
+                using (Pen p = new Pen(Color.FromArgb(210, 255, 255, 255), 2f))
+                    g.DrawArc(p, ring, Start, Sweep * (float)progress);
+
+            // The head that makes the circle a refresh: a triangle at the end of
+            // the arc, laid along the tangent so it points the way round.
+            using (SolidBrush b = new SolidBrush(live))
+            {
+                double a = (Start + Sweep) * Math.PI / 180.0;
+                float cx = ring.X + ring.Width / 2f, cy = ring.Y + ring.Height / 2f;
+                float r = ring.Width / 2f;
+                float px = cx + (float)Math.Cos(a) * r, py = cy + (float)Math.Sin(a) * r;
+                float dx = -(float)Math.Sin(a), dy = (float)Math.Cos(a);   // the way round
+                float nx = -dy, ny = dx;                                   // across it
+                PointF[] head = new PointF[]
+                {
+                    new PointF(px + dx * 6f, py + dy * 6f),
+                    new PointF(px - dx * 2f + nx * 4.2f, py - dy * 2f + ny * 4.2f),
+                    new PointF(px - dx * 2f - nx * 4.2f, py - dy * 2f - ny * 4.2f)
+                };
+                g.FillPolygon(b, head);
+            }
+
+            using (Font f = new Font("Segoe UI", armed ? 8.5f : 8f, FontStyle.Bold))
+                TextRenderer.DrawText(g, armed ? Digits() : "off", f, ClientRectangle, live,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
         private static GraphicsPath Rounded(Rectangle r, int radius)
@@ -3641,9 +3756,8 @@ namespace IdleMaster
         private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
-        private readonly CheckBox chkRepeat;        // the repeat loop: BOOST NOW on a clock
-        private readonly NumericUpDown numRepeat;   // ...every this many minutes
-        private readonly Label repeatLabel;         // ...and how long until the next one
+        private readonly RepeatBadge repeatBadge;   // the repeat loop, riding on BOOST NOW
+        private readonly ToolTip repeatTip = new ToolTip();
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
@@ -3667,7 +3781,9 @@ namespace IdleMaster
         private bool startHidden;
         private bool watchMode;
         private bool busyNow;                   // a mode is running right now
-        private bool syncingRepeat;             // the repeat row is following the ini, not the user
+        private bool repeatOn;                  // the repeat loop is armed
+        private int repeatMinutes = 30;         // ...every this many minutes
+        private bool syncingRepeat;             // the badge is following the ini, not the user
         private DateTime nextRepeat = DateTime.MaxValue;
         private ToolStripMenuItem trayRepeat;
 
@@ -3678,8 +3794,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 840);
-            MinimumSize = new Size(560, 654);
+            Size = new Size(700, 806);
+            MinimumSize = new Size(560, 620);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -3708,82 +3824,67 @@ namespace IdleMaster
             // clicked for you every N minutes for as long as the window is up.
             // The sentry keeps hunting between the runs; this is the whole pass
             // coming round again.
-            chkRepeat = new CheckBox();
-            chkRepeat.Text = "Repeat boost every";
-            chkRepeat.SetBounds(24, 210, 136, 22);
-            chkRepeat.ForeColor = Theme.Fg;
-            chkRepeat.FlatStyle = FlatStyle.Flat;
-            Controls.Add(chkRepeat);
+            //
+            // It rides on the button rather than under it: a refresh arrow on
+            // the left of the blue slab, the interval in its middle, the ring
+            // filling as the next one comes round. Clicking the arrow opens the
+            // menu that sets it - the boost itself is the rest of the button.
+            repeatOn = cfg.RepeatBoostMinutes > 0;
+            repeatMinutes = cfg.RepeatBoostMinutes > 0
+                ? Math.Min(1440, Math.Max(1, cfg.RepeatBoostMinutes)) : 30;
 
-            numRepeat = new NumericUpDown();
-            numRepeat.Minimum = 1;
-            numRepeat.Maximum = 1440;
-            numRepeat.Value = cfg.RepeatBoostMinutes > 0
-                ? Math.Min(1440, cfg.RepeatBoostMinutes) : 30;
-            numRepeat.SetBounds(162, 208, 62, 22);
-            Theme.Input_(numRepeat);
-            Controls.Add(numRepeat);
+            repeatBadge = new RepeatBadge();
+            repeatBadge.SetBounds(34, 145, 46, 46);
+            repeatBadge.Click += delegate { ShowRepeatMenu(); };
+            Controls.Add(repeatBadge);
+            repeatBadge.BringToFront();
+            repeatTip.SetToolTip(repeatBadge, "Repeat boost - click to set the interval");
 
-            Label minutesLabel = Theme.Hint("minutes");
-            minutesLabel.SetBounds(230, 211, 60, 20);
-            Controls.Add(minutesLabel);
-
-            repeatLabel = Theme.Hint("");
-            repeatLabel.SetBounds(294, 211, 368, 20);
-            repeatLabel.AutoEllipsis = true;
-            repeatLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(repeatLabel);
-
-            // Wired after the value is in, so restoring the saved interval does
-            // not count as the user changing it.
-            chkRepeat.Checked = cfg.RepeatBoostMinutes > 0;
-            if (chkRepeat.Checked) ArmRepeat();
-            chkRepeat.Click += delegate { ToggleRepeat(); };
-            numRepeat.ValueChanged += delegate { RepeatIntervalChanged(); };
+            if (repeatOn) ArmRepeat();
 
             btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to Windows vitals", Theme.Danger, 252);
+                "Strip to Windows vitals", Theme.Danger, 218);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
-            btnRestore = SmallButton("Restore desktop", 22, 340);
+            btnRestore = SmallButton("Restore desktop", 22, 306);
             btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = SmallButton("What's eating RAM?", 182, 340);
+            btnEaters = SmallButton("What's eating RAM?", 182, 306);
             btnEaters.Click += delegate { OpenEaters(); };
-            btnTrim = SmallButton("Trim RAM now", 342, 340);
+            btnTrim = SmallButton("Trim RAM now", 342, 306);
             btnTrim.Click += delegate { Run("trim"); };
-            btnConfig = SmallButton("Settings", 502, 340);
+            btnConfig = SmallButton("Settings", 502, 306);
             btnConfig.Click += delegate { EditConfig(); };
 
-            btnCleanup = SmallButton("Disk cleanup", 22, 376);
+            btnCleanup = SmallButton("Disk cleanup", 22, 342);
             btnCleanup.Click += delegate { OpenCleanup(); };
-            btnBackup = SmallButton("Backup kit", 182, 376);
+            btnBackup = SmallButton("Backup kit", 182, 342);
             btnBackup.Click += delegate { OpenBackup(); };
 
             btnUpdate = Theme.Quiet("Check for updates");
-            btnUpdate.SetBounds(342, 376, 152, 30);
+            btnUpdate.SetBounds(342, 342, 152, 30);
             btnUpdate.Click += delegate { CheckUpdates(); };
             Controls.Add(btnUpdate);
 
             // The network guard's page. The button itself goes red while the
             // guard is fighting something, the way the update button goes
             // blue when there is news.
-            btnNetGuard = SmallButton("Network guard", 502, 376);
+            btnNetGuard = SmallButton("Network guard", 502, 342);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
 
-            btnDebloat = SmallButton("Debloat", 22, 412);
+            btnDebloat = SmallButton("Debloat", 22, 378);
             btnDebloat.Click += delegate { OpenDebloat(); };
 
-            btnRemote = SmallButton("Remote desktop setup", 182, 412);
+            btnRemote = SmallButton("Remote desktop setup", 182, 378);
             btnRemote.Click += delegate { OpenRemote(); };
 
             // Two doors to other people's debloaters - launched, not imitated.
-            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 412);
+            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 378);
             btnWinUtil.Click += delegate { RunWinUtil(); };
-            btnZoic = SmallButton("Zoicware", 502, 412);
+            btnZoic = SmallButton("Zoicware", 502, 378);
             btnZoic.Click += delegate { RunZoicware(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(22, 454, 480, 20);
+            updateLabel.SetBounds(22, 420, 480, 20);
             updateLabel.AutoEllipsis = true;
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
@@ -3792,7 +3893,7 @@ namespace IdleMaster
             // here. Opens a pre-typed GitHub issue - the preview shows every
             // byte first, and nothing is sent until Submit in the browser.
             btnFeedback = Theme.Quiet("Report a bug");
-            btnFeedback.SetBounds(510, 448, 152, 30);
+            btnFeedback.SetBounds(510, 414, 152, 30);
             btnFeedback.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnFeedback.Click += delegate { OpenFeedback(); };
             Controls.Add(btnFeedback);
@@ -3800,20 +3901,20 @@ namespace IdleMaster
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 488, 190, 22);
+            chkSentry.SetBounds(24, 454, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 490, 300, 20);
+            sentryLabel.SetBounds(220, 456, 300, 20);
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, 484, 152, 30);
+            btnSentry.SetBounds(510, 450, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -3824,7 +3925,7 @@ namespace IdleMaster
             chkOverclock = new CheckBox();
             chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
             chkOverclock.Checked = cfg.OverclockedSentry;
-            chkOverclock.SetBounds(24, 518, 636, 22);
+            chkOverclock.SetBounds(24, 484, 636, 22);
             chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
             chkOverclock.FlatStyle = FlatStyle.Flat;
             chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -3839,7 +3940,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 546, 640, 212);
+            logBox.SetBounds(22, 512, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -3861,10 +3962,10 @@ namespace IdleMaster
             updateTimer.Start();
 
             AppendLog("Ready. Config: " + Config.Path_);
-            if (chkRepeat.Checked)
+            if (repeatOn)
                 AppendLog("Repeat loop armed from the config: BOOST NOW every "
-                    + (int)numRepeat.Value + " min. First one in " + (int)numRepeat.Value
-                    + " min - untick 'Repeat boost every' to stop it.");
+                    + repeatMinutes + " min. First one in " + repeatMinutes
+                    + " min - the arrow on the BOOST NOW button turns it off.");
             StateFile st = StateFile.Load();
             if (st.Mode.Length > 0)
                 AppendLog("Note: last run was '" + st.Mode + "' and has not been restored yet ("
@@ -4239,13 +4340,9 @@ namespace IdleMaster
             menu.Items.Add("Open Idle Master", null, delegate { ShowWindow(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Boost now", null, delegate { ShowWindow(); Run("boost"); });
-            trayRepeat = new ToolStripMenuItem("Repeat boost every " + (int)numRepeat.Value + " min");
-            trayRepeat.Checked = chkRepeat.Checked;
-            trayRepeat.Click += delegate
-            {
-                chkRepeat.Checked = !chkRepeat.Checked;
-                ToggleRepeat();
-            };
+            trayRepeat = new ToolStripMenuItem("Repeat boost every " + repeatMinutes + " min");
+            trayRepeat.Checked = repeatOn;
+            trayRepeat.Click += delegate { SetRepeat(!repeatOn, repeatMinutes); };
             menu.Items.Add(trayRepeat);
             menu.Items.Add("Absolute idle", null, delegate { ShowWindow(); ConfirmIdle(); });
             menu.Items.Add("Restore desktop", null, delegate { ShowWindow(); Run("restore"); });
@@ -4369,61 +4466,139 @@ namespace IdleMaster
             UpdateSentry();
         }
 
-        // Saved straight to the ini; a hunting sentry reads cfg every sweep, so
-        // it goes overclocked (or calms down) without being restarted.
         // ---- the repeat loop -------------------------------------------------
         // BOOST NOW, on a clock the user sets. It is the same run as the button:
         // the same lists, the same asking, the sentry re-armed after each one.
-        // It lives in this window - close Idle Master and the loop is over.
+        // It lives in this window - close Idle Master and the loop is over, and
+        // it lives on the button too: the refresh arrow at its left edge.
 
         private void ArmRepeat()
         {
-            nextRepeat = DateTime.Now.AddMinutes((double)numRepeat.Value);
+            nextRepeat = DateTime.Now.AddMinutes(repeatMinutes);
         }
 
-        private void ToggleRepeat()
+        // The little menu the arrow opens: the switch, a spinner, and the
+        // intervals people actually pick. Clicking the arrow never boosts -
+        // the rest of the button is still the boost.
+        private void ShowRepeatMenu()
         {
-            if (chkRepeat.Checked)
+            ContextMenuStrip menu = new ContextMenuStrip();
+            Theme.Menu(menu);
+
+            bool spun = false;              // the spinner was touched this time round
+            ToolStripMenuItem onOff = new ToolStripMenuItem(
+                repeatOn ? "Repeat boost is ON" : "Repeat boost is off");
+            onOff.Checked = repeatOn;
+            onOff.Click += delegate { spun = false; SetRepeat(!repeatOn, repeatMinutes); };
+            menu.Items.Add(onOff);
+            menu.Items.Add(new ToolStripSeparator());
+
+            // The spinner lives in the menu itself, so any minute count from 1
+            // to a day is one row away with no second window. A spinner run
+            // lands when the menu closes, so holding the arrow down is one
+            // change and one log line, not thirty.
+            NumericUpDown spin = new NumericUpDown();
+            spin.Minimum = 1;
+            spin.Maximum = 1440;
+            spin.Value = repeatMinutes;
+            spin.SetBounds(0, 1, 62, 22);
+            Theme.Input_(spin);
+
+            Label unit = Theme.Hint("minutes");
+            unit.SetBounds(68, 4, 60, 18);
+
+            Panel row = new Panel();
+            row.BackColor = Theme.Panel;
+            row.Size = new Size(132, 24);
+            row.Controls.Add(spin);
+            row.Controls.Add(unit);
+
+            ToolStripControlHost host = new ToolStripControlHost(row);
+            host.Margin = new Padding(6, 2, 6, 2);
+            host.AutoSize = false;
+            host.Size = row.Size;
+            menu.Items.Add(host);
+            menu.Items.Add(new ToolStripSeparator());
+
+            spin.ValueChanged += delegate { spun = true; };
+            menu.Closed += delegate
+            {
+                if (spun && (int)spin.Value != repeatMinutes) SetRepeat(true, (int)spin.Value);
+            };
+
+            int[] presets = new int[] { 5, 10, 15, 30, 60, 120 };
+            foreach (int mins in presets)
+            {
+                int pick = mins;
+                string label = mins < 60 ? "Every " + mins + " minutes"
+                    : "Every " + (mins / 60) + (mins == 60 ? " hour" : " hours");
+
+                // The menus here run without an image margin, so a tick mark
+                // would not show: the one in force is bulleted and bold instead.
+                bool current = repeatOn && repeatMinutes == mins;
+                ToolStripMenuItem item = new ToolStripMenuItem((current ? "* " : "    ") + label);
+                if (current) item.Font = Theme.Bold();
+                item.Click += delegate { spun = false; SetRepeat(true, pick); };
+                menu.Items.Add(item);
+            }
+
+            if (repeatOn)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                ToolStripMenuItem next = new ToolStripMenuItem(NextRepeatText());
+                next.Enabled = false;
+                menu.Items.Add(next);
+            }
+
+            menu.Show(repeatBadge, new Point(0, repeatBadge.Height + 2));
+        }
+
+        // The one door in and out of the loop: the badge menu and the tray both
+        // come through here, so the state, the ini and the log never drift.
+        private void SetRepeat(bool on, int minutes)
+        {
+            if (syncingRepeat) return;
+            if (minutes < 1) minutes = 1;
+            if (minutes > 1440) minutes = 1440;
+
+            bool wasOn = repeatOn;
+            int wasMins = repeatMinutes;
+            repeatOn = on;
+            repeatMinutes = minutes;
+
+            if (on)
             {
                 ArmRepeat();
-                SaveRepeat((int)numRepeat.Value);
-                AppendLog("Repeat loop ON - a full BOOST NOW every " + (int)numRepeat.Value
-                    + " min, for as long as this window is open. First one in "
-                    + (int)numRepeat.Value + " min.");
+                SaveRepeat(minutes);
+                if (!wasOn)
+                    AppendLog("Repeat loop ON - a full BOOST NOW every " + minutes
+                        + " min, for as long as this window is open. First one in "
+                        + minutes + " min.");
+                else if (wasMins != minutes)
+                    AppendLog("Repeat loop: every " + minutes + " min from now.");
             }
             else
             {
                 nextRepeat = DateTime.MaxValue;
                 SaveRepeat(0);
-                AppendLog("Repeat loop off. Boost is back to being your click.");
+                if (wasOn) AppendLog("Repeat loop off. Boost is back to being your click.");
             }
             RepeatTick();
         }
 
-        // Changing the number while the loop is armed restarts the countdown
-        // from now, so a shorter interval takes effect at once.
-        private void RepeatIntervalChanged()
-        {
-            if (syncingRepeat || !chkRepeat.Checked) return;
-            ArmRepeat();
-            SaveRepeat((int)numRepeat.Value);
-            AppendLog("Repeat loop: every " + (int)numRepeat.Value + " min from now.");
-            RepeatTick();
-        }
-
-        // Settings > Advanced has the same key. After a save there the row on
-        // this window follows the file, silently - no log line, no re-save.
+        // Settings > Advanced has the same key. After a save there the badge
+        // follows the file, silently - no re-save of its own.
         private void SyncRepeat()
         {
             bool on = cfg.RepeatBoostMinutes > 0;
-            int mins = on ? Math.Min(1440, Math.Max(1, cfg.RepeatBoostMinutes)) : (int)numRepeat.Value;
-            if (on == chkRepeat.Checked && mins == (int)numRepeat.Value) return;
+            int mins = on ? Math.Min(1440, Math.Max(1, cfg.RepeatBoostMinutes)) : repeatMinutes;
+            if (on == repeatOn && mins == repeatMinutes) return;
 
             syncingRepeat = true;
             try
             {
-                numRepeat.Value = mins;
-                chkRepeat.Checked = on;
+                repeatOn = on;
+                repeatMinutes = mins;
             }
             finally { syncingRepeat = false; }
 
@@ -4458,49 +4633,63 @@ namespace IdleMaster
             { AppendLog("! could not save RepeatBoostMinutes: " + FirstLine(ex.Message)); }
         }
 
+        // The countdown in words, for the tooltip and the menu's last line.
+        private string NextRepeatText()
+        {
+            if (!repeatOn) return "";
+            if (busyNow) return "boosting now; the clock restarts when it finishes";
+            TimeSpan left = nextRepeat - DateTime.Now;
+            if (left < TimeSpan.Zero) left = TimeSpan.Zero;
+            return "next boost in " + ((int)left.TotalMinutes) + ":"
+                + left.Seconds.ToString("00", CultureInfo.InvariantCulture);
+        }
+
         // Runs off the 2-second tick. A run already in progress just delays the
         // next one - the loop never stacks two boosts on top of each other.
         private void RepeatTick()
         {
-            if (chkRepeat == null || repeatLabel == null) return;
-            if (!chkRepeat.Checked)
+            if (repeatBadge == null) return;
+
+            if (!repeatOn)
             {
-                repeatLabel.Text = "";
+                repeatBadge.Set(false, repeatMinutes, 0);
+                repeatTip.SetToolTip(repeatBadge,
+                    "Repeat boost is off - click to set the interval");
                 if (trayRepeat != null)
                 {
-                    trayRepeat.Text = "Repeat boost every " + (int)numRepeat.Value + " min";
+                    trayRepeat.Text = "Repeat boost every " + repeatMinutes + " min";
                     trayRepeat.Checked = false;
                 }
                 return;
             }
 
             if (busyNow)
-            {
-                repeatLabel.Text = "- boosting now; the clock restarts when it finishes";
-                nextRepeat = DateTime.Now.AddMinutes((double)numRepeat.Value);
-            }
+                nextRepeat = DateTime.Now.AddMinutes(repeatMinutes);
             else if (DateTime.Now >= nextRepeat)
             {
                 ArmRepeat();
-                AppendLog("Repeat loop: boosting (every " + (int)numRepeat.Value + " min).");
+                AppendLog("Repeat loop: boosting (every " + repeatMinutes + " min).");
                 Run("boost");
-                repeatLabel.Text = "- boosting now; the clock restarts when it finishes";
             }
-            else
-            {
-                TimeSpan left = nextRepeat - DateTime.Now;
-                if (left < TimeSpan.Zero) left = TimeSpan.Zero;
-                repeatLabel.Text = "- next boost in " + ((int)left.TotalMinutes) + ":"
-                    + left.Seconds.ToString("00", CultureInfo.InvariantCulture);
-            }
+
+            // The ring fills as the interval runs down.
+            double total = repeatMinutes * 60.0;
+            double left_ = (nextRepeat - DateTime.Now).TotalSeconds;
+            if (left_ < 0) left_ = 0;
+            double through = total <= 0 ? 0 : (total - left_) / total;
+            repeatBadge.Set(true, repeatMinutes, through);
+            repeatTip.SetToolTip(repeatBadge,
+                "BOOST NOW every " + repeatMinutes + " min - " + NextRepeatText());
 
             if (trayRepeat != null)
             {
-                trayRepeat.Text = "Repeat boost every " + (int)numRepeat.Value + " min";
+                trayRepeat.Text = "Repeat boost every " + repeatMinutes + " min";
                 trayRepeat.Checked = true;
             }
         }
 
+        // Saved straight to the ini; a hunting sentry reads cfg every sweep, so
+        // it goes overclocked (or calms down) without being restarted.
         private void ToggleOverclock()
         {
             cfg.OverclockedSentry = chkOverclock.Checked;
