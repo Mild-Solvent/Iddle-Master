@@ -991,7 +991,8 @@ OneDrive
 Teams
 ms-teams
 msteams
-# search indexer helpers
+# search indexer helpers (~40 MB). See the note on WSearch below: these are the
+# cheap half of turning Windows Search off, and they come with the same cost.
 SearchProtocolHost
 SearchFilterHost
 # audio ""enhancement""
@@ -1006,6 +1007,20 @@ UDCService
 NordUpdaterService
 nordsec-threatprotection-service
 NahimicService
+# WSearch is Windows Search itself, and it is the entry on this list you will
+# actually notice. Stopped, the Start menu cannot resolve its own shortcuts:
+# type ""powershell"" and you get ""the item you selected is unavailable. It might
+# have been moved, renamed, or removed"" - and if you answer Remove there, you
+# delete a Start entry over a service that was only paused. Do not.
+#
+# After a plain BOOST this heals itself: WSearch is Automatic (Delayed) and
+# trigger-started, so Windows brings it back a few minutes after the run, and
+# [boost.kill] never touches SearchIndexer, so the index is still there when it
+# does. Under a WATCH it does not heal - the sentry re-stops it every
+# SentryServiceMinutes - and under an ABSOLUTE IDLE watch it gets worse, because
+# SearchIndexer is on the idle list and is killed every 20 seconds, so the index
+# can never finish rebuilding either. Comment this out (and SearchIndexer below)
+# if you would rather have a working Start menu than ~60 MB.
 WSearch
 DoSvc
 BITS
@@ -1050,6 +1065,10 @@ FnHotkeyCapsLKNumLK
 LockApp
 backgroundTaskHost
 RuntimeBroker
+# The indexer, killed on sight - which is fine for one idle run and corrosive
+# under a watch: hunted every 20 seconds it never finishes an index, so Start
+# search stays useless long after WSearch is running again. This is the entry
+# that turns ""search is off for a bit"" into ""search is off"". See WSearch above.
 SearchIndexer
 # Uncomment if you never leave a terminal running work overnight:
 #WindowsTerminal

@@ -521,6 +521,23 @@ It edits `idlemaster.ini` line by line, so every comment in it survives. You can
 still edit the file by hand if you prefer — plain text, `*` wildcards, `#`
 comments out a line.
 
+**Windows Search is the one you'll notice.** `WSearch` is in `[boost.services]`
+and `SearchIndexer` in `[idle.kill]`, and stopped, the Start menu can't resolve
+its own shortcuts — type *powershell* and you get *"the item you selected is
+unavailable. It might have been moved, renamed, or removed."* Answer **Cancel**
+there, never Remove: that deletes a Start entry over a service that was only
+paused.
+
+After a plain **boost** it heals itself — `WSearch` is Automatic (Delayed) and
+trigger-started, and `[boost.kill]` never touches `SearchIndexer`, so the index
+is intact when Windows brings the service back a few minutes later. Under a
+**watch** it doesn't heal: the sentry re-stops the service every
+`SentryServiceMinutes`, and an **Absolute Idle** watch also kills `SearchIndexer`
+every 20 seconds, so the index can never finish rebuilding either. That is the
+difference between *search is off for a bit* and *search is off*. Comment out
+`WSearch`, `SearchIndexer`, `SearchProtocolHost` and `SearchFilterHost` if you'd
+rather have a working Start menu than the ~100 MB.
+
 Two entries are deliberately left commented out because they're the ones that
 could bite you from bed:
 
