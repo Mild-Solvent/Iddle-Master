@@ -630,7 +630,7 @@ namespace IdleMaster
         private int sunshineStrikes;
         private bool loginNagged;
         private readonly HashSet<string> missingProfiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private string tailscaleExe;
+        private static string tailscaleExe;
 
         public NetGuard(Config c, Engine e, Action<string> logger)
         {
@@ -1096,7 +1096,7 @@ namespace IdleMaster
             return false;
         }
 
-        private string TailscaleExe()
+        private static string TailscaleExe()
         {
             if (tailscaleExe != null) return tailscaleExe;
             string exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale\\tailscale.exe");
@@ -1121,6 +1121,32 @@ namespace IdleMaster
             if (!File.Exists(exe)) exe = "tailscale.exe";     // maybe on PATH; maybe not
             tailscaleExe = exe;
             return exe;
+        }
+
+        // The one question "is Tailscale actually up" turns on, for callers that
+        // are not the guard itself. Running = connected. Stopped, NoState and
+        // NeedsLogin all mean the daemon is alive and reachable and doing
+        // nothing, which is the wedge that matters: the SERVICE is Running and
+        // the ADAPTER is Up throughout, so anything judging by those two sees a
+        // healthy machine that no traffic can reach. null = the CLI could not be
+        // asked at all, so the caller should fall back to what it can see.
+        public static string BackendStateNow(int timeoutMs)
+        {
+            try
+            {
+                string json;
+                int rc = Exec(TailscaleExe(), "status --json --peers=false", timeoutMs, out json);
+                if (rc == -2) return null;                       // no CLI to ask
+                if (json == null) return "";                     // asked, no answer: trouble
+                Match m = Regex.Match(json, "\"BackendState\"\\s*:\\s*\"([A-Za-z]+)\"");
+                return m.Success ? m.Groups[1].Value : "";
+            }
+            catch (Exception) { return null; }
+        }
+
+        public static bool BackendIsUp(string state)
+        {
+            return state == "Running";
         }
 
         // Asks the CLI. False = the CLI could not be run at all, so the caller

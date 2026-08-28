@@ -454,10 +454,19 @@ taskbar whose Start button answers nothing.
 
 **Network guard.** Before finishing (and mid-run, in idle mode) it verifies that
 `SunshineService` and `Tailscale` are running, that something is listening on a
-Sunshine port, and that the Tailscale adapter is up. If a service died as
-collateral damage, it restarts it and says so loudly in the log. That is the
-check *inside* a run; the same [network guard](#network-guard) also stands
-there the whole time Idle Master is running.
+Sunshine port, that the Tailscale adapter is up, **and that the daemon is
+actually in the `Running` state**. If a service died as collateral damage, it
+restarts it and says so loudly in the log. That is the check *inside* a run; the
+same [network guard](#network-guard) also stands there the whole time Idle Master
+is running.
+
+That last clause is not padding. "The service is Running and the adapter is Up"
+is *not* the same question as "Tailscale is up": in a `NoState` wedge both of
+those stay true while nothing at all can reach the machine — which is the exact
+outage the check exists to catch, and for a while it reported a clean bill of
+health right through it. The state is read from the daemon now, and a bad one
+gets a line in the log and hands the repair straight to the standing guard
+rather than waiting out `NetworkGuardSeconds`.
 
 **Everything is reversible.** Services are *stopped*, never disabled, so a reboot
 returns the machine to normal on its own. Each run writes `idlemaster.state` with

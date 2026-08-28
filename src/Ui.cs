@@ -4020,6 +4020,15 @@ namespace IdleMaster
             if (guard != null && guard.Alive) return;
             guard = new NetGuard(cfg, engine, AppendLog);
             guard.Start();          // a refusal is kept in guard.Refused for the page
+
+            // The sentry's own 5-minute pass now notices a wedged daemon. It has
+            // no repair ladder of its own, so hand it straight to the guard that
+            // does rather than waiting out the rest of NetworkGuardSeconds.
+            engine.OnNetworkTrouble = delegate
+            {
+                NetGuard g = guard;
+                if (g != null && g.Alive) g.CheckNow();
+            };
         }
 
         private void StopGuard()

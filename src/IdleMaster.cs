@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.13.2.0")]
-[assembly: AssemblyFileVersion("0.13.2.0")]
+[assembly: AssemblyVersion("0.13.3.0")]
+[assembly: AssemblyFileVersion("0.13.3.0")]
 
 namespace IdleMaster
 {
@@ -2262,13 +2262,45 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             }
             catch (Exception) { }
 
+            // The adapter being Up is NOT the same question as Tailscale being
+            // up, and treating it as one is how this check used to hand back a
+            // clean bill of health during the exact outage it exists to catch.
+            // In a NoState wedge the service is Running and the adapter is Up
+            // and nothing can reach the machine - so ask the daemon what state
+            // it is actually in, the same way the standing guard does. null =
+            // no CLI to ask, in which case the adapter is all we have and this
+            // check is no worse than it was.
+            string state = NetGuard.BackendStateNow(6000);
+            bool backendOk = state == null || NetGuard.BackendIsUp(state);
+
             if (loud)
             {
                 log("   " + (sunshinePort ? "+" : "!") + " Sunshine listening: " + (sunshinePort ? "yes" : "NO"));
                 log("   " + (tailscaleUp ? "+" : "!") + " Tailscale adapter up: " + (tailscaleUp ? "yes" : "NO"));
+                if (state != null)
+                    log("   " + (backendOk ? "+" : "!") + " Tailscale state: "
+                        + (state.Length == 0 ? "not answering" : state));
             }
-            return ok && sunshinePort && tailscaleUp;
+            else if (!backendOk)
+            {
+                // The silent pass still has to say this one out loud: it is the
+                // difference between a quiet night and an unreachable machine.
+                log("[guard] Tailscale is "
+                    + (state.Length == 0 ? "not answering" : state)
+                    + " - the service is running and the adapter is up, but nothing"
+                    + " can reach this machine. Asking the network guard to repair it now.");
+            }
+
+            if (!backendOk && OnNetworkTrouble != null)
+                try { OnNetworkTrouble(); } catch (Exception) { }
+
+            return ok && sunshinePort && tailscaleUp && backendOk;
         }
+
+        // Set by whoever owns a standing network guard, so a sweep that spots a
+        // wedged daemon can hand it straight to the thing that knows the repair
+        // ladder instead of waiting out NetworkGuardSeconds.
+        public Action OnNetworkTrouble;
 
         public bool EnsureService(string name, bool loud)
         {
