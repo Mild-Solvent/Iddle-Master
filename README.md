@@ -192,6 +192,24 @@ Two things worth knowing before you leave it on:
   Closing the window stops the thread but leaves the watch *armed*, so opening
   Idle Master again picks it back up where it left off.
 
+### Or just run it again, on a clock
+
+The sentry sweeps; the **repeat loop** re-runs the whole thing. Tick **Repeat
+boost every N minutes** under the BOOST NOW button, set the number, and the
+window clicks that button for you on that interval — the same lists, the same
+asking, the sentry re-armed after each pass. The line beside it counts down to
+the next one (*next boost in 4:32*), and a run that is still going just pushes
+the clock: the loop never stacks two boosts.
+
+It belongs to the window, so closing Idle Master ends it, and the interval is
+remembered in `RepeatBoostMinutes` — set it there (or in Settings > Advanced) and
+the loop arms itself the next time the app opens, first run one interval away.
+The tray menu carries the same toggle for when the window is hidden.
+
+That is a different knob from `SentryFullPassMinutes` below: the sentry's full
+pass happens inside the watch, quietly; the repeat loop is the button being
+pressed again.
+
 **Sentry lists & timers** (button on the sentry row, tray menu) is the sentry's
 own page: the active mode's kill list and service list as checklists — add from
 what is running, type a name, remove, untick to comment out — plus every timer,

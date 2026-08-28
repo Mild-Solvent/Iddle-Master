@@ -416,6 +416,16 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         line (<code>BoostWhenFreeBelowMb</code>). Save re-reads the config; a running sentry uses
         the new lists on its next sweep.</p>
 
+      <h3>Repeat boost every N minutes</h3>
+      <p>The row under <strong>BOOST NOW</strong>: tick it, set the minutes, and the window presses
+        that button on that interval — the same lists, the same asking, the sentry re-armed after
+        each pass. The line beside it counts down to the next one, and a boost that is still
+        running only pushes the clock, so two never stack. It lives in the window (close Idle
+        Master and the loop is over), the interval is kept in <code>RepeatBoostMinutes</code> so it
+        arms itself again next launch, and the tray menu carries the same toggle. Not to be
+        confused with <code>SentryFullPassMinutes</code>, which is the <em>sentry</em> doing a full
+        pass inside its own watch.</p>
+
       <h3>What's eating RAM?</h3>
       <p>The Master's own little task manager: a live table that refreshes every two seconds and
         tags each row with the list it is on (<span class="pill b">BOOST</span>
@@ -563,6 +573,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. <code>0</code> = off.</td></tr>
             <tr><td class="n">SentryFullPassMinutes</td><td class="n">0</td><td class="wrap-ok">Repeat a <em>whole</em> boost pass — re-stop services, trim, purge, check the stream stack — every this many minutes, on top of the 20-second sweep. 0 = off.</td></tr>
             <tr><td class="n">BoostWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">…and do one right now when free RAM drops under this many MB (at most once per 5 minutes). 0 = off.</td></tr>
+            <tr><td class="n">RepeatBoostMinutes</td><td class="n">0</td><td class="wrap-ok">The repeat loop: the window clicks <strong>BOOST NOW</strong> for you every this many minutes, for as long as it is open — a whole boost each time, not the sentry’s sweep. Set from the row under the button, or here. 0 = off.</td></tr>
           </tbody>
         </table>
       </div>

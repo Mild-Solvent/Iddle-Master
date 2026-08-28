@@ -698,6 +698,7 @@ namespace IdleMaster
             new string[] { "SentryBackoffMinutes", "...and leave it alone for (minutes)",           "1", "1440", "30" },
             new string[] { "SentryFullPassMinutes","Repeat a whole boost pass (services, trim, guard) every (minutes, 0 = off)", "0", "1440", "0" },
             new string[] { "BoostWhenFreeBelowMb", "...and do one now when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
+            new string[] { "RepeatBoostMinutes",   "Repeat loop: click BOOST NOW again every (minutes, 0 = off)", "0", "1440", "0" },
             new string[] { "AskTimeoutSeconds",    "Dialog answers itself after (seconds)",         "5", "600",  "47" },
             new string[] { "AskAboveMb",           "Ask about unlisted newcomers bigger than (MB, 0 = off)", "0", "99999", "250" },
             new string[] { "TrimWhenFreeBelowMb",  "Emergency trim when free RAM drops below (MB, 0 = off)", "0", "99999", "0" },
@@ -708,7 +709,7 @@ namespace IdleMaster
         };
 
         // How the Numbers table splits into headings in the advanced window.
-        public const int SentryCount = 8;
+        public const int SentryCount = 9;
         public const int AskCount = 4;
         public const int CleanupCount = 2;
 
@@ -3640,6 +3641,9 @@ namespace IdleMaster
         private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
+        private readonly CheckBox chkRepeat;        // the repeat loop: BOOST NOW on a clock
+        private readonly NumericUpDown numRepeat;   // ...every this many minutes
+        private readonly Label repeatLabel;         // ...and how long until the next one
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
@@ -3662,6 +3666,10 @@ namespace IdleMaster
         private bool reallyExit;
         private bool startHidden;
         private bool watchMode;
+        private bool busyNow;                   // a mode is running right now
+        private bool syncingRepeat;             // the repeat row is following the ini, not the user
+        private DateTime nextRepeat = DateTime.MaxValue;
+        private ToolStripMenuItem trayRepeat;
 
         public MainForm(Config c)
         {
@@ -3670,8 +3678,8 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 806);
-            MinimumSize = new Size(560, 620);
+            Size = new Size(700, 840);
+            MinimumSize = new Size(560, 654);
             StartPosition = FormStartPosition.CenterScreen;
 
             Label title = new Label();
@@ -3696,49 +3704,86 @@ namespace IdleMaster
                 "Kill the background junk. Desktop stays usable.", Theme.Good, 130);
             btnBoost.Click += delegate { Run("boost"); };
 
+            // The repeat loop. Not a second kind of boost: it is this button,
+            // clicked for you every N minutes for as long as the window is up.
+            // The sentry keeps hunting between the runs; this is the whole pass
+            // coming round again.
+            chkRepeat = new CheckBox();
+            chkRepeat.Text = "Repeat boost every";
+            chkRepeat.SetBounds(24, 210, 136, 22);
+            chkRepeat.ForeColor = Theme.Fg;
+            chkRepeat.FlatStyle = FlatStyle.Flat;
+            Controls.Add(chkRepeat);
+
+            numRepeat = new NumericUpDown();
+            numRepeat.Minimum = 1;
+            numRepeat.Maximum = 1440;
+            numRepeat.Value = cfg.RepeatBoostMinutes > 0
+                ? Math.Min(1440, cfg.RepeatBoostMinutes) : 30;
+            numRepeat.SetBounds(162, 208, 62, 22);
+            Theme.Input_(numRepeat);
+            Controls.Add(numRepeat);
+
+            Label minutesLabel = Theme.Hint("minutes");
+            minutesLabel.SetBounds(230, 211, 60, 20);
+            Controls.Add(minutesLabel);
+
+            repeatLabel = Theme.Hint("");
+            repeatLabel.SetBounds(294, 211, 368, 20);
+            repeatLabel.AutoEllipsis = true;
+            repeatLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(repeatLabel);
+
+            // Wired after the value is in, so restoring the saved interval does
+            // not count as the user changing it.
+            chkRepeat.Checked = cfg.RepeatBoostMinutes > 0;
+            if (chkRepeat.Checked) ArmRepeat();
+            chkRepeat.Click += delegate { ToggleRepeat(); };
+            numRepeat.ValueChanged += delegate { RepeatIntervalChanged(); };
+
             btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to Windows vitals", Theme.Danger, 218);
+                "Strip to Windows vitals", Theme.Danger, 252);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
-            btnRestore = SmallButton("Restore desktop", 22, 306);
+            btnRestore = SmallButton("Restore desktop", 22, 340);
             btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = SmallButton("What's eating RAM?", 182, 306);
+            btnEaters = SmallButton("What's eating RAM?", 182, 340);
             btnEaters.Click += delegate { OpenEaters(); };
-            btnTrim = SmallButton("Trim RAM now", 342, 306);
+            btnTrim = SmallButton("Trim RAM now", 342, 340);
             btnTrim.Click += delegate { Run("trim"); };
-            btnConfig = SmallButton("Settings", 502, 306);
+            btnConfig = SmallButton("Settings", 502, 340);
             btnConfig.Click += delegate { EditConfig(); };
 
-            btnCleanup = SmallButton("Disk cleanup", 22, 342);
+            btnCleanup = SmallButton("Disk cleanup", 22, 376);
             btnCleanup.Click += delegate { OpenCleanup(); };
-            btnBackup = SmallButton("Backup kit", 182, 342);
+            btnBackup = SmallButton("Backup kit", 182, 376);
             btnBackup.Click += delegate { OpenBackup(); };
 
             btnUpdate = Theme.Quiet("Check for updates");
-            btnUpdate.SetBounds(342, 342, 152, 30);
+            btnUpdate.SetBounds(342, 376, 152, 30);
             btnUpdate.Click += delegate { CheckUpdates(); };
             Controls.Add(btnUpdate);
 
             // The network guard's page. The button itself goes red while the
             // guard is fighting something, the way the update button goes
             // blue when there is news.
-            btnNetGuard = SmallButton("Network guard", 502, 342);
+            btnNetGuard = SmallButton("Network guard", 502, 376);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
 
-            btnDebloat = SmallButton("Debloat", 22, 378);
+            btnDebloat = SmallButton("Debloat", 22, 412);
             btnDebloat.Click += delegate { OpenDebloat(); };
 
-            btnRemote = SmallButton("Remote desktop setup", 182, 378);
+            btnRemote = SmallButton("Remote desktop setup", 182, 412);
             btnRemote.Click += delegate { OpenRemote(); };
 
             // Two doors to other people's debloaters - launched, not imitated.
-            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 378);
+            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 412);
             btnWinUtil.Click += delegate { RunWinUtil(); };
-            btnZoic = SmallButton("Zoicware", 502, 378);
+            btnZoic = SmallButton("Zoicware", 502, 412);
             btnZoic.Click += delegate { RunZoicware(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(22, 420, 480, 20);
+            updateLabel.SetBounds(22, 454, 480, 20);
             updateLabel.AutoEllipsis = true;
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(updateLabel);
@@ -3747,7 +3792,7 @@ namespace IdleMaster
             // here. Opens a pre-typed GitHub issue - the preview shows every
             // byte first, and nothing is sent until Submit in the browser.
             btnFeedback = Theme.Quiet("Report a bug");
-            btnFeedback.SetBounds(510, 414, 152, 30);
+            btnFeedback.SetBounds(510, 448, 152, 30);
             btnFeedback.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnFeedback.Click += delegate { OpenFeedback(); };
             Controls.Add(btnFeedback);
@@ -3755,20 +3800,20 @@ namespace IdleMaster
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 454, 190, 22);
+            chkSentry.SetBounds(24, 488, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 456, 300, 20);
+            sentryLabel.SetBounds(220, 490, 300, 20);
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, 450, 152, 30);
+            btnSentry.SetBounds(510, 484, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -3779,7 +3824,7 @@ namespace IdleMaster
             chkOverclock = new CheckBox();
             chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
             chkOverclock.Checked = cfg.OverclockedSentry;
-            chkOverclock.SetBounds(24, 484, 636, 22);
+            chkOverclock.SetBounds(24, 518, 636, 22);
             chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
             chkOverclock.FlatStyle = FlatStyle.Flat;
             chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -3794,16 +3839,17 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 512, 640, 212);
+            logBox.SetBounds(22, 546, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 2000;
-            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); UpdateGuard(); };
+            timer.Tick += delegate { UpdateMemory(); UpdateSentry(); UpdateGuard(); RepeatTick(); };
             timer.Start();
             UpdateMemory();
             UpdateSentry();
+            RepeatTick();
 
             // The quiet update check: a minute after start, then every
             // UpdateCheckHours. Finding something only changes the button, the
@@ -3815,6 +3861,10 @@ namespace IdleMaster
             updateTimer.Start();
 
             AppendLog("Ready. Config: " + Config.Path_);
+            if (chkRepeat.Checked)
+                AppendLog("Repeat loop armed from the config: BOOST NOW every "
+                    + (int)numRepeat.Value + " min. First one in " + (int)numRepeat.Value
+                    + " min - untick 'Repeat boost every' to stop it.");
             StateFile st = StateFile.Load();
             if (st.Mode.Length > 0)
                 AppendLog("Note: last run was '" + st.Mode + "' and has not been restored yet ("
@@ -4115,6 +4165,7 @@ namespace IdleMaster
                     + ".");
                 if (sentry != null && sentry.Alive)
                     AppendLog("The sentry is using the new lists from its next sweep.");
+                SyncRepeat();
                 if (eatersWin != null && !eatersWin.IsDisposed) eatersWin.RefreshNow();
             }
             catch (Exception ex) { AppendLog("! could not reload the config: " + ex.Message); }
@@ -4188,6 +4239,14 @@ namespace IdleMaster
             menu.Items.Add("Open Idle Master", null, delegate { ShowWindow(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Boost now", null, delegate { ShowWindow(); Run("boost"); });
+            trayRepeat = new ToolStripMenuItem("Repeat boost every " + (int)numRepeat.Value + " min");
+            trayRepeat.Checked = chkRepeat.Checked;
+            trayRepeat.Click += delegate
+            {
+                chkRepeat.Checked = !chkRepeat.Checked;
+                ToggleRepeat();
+            };
+            menu.Items.Add(trayRepeat);
             menu.Items.Add("Absolute idle", null, delegate { ShowWindow(); ConfirmIdle(); });
             menu.Items.Add("Restore desktop", null, delegate { ShowWindow(); Run("restore"); });
             menu.Items.Add(new ToolStripSeparator());
@@ -4312,6 +4371,136 @@ namespace IdleMaster
 
         // Saved straight to the ini; a hunting sentry reads cfg every sweep, so
         // it goes overclocked (or calms down) without being restarted.
+        // ---- the repeat loop -------------------------------------------------
+        // BOOST NOW, on a clock the user sets. It is the same run as the button:
+        // the same lists, the same asking, the sentry re-armed after each one.
+        // It lives in this window - close Idle Master and the loop is over.
+
+        private void ArmRepeat()
+        {
+            nextRepeat = DateTime.Now.AddMinutes((double)numRepeat.Value);
+        }
+
+        private void ToggleRepeat()
+        {
+            if (chkRepeat.Checked)
+            {
+                ArmRepeat();
+                SaveRepeat((int)numRepeat.Value);
+                AppendLog("Repeat loop ON - a full BOOST NOW every " + (int)numRepeat.Value
+                    + " min, for as long as this window is open. First one in "
+                    + (int)numRepeat.Value + " min.");
+            }
+            else
+            {
+                nextRepeat = DateTime.MaxValue;
+                SaveRepeat(0);
+                AppendLog("Repeat loop off. Boost is back to being your click.");
+            }
+            RepeatTick();
+        }
+
+        // Changing the number while the loop is armed restarts the countdown
+        // from now, so a shorter interval takes effect at once.
+        private void RepeatIntervalChanged()
+        {
+            if (syncingRepeat || !chkRepeat.Checked) return;
+            ArmRepeat();
+            SaveRepeat((int)numRepeat.Value);
+            AppendLog("Repeat loop: every " + (int)numRepeat.Value + " min from now.");
+            RepeatTick();
+        }
+
+        // Settings > Advanced has the same key. After a save there the row on
+        // this window follows the file, silently - no log line, no re-save.
+        private void SyncRepeat()
+        {
+            bool on = cfg.RepeatBoostMinutes > 0;
+            int mins = on ? Math.Min(1440, Math.Max(1, cfg.RepeatBoostMinutes)) : (int)numRepeat.Value;
+            if (on == chkRepeat.Checked && mins == (int)numRepeat.Value) return;
+
+            syncingRepeat = true;
+            try
+            {
+                numRepeat.Value = mins;
+                chkRepeat.Checked = on;
+            }
+            finally { syncingRepeat = false; }
+
+            if (on)
+            {
+                ArmRepeat();
+                AppendLog("Repeat loop: BOOST NOW every " + mins + " min, from the config.");
+            }
+            else
+            {
+                nextRepeat = DateTime.MaxValue;
+                AppendLog("Repeat loop off, from the config.");
+            }
+            RepeatTick();
+        }
+
+        private static string FirstLine(string text)
+        {
+            return text.Split(new char[] { (char)13, (char)10 })[0];
+        }
+
+        private void SaveRepeat(int minutes)
+        {
+            cfg.RepeatBoostMinutes = minutes;
+            try
+            {
+                IniFile ini = new IniFile();
+                ini.SetSetting("RepeatBoostMinutes", minutes.ToString(CultureInfo.InvariantCulture));
+                ini.Save();
+            }
+            catch (Exception ex)
+            { AppendLog("! could not save RepeatBoostMinutes: " + FirstLine(ex.Message)); }
+        }
+
+        // Runs off the 2-second tick. A run already in progress just delays the
+        // next one - the loop never stacks two boosts on top of each other.
+        private void RepeatTick()
+        {
+            if (chkRepeat == null || repeatLabel == null) return;
+            if (!chkRepeat.Checked)
+            {
+                repeatLabel.Text = "";
+                if (trayRepeat != null)
+                {
+                    trayRepeat.Text = "Repeat boost every " + (int)numRepeat.Value + " min";
+                    trayRepeat.Checked = false;
+                }
+                return;
+            }
+
+            if (busyNow)
+            {
+                repeatLabel.Text = "- boosting now; the clock restarts when it finishes";
+                nextRepeat = DateTime.Now.AddMinutes((double)numRepeat.Value);
+            }
+            else if (DateTime.Now >= nextRepeat)
+            {
+                ArmRepeat();
+                AppendLog("Repeat loop: boosting (every " + (int)numRepeat.Value + " min).");
+                Run("boost");
+                repeatLabel.Text = "- boosting now; the clock restarts when it finishes";
+            }
+            else
+            {
+                TimeSpan left = nextRepeat - DateTime.Now;
+                if (left < TimeSpan.Zero) left = TimeSpan.Zero;
+                repeatLabel.Text = "- next boost in " + ((int)left.TotalMinutes) + ":"
+                    + left.Seconds.ToString("00", CultureInfo.InvariantCulture);
+            }
+
+            if (trayRepeat != null)
+            {
+                trayRepeat.Text = "Repeat boost every " + (int)numRepeat.Value + " min";
+                trayRepeat.Checked = true;
+            }
+        }
+
         private void ToggleOverclock()
         {
             cfg.OverclockedSentry = chkOverclock.Checked;
@@ -4571,6 +4760,7 @@ namespace IdleMaster
                 chkSentry.Checked = cfg.Sentry;
                 chkOverclock.Checked = cfg.OverclockedSentry;
                 chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
+                SyncRepeat();
                 if (cfg.StartWithWindows != wasStartup)
                     App.SyncStartupTask(cfg.StartWithWindows, AppendLog);
                 AppendLog("Config saved. " + cfg.Protect.Count + " protected names, "
@@ -4656,6 +4846,8 @@ namespace IdleMaster
 
         private void SetBusy(bool busy)
         {
+            busyNow = busy;
+            // The interval box stays live while a run is on; only the buttons go.
             btnBoost.Enabled = btnIdle.Enabled = btnRestore.Enabled = btnTrim.Enabled = !busy;
             Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
         }

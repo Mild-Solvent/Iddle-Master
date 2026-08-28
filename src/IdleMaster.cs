@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.11.0.0")]
-[assembly: AssemblyFileVersion("0.11.0.0")]
+[assembly: AssemblyVersion("0.12.0.0")]
+[assembly: AssemblyFileVersion("0.12.0.0")]
 
 namespace IdleMaster
 {
@@ -271,6 +271,9 @@ namespace IdleMaster
         public int SentryFullPassMinutes = 0;       // a whole boost pass (services + trim + guard) every N min. 0 = off
         public int BoostWhenFreeBelowMb = 0;        // ...and one right now when free RAM drops under this. 0 = off
 
+        // --- the repeat loop: BOOST NOW on a clock, run by the window itself
+        public int RepeatBoostMinutes = 0;          // click BOOST NOW again every N minutes. 0 = off
+
         // --- ask first: anything that shows up AFTER the mode ran gets a dialog
         public bool AskBeforeKill = true;
         public int AskTimeoutSeconds = 47;          // no answer = AskTimeoutAction
@@ -358,6 +361,7 @@ namespace IdleMaster
                         case "trimwhenfreebelowmb": c.TrimWhenFreeBelowMb = Int(v, c.TrimWhenFreeBelowMb, 0); break;
                         case "sentryfullpassminutes": c.SentryFullPassMinutes = Int(v, c.SentryFullPassMinutes, 0); break;
                         case "boostwhenfreebelowmb": c.BoostWhenFreeBelowMb = Int(v, c.BoostWhenFreeBelowMb, 0); break;
+                        case "repeatboostminutes": c.RepeatBoostMinutes = Int(v, c.RepeatBoostMinutes, 0); break;
                         case "askbeforekill": c.AskBeforeKill = b; break;
                         case "asktimeoutaction":
                         {
@@ -434,6 +438,7 @@ namespace IdleMaster
             TrimWhenFreeBelowMb = o.TrimWhenFreeBelowMb;
             SentryFullPassMinutes = o.SentryFullPassMinutes;
             BoostWhenFreeBelowMb = o.BoostWhenFreeBelowMb;
+            RepeatBoostMinutes = o.RepeatBoostMinutes;
             AskBeforeKill = o.AskBeforeKill; AskTimeoutSeconds = o.AskTimeoutSeconds;
             AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
@@ -589,6 +594,10 @@ SentryFullPassMinutes=0
 # Dynamic boost: do that whole pass right now when free RAM drops under this
 # many MB (at most once per 5 minutes). 0 = off.
 BoostWhenFreeBelowMb=0
+# The repeat loop: the window clicks BOOST NOW for you every N minutes, for as
+# long as it is open. A whole boost each time - the same lists, the same asking -
+# not the sentry's sweep. The countdown sits next to the button. 0 = off.
+RepeatBoostMinutes=0
 
 # --- ASK FIRST --------------------------------------------------------------
 # The sentry takes a census on its first sweep. Everything already running that
