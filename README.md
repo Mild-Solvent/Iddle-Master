@@ -214,7 +214,7 @@ Two things worth knowing before you leave it on:
 ### Or just run it again, on a clock
 
 The sentry sweeps; the **repeat loop** re-runs the whole thing. It rides on the
-BOOST NOW button itself: the **refresh arrow at its left edge**, with the
+BOOST NOW button itself: the **refresh arrow at its right edge**, with the
 interval in the middle of the ring. Click the arrow — not the rest of the
 button, which still boosts — and a small menu opens: on/off, a spinner for any
 number of minutes, and the usual 5 / 10 / 15 / 30 / 60 / 120. Pick one and the

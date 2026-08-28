@@ -3826,15 +3826,21 @@ namespace IdleMaster
             // coming round again.
             //
             // It rides on the button rather than under it: a refresh arrow on
-            // the left of the blue slab, the interval in its middle, the ring
+            // the right of the blue slab, the interval in its middle, the ring
             // filling as the next one comes round. Clicking the arrow opens the
             // menu that sets it - the boost itself is the rest of the button.
+            //
+            // Placed off btnBoost's own edge and anchored to the right, because
+            // the window is sizable: a fixed x would drift off the slab the
+            // first time somebody widened it.
             repeatOn = cfg.RepeatBoostMinutes > 0;
             repeatMinutes = cfg.RepeatBoostMinutes > 0
                 ? Math.Min(1440, Math.Max(1, cfg.RepeatBoostMinutes)) : 30;
 
             repeatBadge = new RepeatBadge();
-            repeatBadge.SetBounds(34, 145, 46, 46);
+            repeatBadge.SetBounds(btnBoost.Right - 58,
+                                  btnBoost.Top + (btnBoost.Height - 46) / 2, 46, 46);
+            repeatBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             repeatBadge.Click += delegate { ShowRepeatMenu(); };
             Controls.Add(repeatBadge);
             repeatBadge.BringToFront();
@@ -4470,7 +4476,7 @@ namespace IdleMaster
         // BOOST NOW, on a clock the user sets. It is the same run as the button:
         // the same lists, the same asking, the sentry re-armed after each one.
         // It lives in this window - close Idle Master and the loop is over, and
-        // it lives on the button too: the refresh arrow at its left edge.
+        // it lives on the button too: the refresh arrow at its right edge.
 
         private void ArmRepeat()
         {

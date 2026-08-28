@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.13.0.0")]
-[assembly: AssemblyFileVersion("0.13.0.0")]
+[assembly: AssemblyVersion("0.13.2.0")]
+[assembly: AssemblyFileVersion("0.13.2.0")]
 
 namespace IdleMaster
 {
@@ -381,7 +381,7 @@ namespace IdleMaster
             if (!File.Exists(Path_))
                 File.WriteAllText(Path_, DefaultIni, new UTF8Encoding(false));
             else
-                AddShippedSection("[protect.path]");
+                SyncShippedSection("[protect.path]");
 
             Config c = new Config();
             string section = "";
@@ -562,19 +562,56 @@ namespace IdleMaster
         // only laid down when the file is absent, and an update deliberately
         // leaves your config alone. So a section that ships LATER is copied in
         // once, comments and all, exactly as a fresh install would have it -
-        // additive, at the end, and never again once the header is there. Delete
-        // the header and it comes back; comment its entries out and it does not.
-        private static void AddShippedSection(string header)
+        // additive, at the end. Delete the header and it comes back.
+        //
+        // Entries that ship later are topped up the same way, because a section
+        // added once and then never revisited is a trap: 0.13.0 shipped
+        // [protect.path] with the Claude Code CLI's old home in it and 0.13.2
+        // learned its new one, and without this nobody who already had the
+        // section would ever see the second line. Only names the file does not
+        // mention AT ALL are added - an entry you commented out stays commented,
+        // because that is you having answered the question already.
+        private static void SyncShippedSection(string header)
         {
             try
             {
-                string[] lines = File.ReadAllLines(Path_);
-                foreach (string l in lines)
-                    if (l.Trim().Equals(header, StringComparison.OrdinalIgnoreCase)) return;
-
+                List<string> lines = new List<string>(File.ReadAllLines(Path_));
                 string block = DefaultSection(header);
                 if (block == null) return;
-                File.AppendAllText(Path_, Environment.NewLine + block, new UTF8Encoding(false));
+
+                int at = -1;
+                for (int i = 0; i < lines.Count; i++)
+                    if (lines[i].Trim().Equals(header, StringComparison.OrdinalIgnoreCase)) { at = i; break; }
+
+                if (at < 0)
+                {
+                    File.AppendAllText(Path_, Environment.NewLine + block, new UTF8Encoding(false));
+                    return;
+                }
+
+                // Everything the file already has an opinion about, enabled or
+                // commented out, so neither counts as missing.
+                HashSet<string> known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string l in lines)
+                {
+                    string t = l.Trim();
+                    if (t.StartsWith("#")) t = t.Substring(1).Trim();
+                    if (t.Length > 0) known.Add(t);
+                }
+
+                List<string> missing = new List<string>();
+                foreach (string raw in block.Replace("\r\n", "\n").Split('\n'))
+                {
+                    string t = raw.Trim();
+                    if (t.Length == 0 || t.StartsWith("#") || t.StartsWith("[")) continue;
+                    if (!known.Add(t)) continue;      // already there, either way
+                    missing.Add(t);
+                }
+                if (missing.Count == 0) return;
+
+                missing.Reverse();                    // inserted one by one, so keep order
+                foreach (string t in missing) lines.Insert(at + 1, t);
+                File.WriteAllLines(Path_, lines.ToArray(), new UTF8Encoding(false));
             }
             catch (Exception) { }   // read-only ini: the code defaults still stand
         }
@@ -936,8 +973,11 @@ WhatsApp*
 # Full paths, '*' works, and a path protects everything underneath it - the same
 # spelling [cleanup.protect] uses. Matched against the process's own exe path.
 [protect.path]
-# The Claude Code CLI. Installed per-user under the desktop app's data folder,
-# but it is a terminal session doing your work, not the app's RAM.
+# The Claude Code CLI, both places it lives: the native install in ~\.local\bin,
+# and the copy the desktop app keeps under its own data folder. Same exe name as
+# the 3 GB desktop app on the idle list, and nothing like it - this one is a
+# terminal session doing your work.
+*\.local\bin\claude.exe
 *\claude-code\*
 #C:\Users\*\my-tools\*
 
