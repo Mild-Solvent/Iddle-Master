@@ -200,9 +200,11 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <h3>Nobody is sitting there</h3>
           <p>Everything boost does, plus <code>[idle.kill]</code> and
             <code>[idle.services]</code>: browsers, chat apps, tray icons and — unless you set
-            <code>KillExplorer=0</code> — the Windows shell itself.</p>
+            <code>KillExplorer=0</code> — the Windows shell, which is recycled and comes back
+            fresh rather than left dead.</p>
           <div class="keeps"><b>Survives:</b> <code>[protect]</code>,
-            <code>[protect.services]</code>, and networking. That is the entire exception.</div>
+            <code>[protect.tree]</code>, <code>[protect.services]</code>, the shell family, and
+            networking. That is the entire exception.</div>
         </div>
       </div>
 
@@ -217,7 +219,8 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         <strong>Restore desktop</strong> (or <code>--restore</code>) walks that list backwards:
         it starts the services again, relaunches whatever is listed in
         <code>[restore.launch]</code>, and brings back <code>explorer.exe</code> if idle mode
-        closed it.</p>
+        left the machine without a shell — normally it does not, because Windows rebuilds the
+        session itself.</p>
       <p><strong>Restore disarms the sentry first.</strong> If it did not, the sentry would shoot
         everything Restore just brought back on its next sweep, twenty seconds later.</p>
       <p>The sentry appends to the same state file, so anything it re-stops hours later still gets
@@ -534,7 +537,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         <table class="tbl">
           <thead><tr><th>Key</th><th style="width:78px">Default</th><th>Meaning</th></tr></thead>
           <tbody>
-            <tr><td class="n">KillExplorer</td><td class="n">1</td><td class="wrap-ok">Absolute idle closes the Windows shell — explorer, start menu, search host. About 450 MB. Set to <code>0</code> and idle leaves your desktop alone.</td></tr>
+            <tr><td class="n">KillExplorer</td><td class="n">1</td><td class="wrap-ok">Absolute idle recycles the Windows shell: explorer is terminated, Winlogon rebuilds the session, and the desktop, taskbar and Start menu come back fresh — a few hundred MB lighter than the shell that had been running all day. The screen flashes black, and open File Explorer windows do not survive it. Set to <code>0</code> and idle leaves the shell alone.</td></tr>
             <tr><td class="n">NetworkGuard</td><td class="n">1</td><td class="wrap-ok">The network guard: after every destructive step verify Sunshine + Tailscale are alive and restart them if not — and, whenever Idle Master runs, keep the standing watch over the connection (see <a href="#netguard">Network guard</a>).</td></tr>
             <tr><td class="n">TrimWorkingSets</td><td class="n">1</td><td class="wrap-ok">Squeeze the working set of every surviving process.</td></tr>
             <tr><td class="n">ClearStandbyList</td><td class="n">1</td><td class="wrap-ok">Purge the standby (cached) list, so Task Manager shows the memory as free.</td></tr>
@@ -612,10 +615,11 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <thead><tr><th>Section</th><th>What goes in it</th></tr></thead>
           <tbody>
             <tr><td class="n">[protect]</td><td class="wrap-ok">Process names never touched, whatever else any list says. Ships with the Windows core, Defender, the audio stack, the streaming stack, Docker and its WSL/Hyper-V backend, and Idle Master itself. <strong>This list wins over everything.</strong></td></tr>
+            <tr><td class="n">[protect.tree]</td><td class="wrap-ok">Apps spared <em>together with every helper process underneath them</em>. For the WebView2 and Electron family — WhatsApp, Discord — whose real work happens in child processes called <code>msedgewebview2</code>, a name that is on the boost list because most of the time it is junk. Sparing the parent alone leaves a tray icon with nothing behind it, no longer receiving anything. Ships with <code>WhatsApp*</code>. Do not put <code>svchost</code>, <code>services</code> or <code>explorer</code> here: everything descends from those.</td></tr>
             <tr><td class="n">[protect.services]</td><td class="wrap-ok">Services that get the guard: checked before the run finishes and re-checked while idle mode runs. Put your remote-access stack here.</td></tr>
             <tr><td class="n">[boost.kill]</td><td class="wrap-ok">Processes boost closes. Background clutter with no business running while you work.</td></tr>
             <tr><td class="n">[boost.services]</td><td class="wrap-ok">Services boost stops — indexer, telemetry, update and launcher services.</td></tr>
-            <tr><td class="n">[idle.kill]</td><td class="wrap-ok">Processes absolute idle closes <em>on top of</em> the boost list: browsers, chat apps, tray icons, shell pieces.</td></tr>
+            <tr><td class="n">[idle.kill]</td><td class="wrap-ok">Processes absolute idle closes <em>on top of</em> the boost list: browsers, chat apps, tray icons. Not the shell hosts — those are protected in code and handled by <code>KillExplorer</code> instead.</td></tr>
             <tr><td class="n">[idle.services]</td><td class="wrap-ok">Services absolute idle stops on top of the boost list.</td></tr>
             <tr><td class="n">[restore.launch]</td><td class="wrap-ok">Programs relaunched by Restore. Deliberately short — restore gives you a working machine back, not the bloat back. <code>path|arguments</code> per line.</td></tr>
             <tr><td class="n">[cleanup.protect]</td><td class="wrap-ok">Full paths disk cleanup must never touch. A path protects everything underneath it.</td></tr>
@@ -691,7 +695,9 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
       <h2>Recovery <a class="anchor" href="#recovery">#</a></h2>
 
       <h3>The desktop is gone — blank screen, no taskbar</h3>
-      <p>Expected, if absolute idle ran with <code>KillExplorer=1</code>. Task Manager is hosted by
+      <p>This should not last. With <code>KillExplorer=1</code>, absolute idle terminates the shell
+        and Winlogon rebuilds the session within seconds — a black flash, then the desktop, taskbar
+        and Start menu back and fresh. If the rebuild never arrives, Task Manager is hosted by
         winlogon, not explorer, so it still works with no shell running:</p>
       <ol class="steps">
         <li><b>Ctrl+Shift+Esc</b> to open Task Manager.</li>
@@ -700,9 +706,12 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
           privileges</em>.</li>
         <li>Press <b>Restore desktop</b>.</li>
       </ol>
-      <p>In a hurry, <em>Run new task</em> → <code>explorer.exe</code> brings the shell straight
-        back — but use Restore afterwards so the stopped services come back too. And if you would
-        rather never see this screen, set <code>KillExplorer=0</code>.</p>
+      <p>In a hurry, <em>Run new task</em> → <code>explorer.exe</code> brings the desktop straight
+        back — but use Restore afterwards so the stopped services come back too. Note that a shell
+        raised by hand this way may have a Start button that answers nothing: the packaged hosts
+        cannot be launched by path, they only return with a real session, so sign out and back in
+        if Start stays dead. And if you would rather never see this screen at all, set
+        <code>KillExplorer=0</code>.</p>
 
       <h3>A reboot fixes everything</h3>
       <p>Nothing is ever disabled, only stopped. If you cannot reach the machine any other way, a

@@ -25,8 +25,8 @@ Two modes:
   updaters, launcher services, tray webviews and the search indexer. Anything you
   opened yourself survives, and any process whose window is on screen is skipped.
 - **ABSOLUTE IDLE** is for a machine nobody is sitting at. It also closes
-  browsers, chat apps and the Windows shell, landing the machine near 1.5-2 GB in
-  use total - the Windows kernel and Defender floor.
+  browsers and chat apps, and recycles the Windows shell, landing the machine near
+  1.5-2 GB in use total - the Windows kernel and Defender floor.
 
 **Restore desktop** puts back exactly what the last run took away.
 
@@ -50,7 +50,7 @@ On a real machine with 15.9 GB total and 11.4 GB in use:
 | Claude desktop, 17 processes | 3.0 GB | absolute idle |
 | VPN client UI, service and updater | 760 MB | boost + idle |
 | msedgewebview2, 17 tray and widget hosts | 540 MB | boost |
-| Windows shell (explorer, search host) | 490 MB | absolute idle |
+| Windows shell (explorer, search host), recycled | 490 MB | absolute idle |
 | Razer Cortex, Central and services | 305 MB | boost |
 | NVIDIA overlay and ShadowPlay | 110 MB | boost |
 | Lenovo Vantage and add-ins | 90 MB | boost |
@@ -88,13 +88,22 @@ changes nothing.
   trash. No answer within 47 seconds means "trash once" by default (configurable).
 - **Open windows are never touched** in boost mode, including an app's background
   worker processes, resolved by walking the parent chain.
+- **`[protect.tree]` spares an app and every helper underneath it**, resolved the
+  same way. It exists for the WebView2 and Electron family: WhatsApp and Discord
+  do their real work in child processes named `msedgewebview2`, which is on the
+  boost list. Sparing the parent alone leaves a tray icon receiving nothing.
 - **Respawn backoff.** If one process returns 6 times, the sentry stops fighting it
   for 30 minutes rather than burning CPU in a kill loop.
 
-Absolute idle closes `explorer.exe`, which removes the taskbar and wallpaper. The
-recovery is Ctrl+Shift+Esc, File, Run new task, IdleMaster.exe, Restore desktop -
-Task Manager is hosted by winlogon so it works with no shell running. Setting
-`KillExplorer=0` disables this behaviour.
+Absolute idle terminates `explorer.exe` and Winlogon rebuilds the session on its
+own: the desktop, taskbar and Start menu come back within seconds, fresh and a few
+hundred MB lighter. The screen flashes black, and open File Explorer windows do
+not survive it. The whole shell family - explorer, sihost, StartMenuExperienceHost,
+ShellExperienceHost, ShellHost, SearchHost, TextInputHost - is protected in code,
+so no sweep can hunt the rebuild. If the rebuild never arrives, the recovery is
+Ctrl+Shift+Esc, File, Run new task, IdleMaster.exe, Restore desktop - Task Manager
+is hosted by winlogon so it works with no shell running. Setting `KillExplorer=0`
+disables this behaviour.
 
 ## Backup kit
 

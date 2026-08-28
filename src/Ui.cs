@@ -677,7 +677,7 @@ namespace IdleMaster
             new string[] { "OverclockedSentry",    "Overclocked sentry - while hunting, kill EVERYTHING not protected (no asking, no sparing)" },
             new string[] { "Tray",                 "Tray icon - closing the window hides to it" },
             new string[] { "StartWithWindows",     "Start Idle Master as you log in (saving here makes/removes the logon task)" },
-            new string[] { "KillExplorer",         "Absolute idle also closes the shell (taskbar, desktop)" },
+            new string[] { "KillExplorer",         "Absolute idle recycles the shell - desktop, taskbar and Start come back fresh" },
             new string[] { "NetworkGuard",         "Network guard - keep the link, Tailscale and Sunshine up; fix and reconnect when they drop" },
             new string[] { "TrimWorkingSets",      "Squeeze the working set of every surviving process" },
             new string[] { "ClearStandbyList",     "Purge the standby (cached) list" },
@@ -959,8 +959,7 @@ namespace IdleMaster
             Controls.Add(tabs);
 
             tabs.TabPages.Add(SettingsTab());
-            tabs.TabPages.Add(Pair("Never touch", "protect", "Processes that survive everything",
-                                                  "protect.services", "Services that survive everything"));
+            tabs.TabPages.Add(NeverTouch());
             tabs.TabPages.Add(Pair("Boost now", "boost.kill", "Processes closed by Boost",
                                                 "boost.services", "Services stopped by Boost"));
             tabs.TabPages.Add(Pair("Absolute idle", "idle.kill", "Also closed by Absolute Idle",
@@ -1111,6 +1110,45 @@ namespace IdleMaster
 
             panes.Add(left);
             panes.Add(right);
+            return page;
+        }
+
+        // Three lists, not two: processes on the left, and the right column
+        // split between services and whole process trees. "Whole tree" is its
+        // own list because it is a different promise - it spares the helpers
+        // an app spawned under a name of their own, which is the only way to
+        // keep a WebView2 app (WhatsApp, Discord) alive while its msedgewebview2
+        // workers stay on the kill list.
+        private TabPage NeverTouch()
+        {
+            TabPage page = new TabPage("Never touch");
+            page.BackColor = Theme.Panel;
+
+            ListPane procs = new ListPane(ini, "protect",
+                "Processes that survive everything", false);
+            ListPane svcs = new ListPane(ini, "protect.services",
+                "Services that survive everything", true);
+            ListPane trees = new ListPane(ini, "protect.tree",
+                "...and these, helper processes included", false);
+            page.Controls.Add(procs);
+            page.Controls.Add(svcs);
+            page.Controls.Add(trees);
+
+            page.Resize += delegate
+            {
+                int h = page.ClientSize.Height - 8;
+                int half = (page.ClientSize.Width - 12) / 2;
+                procs.SetBounds(4, 4, half, h);
+                // The tree list is short by nature - a handful of apps - so it
+                // takes the smaller share of the right column.
+                int top = (h - 4) * 3 / 5;
+                svcs.SetBounds(8 + half, 4, half, top);
+                trees.SetBounds(8 + half, 12 + top, half, h - top - 8);
+            };
+
+            panes.Add(procs);
+            panes.Add(svcs);
+            panes.Add(trees);
             return page;
         }
 
@@ -4572,8 +4610,9 @@ namespace IdleMaster
             string msg = "This closes every app you have open - browsers, Claude, all of it - and strips"
                 + " the machine to Windows vitals."
                 + (cfg.KillExplorer
-                    ? "\n\nThe screen flashes black for a moment while the shell goes down; the desktop"
-                      + " stays usable afterwards."
+                    ? "\n\nThe screen flashes black for a moment while Windows rebuilds the shell."
+                      + " The desktop, taskbar and Start menu come back on their own, fresh - open"
+                      + " File Explorer windows do not survive it."
                     : "")
                 + "\n\nSunshine and Tailscale stay up, so you can still reach this machine."
                 + " 'Restore desktop' brings everything back."

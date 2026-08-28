@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.10.0.0")]
-[assembly: AssemblyFileVersion("0.10.0.0")]
+[assembly: AssemblyVersion("0.11.0.0")]
+[assembly: AssemblyFileVersion("0.11.0.0")]
 
 namespace IdleMaster
 {
@@ -88,6 +88,12 @@ namespace IdleMaster
             }
             catch (Exception) { return 0; }
         }
+
+        // The hidden Ctrl+Shift+right-click "Exit Explorer" message (WM_USER+436)
+        // used to live here. It shut the shell down cleanly and, crucially, Winlogon
+        // did NOT relaunch userinit afterwards - which is precisely the wrong thing:
+        // no relaunch means no session rebuild, and the packaged hosts never return.
+        // RecycleShell terminates instead, on purpose. See the comment there.
 
         internal delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -288,6 +294,7 @@ namespace IdleMaster
 
         public readonly List<string> Protect = new List<string>();
         public readonly List<string> ProtectServices = new List<string>();
+        public readonly List<string> ProtectTree = new List<string>();   // the app AND its helper processes
         public readonly List<string> BoostKill = new List<string>();
         public readonly List<string> BoostServices = new List<string>();
         public readonly List<string> IdleKill = new List<string>();
@@ -378,6 +385,7 @@ namespace IdleMaster
                 {
                     case "protect": c.Protect.Add(item); break;
                     case "protect.services": c.ProtectServices.Add(line); break;
+                    case "protect.tree": c.ProtectTree.Add(item); break;
                     case "boost.kill": c.BoostKill.Add(item); break;
                     case "boost.services": c.BoostServices.Add(line); break;
                     case "idle.kill": c.IdleKill.Add(item); break;
@@ -438,6 +446,7 @@ namespace IdleMaster
             CleanupBigDirMinMb = o.CleanupBigDirMinMb;
 
             Swap(Protect, o.Protect); Swap(ProtectServices, o.ProtectServices);
+            Swap(ProtectTree, o.ProtectTree);
             Swap(BoostKill, o.BoostKill); Swap(BoostServices, o.BoostServices);
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
@@ -522,8 +531,14 @@ namespace IdleMaster
 # Process names are matched WITHOUT the .exe (writing .exe is fine, it is stripped).
 
 [settings]
-# ABSOLUTE IDLE closes the Windows shell (explorer + start menu + search host).
-# Frees ~450 MB. To get the desktop back: Ctrl+Shift+Esc -> Run new task -> IdleMaster.exe
+# ABSOLUTE IDLE recycles the Windows shell. Explorer is terminated, Winlogon
+# rebuilds the session, and the desktop, taskbar and Start menu come back on
+# their own - fresh, and a few hundred MB lighter than the shell that had been
+# running all day. This is the half of idle that restarts the machine without
+# restarting it: the shell is the biggest thing on the box that cannot be
+# trimmed, only replaced. The screen flashes black for a moment, and open File
+# Explorer windows do not survive it. The shell family is protected in code, so
+# the sentry never hunts the rebuild.
 KillExplorer=1
 # The network guard: after every destructive step it verifies Sunshine + Tailscale
 # are alive and restarts them if not - and, whenever Idle Master is running, it
@@ -742,6 +757,24 @@ Themes
 TextInputManagementService
 
 # ---------------------------------------------------------------------------
+# NEVER touched - the app AND every helper process underneath it.
+#
+# [protect] above matches one name. That is not enough for the WebView2 and
+# Electron family: WhatsApp, Discord and friends do their real work in child
+# processes called msedgewebview2, which sit on the kill list below because
+# most of the time they ARE junk. Spare only the parent and you get the worst
+# outcome - a tray app still running, with nothing behind it, quietly not
+# receiving your messages. Name the app here and its whole tree is off limits.
+#
+# Do not move svchost, services or explorer in here. Every process on the
+# machine descends from one of those, so this list would spare all of them.
+[protect.tree]
+# A messenger closes to the tray on purpose - that is not it being idle, that
+# is it doing its job. Killed there it stops receiving messages until you next
+# open the window, and then it has to re-sync from the phone.
+WhatsApp*
+
+# ---------------------------------------------------------------------------
 # BOOST NOW - background junk that has no business running while you work.
 # ---------------------------------------------------------------------------
 [boost.kill]
@@ -768,10 +801,10 @@ NVIDIA Web Helper
 nvsphelper64
 # WebView2 hosts for widgets/tray apps (~536 MB) - they respawn on demand
 msedgewebview2
-# WhatsApp lingers in RAM after its window closes (host runs as WhatsApp.Root).
-# SkipOpenApps spares the whole tree while the window is on screen; closed, it
-# is background residue like the rest.
-WhatsApp*
+# WhatsApp used to be here, on the theory that a closed window meant residue.
+# It does not: the window is closed most of the time and the process is what
+# receives your messages. It lives in [protect.tree] now, which also covers the
+# msedgewebview2 workers it runs on - see the note up there.
 # Windows widgets & phone link junk
 Widgets
 WidgetService
@@ -838,13 +871,11 @@ Code
 SecurityHealthSystray
 RtkAudUService64
 FnHotkeyCapsLKNumLK
-# shell pieces (only if KillExplorer=1 - explorer itself is handled separately)
-StartMenuExperienceHost
-SearchHost
-ShellHost
-ShellExperienceHost
-TextInputHost
-sihost
+# The shell hosts - StartMenuExperienceHost, sihost, SearchHost, ShellHost,
+# ShellExperienceHost, TextInputHost - are NOT listed here, and listing them does
+# nothing: they are protected in code, like Tailscale. KillExplorer=1 recycles the
+# whole session instead, which takes them down and brings them back fresh. Killing
+# them on their own is what leaves a taskbar whose Start button answers nothing.
 LockApp
 backgroundTaskHost
 RuntimeBroker
@@ -1210,20 +1241,19 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
     // The shell is deliberately blind here: explorer owns the desktop and the
     // taskbar, and it is also the ancestor of everything launched from them -
     // counting its windows would spare the whole session.
-    internal sealed class WindowGuard
+    // pid -> parent pid and pid -> name, from one Toolhelp snapshot, so that
+    // every question a sweep asks about the shape of the process tree is
+    // answered against the same instant. Two of them need it: "does this app
+    // own a window" (WindowGuard) and "is this helper part of an app that
+    // [protect.tree] covers" (Engine.IsProtectedTree).
+    internal sealed class ProcTree
     {
-        private readonly HashSet<int> windowPids = new HashSet<int>();
         private readonly Dictionary<int, int> parentOf = new Dictionary<int, int>();
+        private readonly Dictionary<int, string> nameOf = new Dictionary<int, string>();
 
-        // Names Spares() actually saved, so callers can log each once.
-        public readonly HashSet<string> SparedNames =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        public static WindowGuard Snapshot()
+        public static ProcTree Snapshot()
         {
-            WindowGuard g = new WindowGuard();
-
-            HashSet<int> shell = new HashSet<int>();
+            ProcTree t = new ProcTree();
             IntPtr snap = IntPtr.Zero;
             try
             {
@@ -1236,10 +1266,14 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     {
                         do
                         {
-                            g.parentOf[(int)e.th32ProcessID] = (int)e.th32ParentProcessID;
-                            if (string.Equals(e.szExeFile, "explorer.exe",
-                                    StringComparison.OrdinalIgnoreCase))
-                                shell.Add((int)e.th32ProcessID);
+                            int pid = (int)e.th32ProcessID;
+                            t.parentOf[pid] = (int)e.th32ParentProcessID;
+                            // Held without the .exe - the way the lists and
+                            // Process.ProcessName both spell a name.
+                            string n = e.szExeFile ?? "";
+                            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                                n = n.Substring(0, n.Length - 4);
+                            t.nameOf[pid] = n;
                         }
                         while (Native.Process32NextW(snap, ref e));
                     }
@@ -1251,6 +1285,53 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 if (snap != IntPtr.Zero && snap != (IntPtr)(-1))
                     try { Native.CloseHandle(snap); } catch (Exception) { }
             }
+            return t;
+        }
+
+        public bool Knows(int pid) { return parentOf.ContainsKey(pid); }
+
+        public string NameOf(int pid)
+        {
+            string n;
+            return nameOf.TryGetValue(pid, out n) ? n : null;
+        }
+
+        // The pid and every ancestor still in the tree, nearest first. Capped
+        // and cycle-guarded: a parent pid is handed out again once the parent
+        // dies, and a stale link must not turn the walk into a loop.
+        public List<int> Lineage(int pid)
+        {
+            List<int> line = new List<int>();
+            HashSet<int> seen = new HashSet<int>();
+            int cur = pid;
+            for (int hops = 0; hops < 64 && cur > 4 && seen.Add(cur); hops++)
+            {
+                line.Add(cur);
+                int up;
+                if (!parentOf.TryGetValue(cur, out up)) break;
+                cur = up;
+            }
+            return line;
+        }
+    }
+
+    internal sealed class WindowGuard
+    {
+        private readonly HashSet<int> windowPids = new HashSet<int>();
+        private ProcTree tree;
+
+        // Pids the tree had never heard of even after a refresh, so one dead
+        // pid cannot make every sweep take a fresh snapshot.
+        private readonly HashSet<int> unknown = new HashSet<int>();
+
+        // Names Spares() actually saved, so callers can log each once.
+        public readonly HashSet<string> SparedNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static WindowGuard Snapshot()
+        {
+            WindowGuard g = new WindowGuard();
+            g.tree = ProcTree.Snapshot();
 
             try
             {
@@ -1260,7 +1341,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     {
                         uint pid;
                         Native.GetWindowThreadProcessId(h, out pid);
-                        if (pid != 0 && !shell.Contains((int)pid))
+                        if (pid != 0 && !string.Equals(g.tree.NameOf((int)pid), "explorer",
+                                            StringComparison.OrdinalIgnoreCase))
                             g.windowPids.Add((int)pid);
                     }
                     return true;
@@ -1285,23 +1367,25 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         }
 
         // True when the pid, or any ancestor still in the tree, owns a window.
-        // Capped and cycle-guarded: parent pids can be reused after the parent
-        // dies, and a stale link must not turn the walk into a loop. A rare
-        // false spare from pid reuse just postpones a kill to the next sweep.
+        // A rare false spare from pid reuse just postpones a kill to the next
+        // sweep.
+        //
+        // A helper started AFTER the snapshot is not in the tree yet, and a
+        // walk that cannot find its parent reads as "no window above it" - the
+        // one case where sparing an app still kills the worker it spawned a
+        // second ago. So the parent links are refreshed for a pid the tree has
+        // never seen. The windows are not: those belong to the instant this
+        // sweep is judging, and re-reading them mid-sweep would let a window
+        // that opened since the census spare things the census already listed.
         public bool Spares(int pid, string name)
         {
-            int cur = pid;
-            HashSet<int> seen = new HashSet<int>();
-            for (int hops = 0; hops < 64 && cur > 4 && seen.Add(cur); hops++)
+            if (!tree.Knows(pid) && unknown.Add(pid)) tree = ProcTree.Snapshot();
+
+            foreach (int cur in tree.Lineage(pid))
             {
-                if (windowPids.Contains(cur))
-                {
-                    if (name != null) SparedNames.Add(name);
-                    return true;
-                }
-                int up;
-                if (!parentOf.TryGetValue(cur, out up)) break;
-                cur = up;
+                if (!windowPids.Contains(cur)) continue;
+                if (name != null) SparedNames.Add(name);
+                return true;
             }
             return false;
         }
@@ -1367,8 +1451,33 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             "sunshine", "sunshinesvc",
         };
 
+        // The Windows shell, as one unit. Absolute Idle recycles the whole thing
+        // (see RecycleShell) and Winlogon rebuilds it; nothing that sweeps on a
+        // timer may touch a member of it, Overclocked included. A terminated shell
+        // is back within seconds, so hunting it is an endless session-teardown
+        // loop, not a saving - two of those took the machine down hard on
+        // 2026-08-27. The packaged hosts cannot be started any other way either:
+        // launched by path, StartMenuExperienceHost.exe fails its stack check and
+        // puts a crash box on the screen. They come back with the session, or not
+        // at all - which is why killing them one by one leaves a taskbar whose
+        // Start button answers nothing.
+        internal static readonly string[] ShellFamily = new string[]
+        {
+            "explorer", "sihost", "StartMenuExperienceHost",
+            "ShellExperienceHost", "ShellHost", "SearchHost", "TextInputHost",
+        };
+
+        public static bool IsShellFamily(string name)
+        {
+            foreach (string s in ShellFamily)
+                if (string.Equals(s, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
         public bool IsProtectedProcess(string name)
         {
+            if (IsShellFamily(name)) return true;
             foreach (string p in NeverKill)
                 if (Match(p, name)) return true;
             foreach (string p in cfg.Protect)
@@ -1383,6 +1492,51 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return false;
         }
 
+        // ---- [protect.tree]: an app AND every helper underneath it
+
+        // A per-name list cannot say this. WhatsApp, Discord and the rest of
+        // the WebView2/Electron family do their real work in child processes
+        // that carry a name of their own - msedgewebview2 - and that name is
+        // on the kill list because most of the time it IS junk. Sparing only
+        // the parent leaves a tray app that is still running and no longer
+        // receiving anything, which is worse than closing it outright. Naming
+        // the app here spares the whole tree under it instead.
+        //
+        // Deliberately NOT the same list as [protect]: that one holds svchost,
+        // services and explorer, and every process on the machine descends
+        // from one of those, so walking ancestors against it would spare the
+        // entire session.
+        private ProcTree tree;
+        private readonly HashSet<int> treeUnknown = new HashSet<int>();
+
+        // Called once at the top of a sweep, so every pid it judges is weighed
+        // against the same tree.
+        public void RefreshTree()
+        {
+            if (cfg.ProtectTree.Count == 0) return;
+            tree = ProcTree.Snapshot();
+            treeUnknown.Clear();
+        }
+
+        public bool IsProtectedTree(int pid)
+        {
+            if (cfg.ProtectTree.Count == 0) return false;
+            if (tree == null) tree = ProcTree.Snapshot();
+            // Same race as WindowGuard.Spares: a helper spawned since the
+            // snapshot has no parent link yet, and would look like an orphan
+            // on the kill list. One refresh per unseen pid, then let it go.
+            if (!tree.Knows(pid) && treeUnknown.Add(pid)) tree = ProcTree.Snapshot();
+
+            foreach (int cur in tree.Lineage(pid))
+            {
+                string n = tree.NameOf(cur);
+                if (n == null) continue;
+                foreach (string p in cfg.ProtectTree)
+                    if (Match(p, n)) return true;
+            }
+            return false;
+        }
+
         // One census of what is running, grouped by name, so the sentry can ask
         // about an app once instead of once per process. Nothing is killed here.
         // 'skip' holds names in respawn backoff; 'sparePid' is the foreground app;
@@ -1391,6 +1545,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         {
             Dictionary<string, Candidate> byName = new Dictionary<string, Candidate>();
             int me = Process.GetCurrentProcess().Id;
+            RefreshTree();
 
             foreach (Process p in Process.GetProcesses())
             {
@@ -1406,6 +1561,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     string key = name.ToLowerInvariant();
                     if (skip != null && skip.Contains(key)) continue;
                     if (IsProtectedProcess(name)) continue;
+                    if (IsProtectedTree(pid)) continue;
                     if (guard != null && guard.Spares(pid, name)) continue;
 
                     Candidate c;
@@ -1435,11 +1591,12 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         // Which list a name sits on, highest claim first. "" = untouched.
         public string TagOf(string name)
         {
+            if (IsShellFamily(name))
+                return cfg.KillExplorer ? "IDLE" : "KEEP";
             if (IsProtectedProcess(name)) return "KEEP";
+            if (OnList(cfg.ProtectTree, name)) return "KEEP";
             if (OnList(cfg.BoostKill, name)) return "BOOST";
             if (OnList(cfg.IdleKill, name)) return "IDLE";
-            if (cfg.KillExplorer && string.Equals(name, "explorer", StringComparison.OrdinalIgnoreCase))
-                return "IDLE";
             return "";
         }
 
@@ -1497,6 +1654,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     p = Process.GetProcessById(pid);
                     long ws = p.WorkingSet64;
                     if (IsProtectedProcess(p.ProcessName)) continue;
+                    if (IsProtectedTree(pid)) continue;
                     if (guard != null && guard.Spares(pid, p.ProcessName)) continue;
                     p.Kill();
                     p.WaitForExit(3000);
@@ -1529,6 +1687,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             int me = Process.GetCurrentProcess().Id;
             long freed = 0;
             int count = 0;
+            RefreshTree();
             Dictionary<string, long> perName = new Dictionary<string, long>();
 
             foreach (Process p in Process.GetProcesses())
@@ -1546,6 +1705,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     if (Match(pat, name)) { hit = true; break; }
                 if (!hit) continue;
 
+                if (IsProtectedTree(p.Id)) continue;
                 if (guard != null && guard.Spares(p.Id, name)) continue;
 
                 try
@@ -1808,30 +1968,91 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // ---- explorer
 
-        private void KillExplorer(StateFile state)
+        // Recycle, don't decapitate. Winlogon's AutoRestartShell relaunches userinit
+        // the instant explorer is TERMINATED, and that rebuild is the entire point:
+        // it brings sihost, StartMenuExperienceHost, SearchHost and the rest of the
+        // packaged hosts back as one fresh, correctly-activated set, a few hundred MB
+        // lighter than the session that had been running all day. The shell is the
+        // biggest thing on the box that cannot be trimmed, only replaced. Absolute
+        // Idle is a restart of the session without a restart of the machine.
+        //
+        // Asking the shell to exit cleanly is what this did before, and it left the
+        // machine half-dead: explorer stayed down, and bringing it back by hand does
+        // not bring the packaged hosts with it - you get a taskbar with a Start button
+        // that answers nothing, which is exactly what happened on 2026-08-28.
+        //
+        // The 2026-08-27 crash loops were the sentry hunting a shell Winlogon kept
+        // rebuilding. That cannot recur: the whole family is protected in code now,
+        // so the kill below is the only one and nothing sweeps for them afterwards.
+        private void RecycleShell(StateFile state)
         {
-            log("-- closing the Windows shell");
-            bool any = false;
-            foreach (Process p in Process.GetProcessesByName("explorer"))
+            log("-- recycling the Windows shell");
+
+            Process[] shells = Process.GetProcessesByName("explorer");
+            if (shells.Length == 0)
             {
-                try { p.Kill(); p.WaitForExit(4000); any = true; }
+                state.ExplorerKilled = false;
+                log("   (explorer was not running)");
+                StartExplorer();
+                return;
+            }
+
+            foreach (Process p in shells)
+            {
+                try { p.Kill(); p.WaitForExit(4000); }
                 catch (Exception ex) { log("   ! explorer: " + ex.Message.Split('\n')[0]); }
             }
-            state.ExplorerKilled = any;
-            log(any
-                ? "   x explorer closed. Ctrl+Shift+Esc still opens Task Manager if you need a way back."
-                : "   (explorer was not running)");
+            state.ExplorerKilled = true;
+            log("   x shell terminated - Winlogon is rebuilding the session");
+
+            // Winlogon is usually done inside four seconds. Wait on the Start menu
+            // host specifically: explorer on its own is the half-dead state above.
+            bool shell = false, start = false;
+            for (int i = 0; i < 150; i++)
+            {
+                shell = Process.GetProcessesByName("explorer").Length > 0;
+                start = Process.GetProcessesByName("StartMenuExperienceHost").Length > 0;
+                if (shell && start) break;
+                Thread.Sleep(100);
+            }
+
+            if (shell && start)
+                log("   + session rebuilt - desktop, taskbar and Start are back, fresh");
+            else if (shell)
+                log("   + desktop is back, but the Start menu host has not appeared yet");
+            else
+            {
+                log("   ! Winlogon did not rebuild the session - starting the shell by hand.");
+                log("     If Start stays dead, sign out and back in: the packaged hosts only");
+                log("     come back with a real session, they cannot be launched by path.");
+                StartExplorer();
+            }
         }
 
+        // The fallback path only. Absolute Idle recycles the shell and Winlogon puts
+        // the session back on its own; this is what Restore uses when it finds no
+        // desktop at all, and what RecycleShell falls back to if the rebuild never
+        // came. It starts explorer and nothing else - the packaged hosts cannot be
+        // launched by path, so a shell raised this way may still have a dead Start.
         private void StartExplorer()
         {
-            if (Process.GetProcessesByName("explorer").Length > 0) return;
-            try
+            for (int attempt = 0; attempt < 2; attempt++)
             {
-                Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true });
-                log("   + explorer restarted");
+                if (Process.GetProcessesByName("explorer").Length > 0)
+                {
+                    if (attempt > 0) log("   + explorer restarted");
+                    return;
+                }
+                try
+                {
+                    Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true });
+                }
+                catch (Exception ex) { log("   ! could not start explorer: " + ex.Message); }
+                for (int i = 0; i < 50 && Process.GetProcessesByName("explorer").Length == 0; i++)
+                    Thread.Sleep(100);
             }
-            catch (Exception ex) { log("   ! could not start explorer: " + ex.Message); }
+            if (Process.GetProcessesByName("explorer").Length > 0) log("   + explorer restarted");
+            else log("   ! the desktop did not come back - Ctrl+Shift+Esc -> Run new task -> explorer.exe");
         }
 
         // ---- modes
@@ -1871,7 +2092,6 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             if (mode == "idle")
             {
                 pats.AddRange(cfg.IdleKill);
-                if (cfg.KillExplorer) pats.Add("explorer");
             }
             else if (cfg.CloseBrowsersInBoost)
             {
@@ -1905,7 +2125,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             KillList(cfg.IdleKill, "closing everything a human would use");
             StopServices(cfg.IdleServices, state, "stopping the rest");
 
-            if (cfg.KillExplorer) KillExplorer(state);
+            if (cfg.KillExplorer) RecycleShell(state);
 
             log("-- final check on Sunshine + Tailscale");
             bool ok = NetworkGuard(true);

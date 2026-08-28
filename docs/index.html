@@ -200,7 +200,8 @@
         <span class="tag">ABSOLUTE IDLE</span>
         <h3>Down to ~1.5–2 GB in use</h3>
         <p>For a machine that just started or have to stay awaken. Browsers, chat apps, the shell itself — the
-           whole box drops to Windows kernel, Defender, and the things you told it to keep.</p>
+           whole box drops to Windows kernel, Defender, and the things you told it to keep.
+           The shell is recycled, not left dead: Windows rebuilds it, fresh and lighter.</p>
         <div class="keeps"><b>Survives:</b> your protected list, and networking. That is the entire exception.</div>
       </div>
     </div>
@@ -296,7 +297,7 @@
           <tr><td>Claude desktop (17 processes)</td><td class="n">3.0 GB</td><td><span class="pill i">IDLE</span></td></tr>
           <tr><td>NordVPN UI + service + updater</td><td class="n">760 MB</td><td><span class="pill b">BOOST</span> <span class="pill i">IDLE</span></td></tr>
           <tr><td>msedgewebview2 (17 tray/widget hosts)</td><td class="n">540 MB</td><td><span class="pill b">BOOST</span></td></tr>
-          <tr><td>Windows shell (explorer, search host)</td><td class="n">490 MB</td><td><span class="pill i">IDLE</span></td></tr>
+          <tr><td>Windows shell (explorer, search host) — recycled, comes back fresh</td><td class="n">490 MB</td><td><span class="pill i">IDLE</span></td></tr>
           <tr><td>Razer Cortex + Central + services</td><td class="n">305 MB</td><td><span class="pill b">BOOST</span></td></tr>
           <tr><td>NVIDIA overlay / ShadowPlay</td><td class="n">110 MB</td><td><span class="pill b">BOOST</span></td></tr>
           <tr><td>Lenovo Vantage + add-ins</td><td class="n">90 MB</td><td><span class="pill b">BOOST</span></td></tr>
@@ -440,12 +441,16 @@
            counts as <em>keep it</em> — the tool should never be the reason you lost work.</p>
 
         <div class="note">
-          <b>The one scary part.</b> Absolute idle closes <code>explorer.exe</code> — your
-          taskbar and wallpaper disappear. If you connect in to a blank screen:
-          <b style="color:var(--fg)">Ctrl+Shift+Esc</b> → File → Run new task → browse to
-          <code>IdleMaster.exe</code> → Restore desktop. Task Manager is handled by winlogon,
+          <b>The shell is recycled, not decapitated.</b> Absolute idle terminates
+          <code>explorer.exe</code>, and Winlogon rebuilds the session on its own — desktop,
+          taskbar and Start menu come back within seconds, fresh and a few hundred MB lighter
+          than the shell that had been running all day. The screen flashes black while that
+          happens, and open File Explorer windows do not survive it. The whole shell family is
+          protected in code, so the sentry can never hunt the rebuild. If it ever fails to
+          arrive: <b style="color:var(--fg)">Ctrl+Shift+Esc</b> → File → Run new task → browse
+          to <code>IdleMaster.exe</code> → Restore desktop — Task Manager is handled by winlogon,
           so it works with no shell running. Or set <code>KillExplorer=0</code> and idle mode
-          leaves the desktop alone.
+          leaves the shell alone.
         </div>
       </div>
     </div>

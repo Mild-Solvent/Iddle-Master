@@ -110,7 +110,7 @@ Measured, not guessed — 15.9 GB total, 11.4 GB in use at the time of the scan:
 | NordVPN UI + service + threat protection + updater | 760 MB | UI in boost, services in idle |
 | msedgewebview2 (widget/tray hosts, 17 processes) | 540 MB | boost |
 | Razer Cortex + Central + CefSharp + GameManagerService3 | 305 MB | boost |
-| Windows shell (explorer, start menu, search host, text input) | 490 MB | idle |
+| Windows shell (explorer, start menu, search host, text input) | 490 MB | idle (recycled, not left dead) |
 | NVIDIA overlay / ShadowPlay | 110 MB | boost |
 | Lenovo Vantage + add-ins | 90 MB | boost |
 | Tailscale tray icon (the daemon is untouched) | 68 MB | idle |
@@ -369,6 +369,17 @@ a kill list. Sunshine, tailscaled, Defender, lsass, the audio stack, the NVIDIA
 all in there. Docker is protected on purpose: containers you left running matter
 more than the RAM the backend costs. Take it out of `[protect]` if you disagree.
 
+**`[protect.tree]` spares an app *and* its helpers.** A name-matched list cannot
+save a WebView2 or Electron app: WhatsApp, Discord and their family do the real
+work in child processes called `msedgewebview2`, and that name is on the boost
+list because most of the time it genuinely is junk. Spare only the parent and you
+get the worst outcome — a tray icon still sitting there, with nothing behind it,
+quietly not receiving your messages. Name the app in `[protect.tree]` (it ships
+with `WhatsApp*`) and everything underneath it is off limits too. It is a
+separate list from `[protect]` on purpose: that one holds `svchost`, `services`
+and `explorer`, and every process on the machine descends from one of those, so
+walking ancestors against it would spare the entire session.
+
 **Network guard.** Before finishing (and mid-run, in idle mode) it verifies that
 `SunshineService` and `Tailscale` are running, that something is listening on a
 Sunshine port, and that the Tailscale adapter is up. If a service died as
@@ -385,15 +396,35 @@ sentry appends to the same file, so anything it re-stops later still gets undone
 signals the sentry to stand down — otherwise the sentry would shoot everything
 Restore just brought back, on its next sweep.
 
-**The shell is the one scary part.** Absolute idle closes `explorer.exe` — that's
-~490 MB with the start menu and search host that follow it. Your taskbar and
-desktop wallpaper disappear. If you stream in and get a blank screen:
+**The shell is recycled, not decapitated.** Absolute idle terminates
+`explorer.exe` — and Winlogon rebuilds the session on its own, the way it always
+does when the shell dies. The desktop, taskbar and Start menu come back within a
+few seconds, fresh, and a few hundred MB lighter than the shell that had been
+running all day. That is the point: the shell is the biggest thing on the box
+that cannot be trimmed, only replaced, so absolute idle is a restart of the
+session without a restart of the machine.
+
+The screen flashes black while that happens, and open File Explorer windows do
+not survive it. Nothing else changes — your apps are already closed by then, and
+Sunshine and Tailscale are untouched.
+
+Two things make this safe rather than scary, and both are in code, not in a list:
+
+- The whole shell family — `explorer`, `sihost`, `StartMenuExperienceHost`,
+  `ShellExperienceHost`, `ShellHost`, `SearchHost`, `TextInputHost` — is
+  protected from every sweep. The sentry cannot hunt the rebuild Winlogon just
+  started, and killing those hosts one by one is what used to leave a taskbar
+  whose Start button answered nothing. They come back with the session or not at
+  all: launched by path, `StartMenuExperienceHost.exe` fails its own stack check.
+- The run waits for the rebuild and says what it found — desktop and Start back,
+  desktop only, or nothing — and starts the shell by hand if Winlogon did not.
+
+If the rebuild ever fails to arrive, Task Manager is hosted by winlogon, not
+explorer, so the way back still works with no shell running:
 
 > **Ctrl+Shift+Esc** → File → Run new task → browse to `IdleMaster.exe` → **Restore desktop**
 
-Task Manager is handled by winlogon, not explorer, so that shortcut works with no
-shell running. If you'd rather not risk it, set `KillExplorer=0` in the ini and
-idle mode leaves the desktop alone.
+Set `KillExplorer=0` in the ini and idle mode leaves the shell alone.
 
 ## Tuning it
 
