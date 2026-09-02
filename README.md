@@ -41,13 +41,14 @@ place, keeping `idlemaster.ini` exactly as you left it.
 
 Or let the app do it. It **asks GitHub on its own** — a minute after start, then
 every `UpdateCheckHours` (6; 0 turns it off) — and if there is something newer
-you get a tray toast, the button turns into **Update to vX**, and the tray menu
-grows an *Update now*. **One click** downloads that release's installer, hands
-over to it silently, pointed at the folder this copy is running from (so a
-portable copy updates where it stands), and Idle Master comes back on its own
-with your `idlemaster.ini` untouched. **Check for updates** still asks right now
-and tells you where you stand — *v0.6.1 is the newest*, or *v0.7.0 is available*.
-Nothing is downloaded until you click.
+you get a tray toast, **the arrow in the top right corner turns green**, and the
+tray menu grows an *Update now*. **One click** on that arrow downloads the
+release's installer, hands over to it silently, pointed at the folder this copy
+is running from (so a portable copy updates where it stands), and Idle Master
+comes back on its own with your `idlemaster.ini` untouched. The arrow is white
+while there is nothing to say, and clicking it then asks right now and tells you
+where you stand — *v0.6.1 is the newest*, or *v0.7.0 is available*. Nothing is
+downloaded until you click.
 
 Silent, for scripts:
 
