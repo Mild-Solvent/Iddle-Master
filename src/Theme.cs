@@ -50,6 +50,7 @@ namespace IdleMaster
         public static Font Base()  { return new Font("Segoe UI", 9f); }
         public static Font Bold()  { return new Font("Segoe UI", 9f, FontStyle.Bold); }
         public static Font Small() { return new Font("Segoe UI", 8f); }
+        public static Font Tag()   { return new Font("Segoe UI", 7.5f, FontStyle.Bold); }
         public static Font Big()   { return new Font("Segoe UI", 13f, FontStyle.Bold); }
         public static Font Title() { return new Font("Segoe UI", 20f, FontStyle.Bold); }
         public static Font Mono()  { return new Font("Consolas", 9f); }
@@ -78,6 +79,17 @@ namespace IdleMaster
         }
 
         private static int Cap(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+
+        // A colour part of the way towards another one - how a band rule under
+        // the big buttons gets a quieter version of an existing hue instead of
+        // a new colour nobody chose.
+        public static Color Mix(Color a, Color b, double t)
+        {
+            if (t < 0) t = 0; else if (t > 1) t = 1;
+            return Color.FromArgb((int)(a.R + (b.R - a.R) * t),
+                                  (int)(a.G + (b.G - a.G) * t),
+                                  (int)(a.B + (b.B - a.B) * t));
+        }
 
         public static Button Button(string text, Color back, Color fore)
         {
