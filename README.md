@@ -173,8 +173,16 @@ the path — so *Update.exe, 300 MB* reads as *Discord Inc.* before you decide.
   it is on. The log said *"claude is protected from now on"* and the ini never
   changed. The duplicate check is now scoped to the section being written.)
 - **Trash once** — closed now, nothing written; if it comes back you are asked again.
-- **Always trash** — closed now and every time it returns (an unlisted name goes
-  into `[boost.kill]`, so the lists learn from what you actually do).
+- **Always trash** — closed now and every time it returns. The name is written
+  into `[ask.never]`, and an unlisted one also into `[boost.kill]`, so the lists
+  learn from what you actually do. (Through 0.13.3 the only record of *always*
+  was the census — which is memory, and forgets at the next start. Worse, a name
+  a kill list already covered had nothing to append there at all, so the answer
+  was written nowhere: Lenovo Vantage's add-ins, restarted by their own service
+  minutes after every boot, asked the same question every single day no matter
+  how many times you had answered it. `[ask.never]` is the half of the answer
+  that now survives the app; the **Answered** tab in advanced settings is where
+  you take a name back off it.)
 
 No answer in 47 seconds means whatever `AskTimeoutAction` says — *trash once* by
 default, or `keep` / `always` if you prefer; the toast's last line tells you which.

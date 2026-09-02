@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.14.0.0")]
-[assembly: AssemblyFileVersion("0.14.0.0")]
+[assembly: AssemblyVersion("0.16.0.0")]
+[assembly: AssemblyFileVersion("0.16.0.0")]
 
 namespace IdleMaster
 {
@@ -406,6 +406,7 @@ namespace IdleMaster
         public readonly List<string> DebloatProtect = new List<string>();
         public readonly List<string> NetworkWifi = new List<string>();    // preferred Wi-Fi profiles, in order
         public readonly List<string> RemoteApps = new List<string>();     // apps the remote-desktop watch keeps connected
+        public readonly List<string> AskNever = new List<string>();       // already answered "Always trash" - closed on sight, no toast
 
         public static string Path_ { get { return System.IO.Path.Combine(App.Dir, "idlemaster.ini"); } }
 
@@ -513,6 +514,8 @@ namespace IdleMaster
                     case "network.wifi": c.NetworkWifi.Add(line); break;
                     // Process names the remote-desktop watch keeps connected.
                     case "remote.apps": c.RemoteApps.Add(item); break;
+                    // Settled by a toast answer, not by hand.
+                    case "ask.never": c.AskNever.Add(item); break;
                 }
             }
             return c;
@@ -574,6 +577,7 @@ namespace IdleMaster
             Swap(DebloatProtect, o.DebloatProtect);
             Swap(NetworkWifi, o.NetworkWifi);
             Swap(RemoteApps, o.RemoteApps);
+            Swap(AskNever, o.AskNever);
         }
 
         // The names one section of the shipped default config carries, enabled
@@ -839,7 +843,9 @@ RepeatBoostMinutes=0
 #   Keep it      - left alone for SentryBackoffMinutes, then asked again
 #   Always keep  - written into [protect] below, remembered forever
 #   Trash once   - closed now; if it comes back you are asked again
-#   Always trash - closed now and every time (unlisted names go into [boost.kill])
+#   Always trash - closed now and every time. The name goes into [ask.never] at
+#                  the bottom of this file, which is what makes the answer
+#                  outlive the app; unlisted names also go into [boost.kill].
 AskBeforeKill=1
 # No answer in this many seconds = AskTimeoutAction.
 AskTimeoutSeconds=47
@@ -1035,6 +1041,18 @@ WhatsApp*
 *\.local\bin\claude.exe
 *\claude-code\*
 #C:\Users\*\my-tools\*
+
+# ---------------------------------------------------------------------------
+# ANSWERED - what you have already settled with ""Always trash"".
+# ---------------------------------------------------------------------------
+# The toast only comes up for something that appeared AFTER the sentry's opening
+# census, and that census lives in memory: it dies with the app. So an add-in
+# that its own service restarts - Lenovo Vantage's, above all - was a newcomer
+# again at every start, and the same question came back however many times you
+# had answered it. This section is the half of the answer that survives. A name
+# here is closed on sight, in any mode, without a word. Delete the line to be
+# asked about it again.
+[ask.never]
 
 # ---------------------------------------------------------------------------
 # BOOST NOW - background junk that has no business running while you work.
@@ -3270,6 +3288,15 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 }
 
                 bool newcomer = !census.Contains(c.Key);
+
+                // Answered in some earlier session. There is nothing left to ask.
+                if (newcomer && engine.OnList(cfg.AskNever, c.Name))
+                {
+                    census.Add(c.Key);
+                    hits.AddRange(engine.Reap(c, guard));
+                    continue;
+                }
+
                 if (!listed && !newcomer) continue;                 // untouched, as always
                 if (!listed && cfg.AskAboveMb <= 0) { census.Add(c.Key); continue; }
                 if (!listed && c.Bytes < (long)cfg.AskAboveMb * 1024 * 1024)
@@ -3281,7 +3308,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 // Something already known to be junk, respawning: no question.
                 if (listed && !newcomer) { hits.AddRange(engine.Reap(c, guard)); continue; }
 
-                Verdict v = Consult(c, listed);
+                bool asked;
+                Verdict v = Consult(c, listed, out asked);
                 if (v == Verdict.NoAnswer)
                 {
                     // Nobody answered: the ini says what that means.
@@ -3310,6 +3338,19 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                         {
                             cfg.BoostKill.Add(c.Name);
                             log("[sentry] " + c.Name + " added to the boost kill list");
+                        }
+
+                        // A name a kill list already covers had nothing to append
+                        // there, so the whole record of "always" was the census -
+                        // which is memory, and forgets at the next start. That is
+                        // how the loudest button on the toast came to do exactly
+                        // what "Trash once" does. [ask.never] is what makes it
+                        // mean what it says.
+                        if (asked && !engine.OnList(cfg.AskNever, c.Name)
+                                  && Config.Append("ask.never", c.Name))
+                        {
+                            cfg.AskNever.Add(c.Name);
+                            log("[sentry] " + c.Name + " - closed on sight from now on, no more asking");
                         }
                         break;
 
@@ -3384,8 +3425,14 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // Put the question to whoever is at the keyboard. With no UI, or in idle
         // mode where nobody is watching, the lists decide on their own.
-        private Verdict Consult(Candidate c, bool listed)
+        private Verdict Consult(Candidate c, bool listed, out bool asked)
         {
+            // 'asked' means a dialog somebody could see went up. Only answers to
+            // one of those are written into the config: every path below it is
+            // the lists deciding on their own, and the lists must not grow
+            // behind your back.
+            asked = false;
+
             // Overclocked means away: nobody would answer a toast, and the whole
             // point is that everything unprotected dies. Standing down means
             // somebody is here after all, so the toast is worth putting up.
@@ -3398,6 +3445,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             q.OnKillList = listed;
             q.Mode = Enforcing;
             log("[sentry] " + c.Name + " showed up (" + Engine.Size(c.Bytes) + ") - asking you");
+            asked = true;
             try { return Ask(q); }
             catch (Exception) { return Verdict.Keep; }
         }

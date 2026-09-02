@@ -1227,7 +1227,7 @@ namespace IdleMaster
             tabs.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             tabs.SizeMode = TabSizeMode.Fixed;
-            tabs.ItemSize = new Size(92, 28);      // eight tabs have to fit in 754 px
+            tabs.ItemSize = new Size(83, 28);      // nine tabs have to fit in 754 px
             tabs.DrawItem += DrawTab;
             Controls.Add(tabs);
 
@@ -1243,7 +1243,9 @@ namespace IdleMaster
                 "Paths disk cleanup must never touch  (full path, '*' works)"));
             tabs.TabPages.Add(Single("Debloat", "debloat.protect",
                 "Store apps debloat must never suggest  (package names, '*' works)"));
-            tabs.TabPages.Add(Single("Network guard", "network.wifi",
+            tabs.TabPages.Add(Single("Answered", "ask.never",
+                "Answered with 'Always trash' - closed on sight, never asked about again"));
+            tabs.TabPages.Add(Single("Network", "network.wifi",
                 "Wi-Fi networks the network guard reconnects to, best first  (saved profiles; empty = every one it knows)", "wifi"));
 
             Label hint = Theme.Hint("Unchecked entries stay in the file, commented out. Nothing here can "
