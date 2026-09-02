@@ -1,7 +1,7 @@
 // IDLE MASTER - where looks come from.
 //
 // A theme is a text file. Not a plugin, not a DLL, not a manifest with a
-// schema: eighteen colours and two font names in the same key=value shape as
+// schema: nineteen colours and two font names in the same key=value shape as
 // idlemaster.ini, saved as themes\something.imtheme next to the exe. The app
 // ships two of them and writes both out on first start, precisely so that the
 // way to make a third is "copy one and edit it" - no build, no account, no
@@ -88,6 +88,13 @@ namespace IdleMaster
             p.Warn     = Color.FromArgb(255, 180, 84);
             p.Track    = Color.FromArgb(16, 30, 19);
             p.OnAccent = Color.FromArgb(217, 255, 227);
+
+            // Everything in this theme is already green, so the one colour that
+            // means "there is a newer release" cannot be. Cyan is the only other
+            // thing a phosphor tube ever did that reads as news rather than
+            // trouble - amber is spoken for by Warn.
+            p.Ready = Color.FromArgb(80, 220, 255);
+
             p.GaugeOk   = Color.FromArgb(47, 191, 85);
             p.GaugeWarn = Color.FromArgb(192, 138, 42);
             p.GaugeBad  = Color.FromArgb(214, 74, 58);
@@ -260,6 +267,7 @@ namespace IdleMaster
                     case "warn":      Col(v, ref p.Warn); break;
                     case "track":     Col(v, ref p.Track); break;
                     case "onaccent":  Col(v, ref p.OnAccent); break;
+                    case "ready":     Col(v, ref p.Ready); break;
                     case "gaugeok":   Col(v, ref p.GaugeOk); break;
                     case "gaugewarn": Col(v, ref p.GaugeWarn); break;
                     case "gaugebad":  Col(v, ref p.GaugeBad); break;
@@ -325,6 +333,9 @@ namespace IdleMaster
             s.AppendLine("logfg=" + Theme.Hex(p.LogFg) + "              # the log lines");
             s.AppendLine("listfg=" + Theme.Hex(p.ListFg) + "             # list and tree rows");
             s.AppendLine("warn=" + Theme.Hex(p.Warn) + "               # failures, the idle tag, away mode");
+            s.AppendLine("ready=" + Theme.Hex(p.Ready) + "              # ONLY the corner arrow when a release is waiting.");
+            s.AppendLine("#                             Nothing else wears it, so make it a colour");
+            s.AppendLine("#                             nothing else in your theme uses.");
             s.AppendLine();
             s.AppendLine("# --- buttons");
             s.AppendLine("good=" + Theme.Hex(p.Good) + "               # BOOST NOW and every primary action");

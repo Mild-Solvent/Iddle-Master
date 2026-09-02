@@ -4,7 +4,7 @@
 //
 // Two halves:
 //
-//   Palette   one look, as data - eighteen colours and two font families.
+//   Palette   one look, as data - nineteen colours and two font families.
 //             Themes.cs reads these out of .imtheme files on disk.
 //   Theme     the facade every window already calls (Theme.Fg, Theme.Quiet,
 //             Theme.Form). These used to be constants; now they read whichever
@@ -32,7 +32,7 @@ namespace IdleMaster
         void Restyle();
     }
 
-    // One look. Nothing here is behaviour: a theme is eighteen colours, two
+    // One look. Nothing here is behaviour: a theme is nineteen colours, two
     // font families, and the three lines that say who wrote it.
     internal sealed class Palette
     {
@@ -55,6 +55,14 @@ namespace IdleMaster
         public Color Warn    = Color.FromArgb(208, 132, 132);
         public Color Track   = Color.FromArgb(35, 40, 51);
         public Color OnAccent = Color.White;        // text on top of Good / Danger
+
+        // Reserved for exactly one thing: a newer release is sitting there
+        // waiting for a click, and the corner arrow turning this colour IS the
+        // news. Nothing else in the app is allowed to wear it - which is why a
+        // theme picks it rather than inheriting Accent. In a green theme it had
+        // better not be green.
+        public Color Ready = Color.FromArgb(56, 170, 104);
+
         public Color GaugeOk   = Color.FromArgb(61, 126, 191);
         public Color GaugeWarn = Color.FromArgb(176, 96, 96);
         public Color GaugeBad  = Color.FromArgb(200, 72, 72);
@@ -80,7 +88,7 @@ namespace IdleMaster
             return new Color[]
             {
                 Bg, Panel, Input, LogBg, LogFg, ListFg, Fg, Dim, Accent,
-                Good, Danger, Neutral, Warn, Track, OnAccent,
+                Good, Danger, Neutral, Warn, Track, OnAccent, Ready,
                 GaugeOk, GaugeWarn, GaugeBad
             };
         }
@@ -120,6 +128,7 @@ namespace IdleMaster
         public static Color Warn    { get { return cur.Warn; } }
         public static Color Track   { get { return cur.Track; } }
         public static Color OnAccent { get { return cur.OnAccent; } }
+        public static Color Ready   { get { return cur.Ready; } }
         public static Color GaugeOk   { get { return cur.GaugeOk; } }
         public static Color GaugeWarn { get { return cur.GaugeWarn; } }
         public static Color GaugeBad  { get { return cur.GaugeBad; } }
