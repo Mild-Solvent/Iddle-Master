@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.13.3.0")]
-[assembly: AssemblyFileVersion("0.13.3.0")]
+[assembly: AssemblyVersion("0.14.0.0")]
+[assembly: AssemblyFileVersion("0.14.0.0")]
 
 namespace IdleMaster
 {
@@ -102,6 +102,38 @@ namespace IdleMaster
 
         [DllImport("user32.dll")]
         internal static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        internal static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wp, IntPtr lp);
+
+        internal const uint WM_CLOSE = 0x0010;
+
+        // Ask every top-level window a process owns to close, and say how many
+        // were asked. Process.CloseMainWindow only ever asks the one window
+        // Windows happens to call "main", which for an Electron or packaged app
+        // is regularly the wrong one or none at all - and then the only thing
+        // left is TerminateProcess.
+        internal static int CloseWindows(int pid)
+        {
+            int asked = 0;
+            try
+            {
+                EnumWindows(delegate(IntPtr h, IntPtr l)
+                {
+                    try
+                    {
+                        uint owner;
+                        GetWindowThreadProcessId(h, out owner);
+                        if (owner != (uint)pid) return true;
+                        if (PostMessage(h, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) asked++;
+                    }
+                    catch (Exception) { }
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch (Exception) { }
+            return asked;
+        }
 
         // "Visible" is not enough: suspended UWP hosts keep a visible-but-cloaked
         // window forever. DWM knows the difference.
@@ -368,6 +400,7 @@ namespace IdleMaster
         public readonly List<string> BoostServices = new List<string>();
         public readonly List<string> IdleKill = new List<string>();
         public readonly List<string> IdleServices = new List<string>();
+        public readonly List<string> ManualServices = new List<string>();// stopped once; if it comes back, that was you
         public readonly List<string> RestoreLaunch = new List<string>();
         public readonly List<string> CleanupProtect = new List<string>();
         public readonly List<string> DebloatProtect = new List<string>();
@@ -381,7 +414,10 @@ namespace IdleMaster
             if (!File.Exists(Path_))
                 File.WriteAllText(Path_, DefaultIni, new UTF8Encoding(false));
             else
+            {
                 SyncShippedSection("[protect.path]");
+                SyncShippedSection("[services.manual]");
+            }
 
             Config c = new Config();
             string section = "";
@@ -467,6 +503,7 @@ namespace IdleMaster
                     case "boost.services": c.BoostServices.Add(line); break;
                     case "idle.kill": c.IdleKill.Add(item); break;
                     case "idle.services": c.IdleServices.Add(line); break;
+                    case "services.manual": c.ManualServices.Add(line); break;
                     case "restore.launch": c.RestoreLaunch.Add(line); break;
                     // Paths, not process names - StripExe must not touch these.
                     case "cleanup.protect": c.CleanupProtect.Add(line); break;
@@ -531,6 +568,7 @@ namespace IdleMaster
             Swap(ProtectPath, o.ProtectPath);
             Swap(BoostKill, o.BoostKill); Swap(BoostServices, o.BoostServices);
             Swap(IdleKill, o.IdleKill); Swap(IdleServices, o.IdleServices);
+            Swap(ManualServices, o.ManualServices);
             Swap(RestoreLaunch, o.RestoreLaunch);
             Swap(CleanupProtect, o.CleanupProtect);
             Swap(DebloatProtect, o.DebloatProtect);
@@ -660,8 +698,25 @@ namespace IdleMaster
                     lines.Add(header);
                     at = lines.Count - 1;
                 }
-                foreach (string l in lines)
-                    if (l.Trim().Equals(value, StringComparison.OrdinalIgnoreCase)) return true;
+
+                // Only THIS section counts as "already there". Scanning the whole
+                // file was the bug behind a toast that lied: answer "always keep
+                // this" for an app that is on a kill list - which is the only way
+                // the toast comes up at all - and the name was found on that
+                // other list, so Append reported success and wrote nothing. The
+                // log said "claude is protected from now on" and idlemaster.ini
+                // never changed.
+                //
+                // Comments are stripped before comparing, because what we write
+                // here carries one: an entry chosen twice must not be appended
+                // twice.
+                for (int i = at + 1; i < lines.Count; i++)
+                {
+                    string l = lines[i].Trim();
+                    if (l.StartsWith("[")) break;               // next section - done looking
+                    if (StripComment(lines[i]).Trim().Equals(value, StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
 
                 lines.Insert(at + 1, value + "   # you chose this on "
                     + DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
@@ -1138,6 +1193,24 @@ LanmanServer
 #NvContainerLocalSystem
 # Stopping Defender is possible but tamper protection will usually refuse it.
 #WinDefend
+
+# ---------------------------------------------------------------------------
+# STOPPED ONCE, THEN LEFT ALONE. Services here still come down when you press
+# a button - they are on the lists above like anything else - but they are not
+# hunted. The sentry re-stops a service that restarted itself; a service in
+# here is exempt, because if it is running again after we stopped it, nothing
+# in this tool did that. You did. So it lives until the next time you press
+# the button yourself.
+#
+# nordvpn-service is the reason this section exists. It is also handled
+# specially in code: its tunnel is asked to hang up BEFORE the service is
+# stopped, because NordLynx keeps the default route (metric 5, against Wi-Fi's
+# 35) after the service that feeds it is gone, and the machine then routes
+# every packet into a dead pipe - link up, router answering, nothing past it.
+# ---------------------------------------------------------------------------
+[services.manual]
+nordvpn-service
+#Tailscale
 
 # ---------------------------------------------------------------------------
 # RESTORE - relaunched by ""Restore desktop"". Deliberately short: restore gives
@@ -1847,20 +1920,71 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         // after. Asking the window to close costs a couple of seconds and gives
         // the app the chance to let go of its own lock. Anything still standing
         // when the grace runs out is terminated exactly as before.
+        // Terminating an app is not the same as closing it, and for one that
+        // lives in C:\Program Files\WindowsApps the difference has a cost you
+        // only meet later. Kill an Electron app outright and its helpers are
+        // orphaned mid-write, still holding files inside the package folder;
+        // the next update cannot swap those files out and Windows says "Another
+        // program is currently using this file" over a path you have never
+        // typed. Windows had already told us as much in its own log - "marking
+        // package Claude_1.40609.1.0 for deferred registration because
+        // Claude_1.40609.0.0 is still running".
+        //
+        // So: ask every window, not just the "main" one, and give an app that
+        // actually has windows the longer of the two graces to save its work.
+        // The Kill is still there. It is just no longer the first move.
         private void EndProcess(Process p)
         {
             if (cfg.CloseGraceMs > 0)
             {
                 try
                 {
-                    if (p.MainWindowHandle != IntPtr.Zero
-                        && p.CloseMainWindow()
-                        && p.WaitForExit(cfg.CloseGraceMs)) return;
+                    int asked = Native.CloseWindows(p.Id);
+                    if (asked == 0 && p.MainWindowHandle != IntPtr.Zero && p.CloseMainWindow()) asked = 1;
+                    if (asked > 0)
+                    {
+                        // A window means a human's work might be in it. Anything
+                        // windowless is a helper and gets the plain grace.
+                        int grace = cfg.CloseGraceMs;
+                        int wide = cfg.CloseGraceMs * 3;
+                        if (wide > 15000) wide = 15000;
+                        if (wide > grace) grace = wide;
+                        if (p.WaitForExit(grace)) return;
+                    }
                 }
                 catch (Exception) { }        // no window, gone already, or refuses to be asked
             }
             p.Kill();
             p.WaitForExit(3000);
+        }
+
+        // Ending the root should take the family with it - Chromium keeps its
+        // children in a job object - but a helper that was mid-syscall, or one
+        // the job never owned, outlives its parent. That survivor is the whole
+        // problem: it is what "the app running with half of its helpers dead"
+        // means, and for a packaged app it is what keeps a file open inside
+        // C:\Program Files\WindowsApps until an update trips over it. Finish
+        // the family in THIS pass instead of leaving it for the next sweep,
+        // which is minutes away and may back off before it arrives.
+        private static void Stragglers(List<int> targets, Dictionary<int, Process> live)
+        {
+            List<int> left = new List<int>();
+            foreach (int pid in targets)
+                try { if (!live[pid].HasExited) left.Add(pid); }
+                catch (Exception) { }
+            if (left.Count == 0) return;
+
+            Thread.Sleep(700);                  // the job object gets its moment first
+            foreach (int pid in left)
+            {
+                try
+                {
+                    if (live[pid].HasExited) continue;
+                    live[pid].Kill();
+                    live[pid].WaitForExit(2000);
+                }
+                catch (Exception) { }
+            }
         }
 
         // One census of what is running, grouped by name, so the sentry can ask
@@ -2014,6 +2138,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     catch (Exception) { /* gone with its parent, or refuses - the next sweep retries */ }
                 }
 
+                Stragglers(targets, live);
+
                 foreach (int pid in targets)
                 {
                     bool gone;
@@ -2113,6 +2239,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     }
                 }
 
+                Stragglers(targets, live);
+
                 foreach (int pid in targets)
                 {
                     bool gone;
@@ -2159,6 +2287,28 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     log("   . " + name + " is protected, skipped");
                     continue;
                 }
+
+                // Stopped once already and running again: nothing in here
+                // started it, so you did. That is the whole promise of
+                // [services.manual] - it comes down when you press the button,
+                // and once you bring it back by hand it stays up. The sentry's
+                // "services that restarted themselves" sweep comes through
+                // here too, which is exactly the one that used to take it away
+                // again thirty seconds after you started it.
+                if (OnList(cfg.ManualServices, name) && WasStopped(state, name)
+                    && ServiceRunning(name))
+                {
+                    log("   . " + name + " is back up and this list only stops it once"
+                        + " - that was you, leaving it alone");
+                    continue;
+                }
+
+                // A VPN service is holding the default route through a tunnel
+                // that does not fall over when the service does. Hang up first,
+                // and if it will not hang up, leave the service running.
+                VpnApp vpn = Vpn.For(name);
+                if (vpn != null && !Vpn.StandDown(vpn, log)) continue;
+
                 try
                 {
                     ServiceController sc = new ServiceController(name);
@@ -2203,6 +2353,17 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // The sentry calls this every few minutes; most of the time nothing has
         // come back, so it must not write a line unless it actually did something.
+        // Have we stopped this one already, this mode? The state file is the
+        // record of what this tool took down, so it is also the record of what
+        // a human must have put back.
+        private static bool WasStopped(StateFile state, string name)
+        {
+            if (state == null) return false;
+            foreach (string s in state.StoppedServices)
+                if (string.Equals(s, name, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         private static void Remember(StateFile state, string name)
         {
             foreach (string s in state.StoppedServices)
@@ -2509,6 +2670,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             StateFile state = StateFile.Load();
             state.Mode = "boost";
 
+            // The VPN hangs up before anything is killed: the CLI that brings
+            // the tunnel down talks to the desktop app, and the desktop app is
+            // on the kill list a line below this one.
+            Vpn.StandDownFor(this, cfg.BoostServices, log);
+
             // Browsers are exempt from the guard: CloseBrowsersInBoost is an
             // explicit "yes, even though they are open".
             KillList(cfg.BoostKill, "killing background clutter",
@@ -2558,6 +2724,15 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             StateFile state = StateFile.Load();
             state.Mode = "idle";
+
+            // Both lists' worth of VPN, before the first kill: the boost list
+            // takes the NordVPN window out at the next line, and after that
+            // there is nothing left to tell the tunnel to hang up. This is the
+            // ordering the old run got wrong - UI killed at 01:16:42, service
+            // stopped nine seconds later, network gone until the guard noticed.
+            List<string> vpnPass = new List<string>(cfg.BoostServices);
+            vpnPass.AddRange(cfg.IdleServices);
+            Vpn.StandDownFor(this, vpnPass, log);
 
             KillList(cfg.BoostKill, "killing background clutter");
             StopServices(cfg.BoostServices, state, "stopping non-essential services");

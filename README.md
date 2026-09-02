@@ -99,6 +99,19 @@ IdleMaster.exe --installtask --guard   ...or only the network guard at logon
 Run `--report` first. It tags every process and service with the mode that would
 close it, so you see the plan before anything dies.
 
+### The lists live on the buttons
+
+Each big button carries its own lists on its left edge — three bars, mirroring
+the repeat ring on the right of **BOOST NOW**. Click them and you get exactly
+the two lists that button acts on, side by side: what it closes, and what it
+stops. Add from what is running, type a name, remove a row, Save.
+
+They open the same panes the Settings window uses and write the same
+`idlemaster.ini`; this is a shorter way in, not a second copy of the truth. It
+exists because a list you reach through Settings → tab → pane reads as somebody
+else's configuration, which is how a name sits on a kill list for weeks without
+anyone meeting it.
+
 ## What it found on this machine
 
 Measured, not guessed — 15.9 GB total, 11.4 GB in use at the time of the scan:
@@ -154,7 +167,11 @@ The toast shows the app's own icon, the description and company from the exe, an
 the path — so *Update.exe, 300 MB* reads as *Discord Inc.* before you decide.
 
 - **Keep it** — left alone for 30 minutes, then asked again.
-- **Always keep** — written into `[protect]`, remembered forever.
+- **Always keep** — written into `[protect]`, remembered forever. (Through
+  0.13.3 this quietly wrote nothing whenever the name already appeared anywhere
+  else in the file — which for an app the toast asks about means the kill list
+  it is on. The log said *"claude is protected from now on"* and the ini never
+  changed. The duplicate check is now scoped to the section being written.)
 - **Trash once** — closed now, nothing written; if it comes back you are asked again.
 - **Always trash** — closed now and every time it returns (an unlisted name goes
   into `[boost.kill]`, so the lists learn from what you actually do).
@@ -442,9 +459,24 @@ leaving the app running with half its helpers dead. Idle Master now sorts a
 family by depth and ends the root first; Chromium keeps its children in a job
 object, so they go down with it and there is nothing left to respawn anything.
 
-**Close first, terminate second.** An app with a window on screen is asked to
-shut itself down and given `CloseGraceMs` (3 s by default) to do it; only what is
-still standing afterwards is terminated. This is what stops Electron apps coming
+**And the family is finished in the same pass.** The job object handles the
+common case, but a helper caught mid-syscall — or one the job never owned —
+outlives its parent. Anything still standing a beat after the root goes down is
+taken out immediately, rather than left for a sweep that is minutes away and may
+back off before it arrives. A survivor from a *packaged* app is not a cosmetic
+problem: it holds files open inside `C:\Program Files\WindowsApps`, and the next
+update cannot swap them out. That is where the dialog naming a path you have
+never typed — "Another program is currently using this file" — comes from, and
+Windows says so in its own log first: *marking package Claude_1.40609.1.0 for
+deferred registration because Claude_1.40609.0.0 is still running*.
+
+**Close first, terminate second.** An app with windows is asked to shut itself
+down and given `CloseGraceMs` (3 s by default, ×3 up to 15 s for anything that
+actually has a window to save work in) to do it; only what is still standing
+afterwards is terminated. *Every* top-level window is asked, not just the one
+Windows calls "main" — an Electron or packaged app regularly parks its real
+window behind a host, and asking only the main one finds nothing, which drops
+straight through to terminate. This is what stops Electron apps coming
 back broken the next morning: terminated outright they never release the
 singleton lock in their own profile, and the next launch refuses to start and
 says another copy is already running. Set `CloseGraceMs=0` for the old
@@ -559,15 +591,47 @@ could bite you from bed:
   with a name of its own. `[protect.path]` is how you spare one by where it was
   installed; that is why the Claude Code CLI ships in there.
 
-`nordvpn-service` **is** stopped in idle mode. If you have NordVPN's kill switch
-armed, killing the service can take the whole network with it — the network guard
-will catch that and scream in the log, but test it once while you're awake.
+### The VPN comes down before the service does
+
+`nordvpn-service` **is** stopped in idle mode, and for a long time that was the
+single most expensive line in the file — not because of the kill switch, but
+because of the routing table. Connect to NordVPN and the NordLynx tunnel takes
+the default route on interface metric 5, against Wi-Fi's 35. Every packet the
+machine sends leaves through the tunnel. Stop the service and the *adapter does
+not go away*: it stays up, it keeps the route, and it has nothing behind it any
+more. The link is fine, the router answers, and nothing past it does. The guard
+reports it honestly — "link up (Wi-Fi) but the internet does not answer and DNS
+fails" — and then flushes DNS and renews the lease, which are repairs to the one
+part of the path that was never broken.
+
+So the tunnel is hung up first, through NordVPN's own CLI, and the service is
+only stopped once the route is back on the physical adapter. Three rules fall
+out of that:
+
+- **Order matters.** The disconnect runs before *anything* is killed, because
+  the CLI forwards its argument to the running desktop app — and that app is on
+  the boost kill list. Kill it first and there is nothing left to hang up with.
+- **It fails safe.** No app to forward to, no CLI on disk, or a tunnel still up
+  twelve seconds after the disconnect: the service is left running and the log
+  says why. 87 MB is not worth the machine's connection.
+- **Once, then it is yours.** `nordvpn-service` ships in `[services.manual]`. It
+  comes down when you press the button; if it is running again afterwards, you
+  started it, and nothing here takes it away. The sentry's "services that
+  restarted themselves" sweep skips it, and so does the network guard — with one
+  exception, the exact fingerprint of our own mess: the service down with its
+  tunnel still up. That is the machine routing into nothing, and restarting it
+  there is a repair rather than an opinion.
+
+Nothing in this ever touches Tailscale. Its adapter is a tunnel too, and it is
+the way back in; the table in `src/Vpn.cs` names each product's adapters
+explicitly for that reason.
 
 ## Files
 
 ```
 src/IdleMaster.cs         engine, config, sentry, updater, CLI entry point
 src/NetGuard.cs             the network guard: WLAN API, measuring, the repair ladder
+src/Vpn.cs                the VPN handshake: hang the tunnel up before stopping the service
 src/Ui.cs                 every window: main, task manager, settings, ask toast
 src/Cleanup.cs            the disk cleanup scanner: junk spots, leftovers, owners
 src/DiskScan.cs           the disk mapper: raw MFT reader + parallel-walk fallback

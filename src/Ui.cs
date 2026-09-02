@@ -431,6 +431,162 @@ namespace IdleMaster
         }
     }
 
+    // -------------------------------------------------------------- list badge
+
+    // The lists, folded into the button that uses them: three bars on the LEFT
+    // of the slab, mirroring the repeat badge on the right. A click opens
+    // exactly the two lists that button acts on - what it closes, and what it
+    // stops - and nothing else.
+    //
+    // The lists ARE the button. Having to go Settings -> tab -> pane to change
+    // what BOOST NOW does made them read as somebody else's configuration,
+    // which is how an entry like 'claude' sits on a kill list for weeks without
+    // anyone meeting it.
+    //
+    // A sibling of the button underneath, not a child, so the click opens the
+    // lists instead of boosting the machine.
+    internal sealed class ListBadge : Control
+    {
+        private readonly Color slab;
+        private bool hot;
+
+        public ListBadge(Color buttonColor)
+        {
+            slab = buttonColor;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(46, 46);
+            BackColor = slab;
+            Cursor = Cursors.Hand;
+            TabStop = false;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        { hot = true; Invalidate(); base.OnMouseEnter(e); }
+
+        protected override void OnMouseLeave(EventArgs e)
+        { hot = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            // The slab behind us is the button; only the hover shade is ours.
+            using (SolidBrush b = new SolidBrush(hot ? Theme.Lift(slab, 22) : slab))
+                g.FillRectangle(b, ClientRectangle);
+            if (hot)
+                using (GraphicsPath p = RoundRect(new Rectangle(1, 1, Width - 3, Height - 3), 8))
+                using (Pen pen = new Pen(Color.FromArgb(70, 255, 255, 255)))
+                    g.DrawPath(pen, p);
+
+            // Three bars. Bright enough to read as a control, not so bright it
+            // competes with the word next to it.
+            Color ink = Color.FromArgb(hot ? 235 : 190, 255, 255, 255);
+            const int W = 22, H = 3, Gap = 6;
+            int x = (Width - W) / 2;
+            int y = (Height - (H * 3 + Gap * 2)) / 2;
+            using (SolidBrush b = new SolidBrush(ink))
+                for (int i = 0; i < 3; i++)
+                {
+                    using (GraphicsPath p = RoundRect(new Rectangle(x, y + i * (H + Gap), W, H), 1))
+                        g.FillPath(b, p);
+                }
+        }
+
+        private static GraphicsPath RoundRect(Rectangle r, int radius)
+        {
+            int d = radius * 2;
+            GraphicsPath p = new GraphicsPath();
+            if (d <= 1) { p.AddRectangle(r); return p; }
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
+    }
+
+    // What one button closes and what it stops, side by side, with Save. The
+    // panes are the very same ListPane the settings window builds, reading and
+    // writing the very same idlemaster.ini - this is a shorter way in, not a
+    // second copy of the truth.
+    internal sealed class ListsPopup : Form
+    {
+        private readonly IniFile ini = new IniFile();
+        private readonly List<ListPane> panes = new List<ListPane>();
+        public bool Saved;
+
+        public ListsPopup(string title, string note,
+                          string killSection, string killCaption,
+                          string svcSection, string svcCaption)
+        {
+            Theme.Form(this);
+            Text = title;
+            BackColor = Theme.Panel;
+            Size = new Size(788, 500);
+            MinimumSize = new Size(620, 420);
+            StartPosition = FormStartPosition.CenterParent;
+
+            Label hint = Theme.Caption(note);
+            hint.SetBounds(12, 10, 748, 18);
+            hint.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            hint.AutoEllipsis = true;
+            Controls.Add(hint);
+
+            ListPane left = new ListPane(ini, killSection, killCaption, false);
+            ListPane right = new ListPane(ini, svcSection, svcCaption, true);
+            Controls.Add(left);
+            Controls.Add(right);
+            panes.Add(left);
+            panes.Add(right);
+
+            Button save = Theme.Action("Save");
+            save.Click += delegate { Persist(); };
+            Controls.Add(save);
+
+            Button cancel = Theme.Quiet("Cancel");
+            cancel.Click += delegate { Close(); };
+            Controls.Add(cancel);
+
+            // Laid out by hand on every resize, for the reason the settings
+            // window lays its pair out by hand: anchoring two panes to the same
+            // bottom edge sends their buttons off the form the first time
+            // somebody drags a corner.
+            Resize += delegate
+            {
+                int w = ClientSize.Width, h = ClientSize.Height;
+                int top = 34, bottom = h - 46;
+                int half = (w - 30) / 2;
+                left.SetBounds(12, top, half, bottom - top);
+                right.SetBounds(18 + half, top, half, bottom - top);
+                save.SetBounds(w - 116, h - 40, 104, 30);
+                cancel.SetBounds(w - 228, h - 40, 104, 30);
+            };
+            OnResize(EventArgs.Empty);
+
+            AcceptButton = save;
+            CancelButton = cancel;
+        }
+
+        private void Persist()
+        {
+            try
+            {
+                foreach (ListPane p in panes) p.Save(ini);
+                ini.Save();
+                Saved = true;
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Could not write idlemaster.ini:\n\n" + ex.Message,
+                    "Idle Master", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+    }
+
     // ------------------------------------------------------------ config window
 
     // Pick names off the machine instead of typing them: running processes by how
@@ -3757,6 +3913,8 @@ namespace IdleMaster
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
         private readonly RepeatBadge repeatBadge;   // the repeat loop, riding on BOOST NOW
+        private readonly ListBadge listBoost, listIdle;   // each button's own lists, riding on its left
+        private readonly ToolTip listTip = new ToolTip();
         private readonly ToolTip repeatTip = new ToolTip();
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
@@ -3848,9 +4006,15 @@ namespace IdleMaster
 
             if (repeatOn) ArmRepeat();
 
+            listBoost = ListsHandle(btnBoost, Theme.Good, "boost");
+            listTip.SetToolTip(listBoost, "What Boost closes and stops - click to edit");
+
             btnIdle = BigButton("ABSOLUTE IDLE",
                 "Strip to Windows vitals", Theme.Danger, 218);
             btnIdle.Click += delegate { ConfirmIdle(); };
+
+            listIdle = ListsHandle(btnIdle, Theme.Danger, "idle");
+            listTip.SetToolTip(listIdle, "What Absolute Idle closes and stops - click to edit");
 
             btnRestore = SmallButton("Restore desktop", 22, 306);
             btnRestore.Click += delegate { Run("restore"); };
@@ -4989,6 +5153,53 @@ namespace IdleMaster
             b.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(b);
             return b;
+        }
+
+        // The three bars on a big button's left edge. Placed off the button's
+        // own bounds and anchored left, the way the repeat badge is placed off
+        // its right edge and anchored right - the window is sizable and a fixed
+        // x would drift off the slab.
+        private ListBadge ListsHandle(Button on, Color slab, string which)
+        {
+            ListBadge b = new ListBadge(slab);
+            b.SetBounds(on.Left + 12, on.Top + (on.Height - 46) / 2, 46, 46);
+            b.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            b.Click += delegate { OpenLists(which); };
+            Controls.Add(b);
+            b.BringToFront();
+            return b;
+        }
+
+        private void OpenLists(string which)
+        {
+            bool idle = which == "idle";
+            ListsPopup f = idle
+                ? new ListsPopup("Absolute idle - what it closes and stops",
+                    "Applied ON TOP of the boost lists. Nobody is watching, so this is where the browsers and the desktop go.",
+                    "idle.kill", "Also closed by Absolute Idle",
+                    "idle.services", "Also stopped by Absolute Idle")
+                : new ListsPopup("Boost now - what it closes and stops",
+                    "Background junk that has no business running while you work. The desktop stays usable.",
+                    "boost.kill", "Processes closed by Boost",
+                    "boost.services", "Services stopped by Boost");
+
+            using (f)
+            {
+                f.ShowDialog(this);
+                if (!f.Saved) return;
+            }
+            try
+            {
+                cfg.CopyFrom(Config.Load());
+                AppendLog(idle
+                    ? "Idle lists saved. " + cfg.IdleKill.Count + " processes, "
+                        + cfg.IdleServices.Count + " services on top of boost."
+                    : "Boost lists saved. " + cfg.BoostKill.Count + " processes, "
+                        + cfg.BoostServices.Count + " services.");
+                if (sentry != null && sentry.Alive)
+                    AppendLog("The sentry is using the new lists from its next sweep.");
+            }
+            catch (Exception ex) { AppendLog("Could not reload the config: " + ex.Message); }
         }
 
         private Button SmallButton(string text, int x, int y)

@@ -1480,6 +1480,21 @@ namespace IdleMaster
                         {
                             if (!s.Equals(net, StringComparison.OrdinalIgnoreCase)) continue;
                             if (Engine.ServiceRunning(s)) continue;
+
+                            // A service on [services.manual] is yours to start.
+                            // The guard overrides that for exactly one shape of
+                            // trouble: its own tunnel still up with the service
+                            // down. That is the machine routing into nothing,
+                            // and it is the only case where starting it back up
+                            // is a repair rather than an opinion. Everything
+                            // else - including "the internet is down and this
+                            // VPN happens to be off" - is left for you.
+                            if (engine.OnList(cfg.ManualServices, s) && !Vpn.StrandedTunnel(s))
+                            {
+                                done.Add("left " + s + " alone - that one is yours to start by hand");
+                                continue;
+                            }
+
                             if (engine.EnsureService(s, false)) { done.Add("restarted " + s + " (a mode had stopped it; the network may need it)"); FixCount++; any = true; }
                         }
                     }
