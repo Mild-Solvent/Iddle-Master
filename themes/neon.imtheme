@@ -1,0 +1,42 @@
+# IDLE MASTER theme
+
+name=Neon
+author=Idle Master
+about=Magenta and cyan on deep violet, corners rounded, everything glowing. Turns the shape keys up as far as they go.
+
+bg=#120a1e
+panel=#1d1230
+input=#0c0715
+logbg=#0a0613
+track=#2a1c42
+
+fg=#ede4ff
+dim=#8878ab
+accent=#ff4fd8
+logfg=#5ce1ff
+listfg=#c3b3e6
+warn=#ffb03a
+ready=#5cffb0              # accent is magenta, log is cyan - news gets green
+
+good=#5a1f8c
+danger=#8c1f4a
+neutral=#281a3c
+onaccent=#fff2ff
+
+gaugeok=#a24fff
+gaugewarn=#ffb03a
+gaugebad=#ff3a6a
+
+# --- shape, all the way up
+radius=8
+gradient=34
+glow=110
+borderwidth=1
+border=#ff4fd8
+chrome=custom
+caption=#0c0715
+
+uifont=Segoe UI
+uisize=9
+monofont=Consolas
+monosize=9

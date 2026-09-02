@@ -1,0 +1,44 @@
+# IDLE MASTER theme
+
+name=Amber
+author=Idle Master
+about=The other phosphor. A VT220 that somehow ended up managing your RAM.
+
+# --- surfaces
+bg=#100a02
+panel=#1c1306
+input=#0a0601
+logbg=#080501
+track=#2c2009
+
+# --- text
+fg=#ffd291
+dim=#a87e2e
+accent=#ffb000
+logfg=#ffb000
+listfg=#e0a94c
+warn=#ff7043
+ready=#5ad2ff              # amber theme, so the news has to be cold
+
+# --- buttons
+good=#5c3d00
+danger=#5c1600
+neutral=#241a08
+onaccent=#fff0d0
+
+gaugeok=#d99000
+gaugewarn=#e06a20
+gaugebad=#e2483a
+
+# --- shape
+radius=0
+gradient=0
+glow=0
+borderwidth=1
+border=#3d2c0c
+chrome=system
+
+uifont=Segoe UI
+uisize=9
+monofont=Lucida Console
+monosize=9

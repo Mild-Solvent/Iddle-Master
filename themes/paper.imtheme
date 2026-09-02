@@ -1,0 +1,49 @@
+# IDLE MASTER theme
+#
+# Copy this file, rename it, change the colours, restart Idle Master -
+# it shows up in Settings > Theme. Colours are #rrggbb, r,g,b, or any
+# name Windows knows. Anything unreadable falls back to the default,
+# so a typo costs you one colour, not the app.
+
+name=Paper
+author=Idle Master
+about=Ink on paper. The one that does not glow at you at three in the morning.
+
+# --- surfaces
+bg=#f2f0ec                 # the window itself
+panel=#ffffff              # popups, menus, cards
+input=#ffffff              # text boxes and spinners
+logbg=#fbfaf8              # the console at the bottom
+track=#dcd7cf              # gauge troughs, separators
+
+# --- text
+fg=#1d2128                 # normal writing
+dim=#5e6672                # darkened to clear the 4.5 body-text contrast bar
+accent=#1b5fa6             # titles and captions
+logfg=#3c4a60              # the log lines
+listfg=#2f3a49             # list and tree rows
+warn=#9c4a12               # failures, the idle tag, away mode
+ready=#1f7a44              # ONLY the corner arrow when a release is waiting.
+
+# --- buttons
+good=#1b5fa6               # BOOST NOW and every primary action
+danger=#9e2b2b             # ABSOLUTE IDLE and every destructive one
+neutral=#e4e0d9            # the quiet ones
+onaccent=#ffffff           # writing ON good/danger - the whole reason this key exists
+
+# --- the RAM gauge, which reddens as memory runs out
+gaugeok=#2f7bc4
+gaugewarn=#c08a2a
+gaugebad=#c0392b
+
+# --- shape. All off: this one is about contrast, not decoration.
+radius=0
+gradient=0
+glow=0
+borderwidth=0
+chrome=system
+
+uifont=Segoe UI
+uisize=9
+monofont=Consolas
+monosize=9

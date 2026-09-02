@@ -1,0 +1,39 @@
+# IDLE MASTER theme
+
+name=Fjord
+author=Idle Master
+about=Cold northern blues, low contrast, nothing shouting. Minimalistic after a long winter.
+
+bg=#2e3440
+panel=#3b4252
+input=#272c36
+logbg=#242933
+track=#434c5e
+
+fg=#e5e9f0
+dim=#96a1b7                 # lifted to clear the 4.5 body-text contrast bar
+accent=#88c0d0
+logfg=#a3be8c
+listfg=#d8dee9
+warn=#ebcb8b
+ready=#a3be8c
+
+good=#4c6a8a
+danger=#7d4a4f
+neutral=#434c5e
+onaccent=#eceff4
+
+gaugeok=#81a1c1
+gaugewarn=#ebcb8b
+gaugebad=#bf616a
+
+radius=3
+gradient=14
+glow=0
+borderwidth=0
+chrome=system
+
+uifont=Segoe UI
+uisize=9
+monofont=Consolas
+monosize=9

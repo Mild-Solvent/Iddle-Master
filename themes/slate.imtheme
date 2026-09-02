@@ -1,0 +1,40 @@
+# IDLE MASTER theme
+
+name=Slate
+author=Idle Master
+about=No hue at all. Grey on grey, for when colour is somebody else's idea of information.
+
+bg=#1b1c1e
+panel=#292b2e
+input=#151618
+logbg=#131416
+track=#34363a
+
+fg=#e6e7ea
+dim=#868a91
+accent=#c6c9cf
+logfg=#b4b8c0
+listfg=#c2c6cd
+warn=#c98d8d
+ready=#7fb37f              # the only colour in the theme, which is the point
+
+good=#3c4046
+danger=#5a3c3c
+neutral=#34363a
+onaccent=#f4f5f7
+
+gaugeok=#7a7f88
+gaugewarn=#a68c6a
+gaugebad=#b56a62
+
+radius=2
+gradient=10
+glow=0
+borderwidth=1
+border=#42454b
+chrome=system
+
+uifont=Segoe UI
+uisize=9
+monofont=Consolas
+monosize=9
