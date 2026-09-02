@@ -29,7 +29,7 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.17.0.0")]
+[assembly: AssemblyVersion("0.18.0.0")]
 [assembly: AssemblyFileVersion("0.17.0.0")]
 
 namespace IdleMaster
@@ -379,6 +379,11 @@ namespace IdleMaster
                                                     // that are on no list at all. 0 = off.
         public bool Tray = true;                    // tray icon; closing the window hides to it
         public int UpdateCheckHours = 6;            // ask GitHub for a newer release this often. 0 = only by hand
+
+        // --- the look. A name, matched against themes\*.imtheme and the two
+        // built-ins; ThemeIntro is the one-shot "you have been asked".
+        public string Theme = Themes.Default;
+        public bool ThemeIntro = false;             // 0 = the picker still owes you a first appearance
         public bool StartWithWindows = false;       // logon task: Idle Master opens as you log in
         public string StartupAction = "none";       // ...and then runs: none | boost | idle
 
@@ -459,6 +464,8 @@ namespace IdleMaster
                             c.StartupAction = (sa == "boost" || sa == "idle") ? sa : "none";
                             break;
                         }
+                        case "theme": if (v.Length > 0) c.Theme = v; break;
+                        case "themeintro": c.ThemeIntro = b; break;
                         case "sentryseconds": c.SentrySeconds = Int(v, c.SentrySeconds, 5); break;
                         case "sentryserviceminutes": c.SentryServiceMinutes = Int(v, c.SentryServiceMinutes, 1); break;
                         case "sentrytrimminutes": c.SentryTrimMinutes = Int(v, c.SentryTrimMinutes, 1); break;
@@ -559,6 +566,7 @@ namespace IdleMaster
             AskTimeoutAction = o.AskTimeoutAction;
             AskAboveMb = o.AskAboveMb; Tray = o.Tray;
             UpdateCheckHours = o.UpdateCheckHours;
+            Theme = o.Theme; ThemeIntro = o.ThemeIntro;
             NetworkGuardWifi = o.NetworkGuardWifi;
             NetworkGuardKeepWifiAwake = o.NetworkGuardKeepWifiAwake;
             NetworkGuardScan = o.NetworkGuardScan;
@@ -868,6 +876,19 @@ StartWithWindows=0
 # What that logon start runs on its own: none, boost, or idle. 'Keep hunting'
 # still applies afterwards, exactly as if you had clicked the button yourself.
 StartupAction=none
+
+# --- THEME ------------------------------------------------------------------
+# What Idle Master looks like. The name of a theme: one of the two built in
+# (Minimalistic, Terminal) or any .imtheme file in the themes\ folder next to
+# the exe. A theme is a text file - eighteen colours and two font names - so
+# making your own is copy, edit, restart. Wrong name = Minimalistic.
+# Settings > Theme is the same thing with pictures, including the button that
+# downloads the bundle off the GitHub release post.
+Theme=Minimalistic
+# The picker shows itself once, over a blurred copy of the window, the first
+# time Idle Master opens. This is the note that it has. Set it back to 0 to be
+# asked again on the next start.
+ThemeIntro=0
 
 # --- NETWORK GUARD ----------------------------------------------------------
 # The sentry guards the RAM; this guards the way back in. With NetworkGuard=1,
@@ -3561,6 +3582,11 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 return 2;
             }
 
+            // The look, before a single window exists - Theme.Form() copies
+            // colours into controls as they are built, so a theme applied any
+            // later would only reach the windows opened after it.
+            Themes.Startup(cfg);
+
             // One Idle Master per machine. Every long-lived shape of the app -
             // the window, --watch, --guard, --startup - claims the same global
             // slot before it puts anything in the tray, so a logon task plus a
@@ -3922,6 +3948,29 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             for (int i = 0; i < bits.Length && i < 4; i++)
                 int.TryParse(bits[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out n[i]);
             return n;
+        }
+
+        // Any other asset published alongside the installer - the theme bundle,
+        // for one. Not limited to the newest release: a bundle that has not
+        // changed in three versions is still on the release it was published
+        // with, and that is a feature, not a stale link. First one found in the
+        // list wins, which is newest-first.
+        public static string FindAsset(string name)
+        {
+            try { ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072; }
+            catch (Exception) { }
+
+            using (WebClient w = new WebClient())
+            {
+                w.Headers.Add("User-Agent", "IdleMaster/" + App.Version);
+                w.Headers.Add("Accept", "application/vnd.github+json");
+                string json = w.DownloadString(Api);
+
+                Match url = Regex.Match(json,
+                    "\"browser_download_url\"\\s*:\\s*\"([^\"]*/" + Regex.Escape(name) + ")\"",
+                    RegexOptions.IgnoreCase);
+                return url.Success ? url.Groups[1].Value : "";
+            }
         }
 
         // Downloads the installer for a release into TEMP and returns its path.

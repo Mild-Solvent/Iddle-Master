@@ -162,7 +162,7 @@ namespace IdleMaster
             Button always = Btn(Theme.Action("Always keep"), 130);
             always.Click += delegate { Answer(Verdict.KeepAlways); };
 
-            Button once = Btn(Theme.Button("Trash once", Theme.Lift(Theme.Danger, -30), Color.White), 244);
+            Button once = Btn(Theme.Button("Trash once", Theme.Lift(Theme.Danger, -30), Theme.OnAccent), 244);
             once.Click += delegate { Answer(Verdict.KillOnce); };
 
             Button kill = Btn(Theme.Dangerous("Always trash"), 358);
@@ -300,9 +300,9 @@ namespace IdleMaster
                 "{0:0.0} GB free   {1:0}%", free / 1024.0, pct * 100);
 
             TextRenderer.DrawText(g, leftText, Font, new Rectangle(10, 0, bar.Width - 20, bar.Height),
-                Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+                Theme.OnAccent, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             TextRenderer.DrawText(g, rightText, Font, new Rectangle(10, 0, bar.Width - 20, bar.Height),
-                Color.White, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                Theme.OnAccent, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
         }
 
         private static GraphicsPath Rounded(Rectangle r, int radius)
@@ -383,7 +383,7 @@ namespace IdleMaster
                     g.DrawPath(pen, p);
 
             Rectangle ring = new Rectangle(6, 6, Width - 13, Height - 13);
-            Color live = armed ? Color.White : Color.FromArgb(150, 255, 255, 255);
+            Color live = armed ? Theme.OnAccent : Color.FromArgb(150, Theme.OnAccent);
 
             // The dim circle first - three quarters of one, the gap at the top
             // right where the arrow head goes - then the bright arc that has
@@ -1071,6 +1071,7 @@ namespace IdleMaster
         private ComboBox startupAction;
 
         public bool Saved;
+        public bool WantsTheme;         // closed by the Theme... button, not by Save or Cancel
 
         public QuickSettingsForm()
         {
@@ -1119,6 +1120,14 @@ namespace IdleMaster
             advanced.SetBounds(20, 504, 150, 30);
             advanced.Click += delegate { OpenAdvanced(); };
             Controls.Add(advanced);
+
+            // The look. Not a dropdown here: the picker is a pane over the main
+            // window with previews on it, and it cannot be shown underneath a
+            // modal dialog - so this closes and the window opens it.
+            Button theme = Theme.Quiet("Theme...");
+            theme.SetBounds(176, 504, 70, 30);
+            theme.Click += delegate { WantsTheme = true; Close(); };
+            Controls.Add(theme);
 
             Button save = Theme.Action("Save");
             save.SetBounds(252, 504, 90, 30);
@@ -4584,7 +4593,7 @@ namespace IdleMaster
 
     // ------------------------------------------------------------------- gui
 
-    internal sealed class MainForm : Form
+    internal sealed class MainForm : Form, IRestyle
     {
         private readonly Config cfg;
         private readonly Engine engine;
@@ -4617,6 +4626,7 @@ namespace IdleMaster
         private DebloatForm debloatWin;
         private BackupForm backupWin;
         private bool reallyExit;
+        private bool askedTheme;                // the first-run picker has had its turn
         private bool startHidden;
         private bool watchMode;
         private bool busyNow;                   // a mode is running right now
@@ -5048,7 +5058,7 @@ namespace IdleMaster
 
             NetReport r = on ? guard.Last : null;
             if (on && r != null && (!r.Healthy || !guard.AppsOk))
-                PaintButton(btnNetGuard, "Network guard: " + (guard.Busy ? "fixing" : "trouble"), Theme.Danger, Color.White);
+                PaintButton(btnNetGuard, "Network guard: " + (guard.Busy ? "fixing" : "trouble"), Theme.Danger, Theme.OnAccent);
             else if (!GuardWanted)
                 PaintButton(btnNetGuard, "Network guard: off", Theme.Neutral, Theme.Dim);
             else
@@ -5221,6 +5231,7 @@ namespace IdleMaster
             menu.Items.Add("Remote desktop setup...", null, delegate { ShowWindow(); OpenRemote(); });
             menu.Items.Add("Network guard...", null, delegate { ShowWindow(); OpenNetGuard(); });
             menu.Items.Add("Settings...", null, delegate { ShowWindow(); EditConfig(); });
+            menu.Items.Add("Theme...", null, delegate { ShowWindow(); OpenThemes(); });
             menu.Items.Add("Check for updates", null, delegate { ShowWindow(); CheckUpdates(); });
             menu.Items.Add("Report a bug...", null, delegate { ShowWindow(); OpenFeedback(); });
             trayUpdate = new ToolStripMenuItem("Update now");
@@ -5238,6 +5249,71 @@ namespace IdleMaster
             Show();
             WindowState = FormWindowState.Normal;
             Activate();
+            ThemeIntro();
+        }
+
+        // ---- the look
+        //
+        // The picker is a pane over this window, not a dialog in front of it,
+        // so it waits until there is something to blur. Once, ever: answering
+        // it or waving it away both write ThemeIntro=1, because a prompt that
+        // comes back every morning is a nag, and the tray menu and Settings
+        // both lead here afterwards.
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            ThemeIntro();
+        }
+
+        private void ThemeIntro()
+        {
+            if (askedTheme || cfg.ThemeIntro || !Visible || IsDisposed) return;
+            askedTheme = true;
+            // After the paint that follows Shown, or the snapshot behind the
+            // glass is a half-drawn window.
+            BeginInvoke((MethodInvoker)delegate
+            {
+                try
+                {
+                    Refresh();
+                    ThemeGate.Open(this, cfg, true, AppendLog);
+                }
+                catch (Exception ex) { AppendLog("! theme picker: " + ex.Message); }
+            });
+        }
+
+        private void OpenThemes()
+        {
+            askedTheme = true;
+            try
+            {
+                Refresh();
+                ThemeGate.Open(this, cfg, false, AppendLog);
+            }
+            catch (Exception ex) { AppendLog("! theme picker: " + ex.Message); }
+        }
+
+        // The colours this window mixes for itself - a state colour on a
+        // checkbox, a button painted to say the guard is in trouble - are not
+        // in the palette, so the generic swap cannot find them. Redo them.
+        public void Restyle()
+        {
+            try
+            {
+                logBox.BackColor = Theme.LogBg;
+                logBox.ForeColor = Theme.LogFg;
+                logBox.Font = Theme.Mono();
+                chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
+                chkSentry.ForeColor = Theme.Fg;
+                if (tray != null && tray.ContextMenuStrip != null) Theme.Menu(tray.ContextMenuStrip);
+                UpdateGuard();
+                if (pending != null) Announce(pending, false);   // repaint the button, do not re-toast
+                gauge.Invalidate();
+                repeatBadge.Invalidate();
+                listBoost.Invalidate();
+                listIdle.Invalidate();
+            }
+            catch (Exception) { }
         }
 
         // Closing the window while the sentry is up would let RAM drift back, so
@@ -5693,7 +5769,7 @@ namespace IdleMaster
             pending = r;
             btnUpdate.Text = "Update to " + r.Tag;
             btnUpdate.BackColor = Theme.Good;
-            btnUpdate.ForeColor = Color.White;
+            btnUpdate.ForeColor = Theme.OnAccent;
             btnUpdate.FlatAppearance.MouseOverBackColor = Theme.Lift(Theme.Good, 18);
             btnUpdate.FlatAppearance.MouseDownBackColor = Theme.Lift(Theme.Good, -12);
             btnUpdate.Enabled = true;
@@ -5797,10 +5873,12 @@ namespace IdleMaster
         // config immediately - no restart, no text editor.
         private void EditConfig()
         {
+            bool toTheme = false;
             using (QuickSettingsForm f = new QuickSettingsForm())
             {
                 f.ShowDialog(this);
-                if (!f.Saved) return;
+                toTheme = f.WantsTheme;
+                if (!f.Saved) { if (toTheme) OpenThemes(); return; }
             }
             bool wasStartup = cfg.StartWithWindows;
             try
@@ -5827,7 +5905,7 @@ namespace IdleMaster
 
         private Button BigButton(string text, string sub, Color color, int y)
         {
-            Button b = Theme.Button(text + "\n" + sub, color, Color.White);
+            Button b = Theme.Button(text + "\n" + sub, color, Theme.OnAccent);
             b.SetBounds(22, y, 640, 76);
             b.Font = Theme.Big();
             b.TextAlign = ContentAlignment.MiddleCenter;

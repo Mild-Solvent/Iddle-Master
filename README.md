@@ -424,6 +424,68 @@ otherwise. Apps go through `winget install` one at a time, so one failure costs
 one app. Without a bundled installer, the Idle Master step downloads the latest
 release. `--auto` starts with whatever the ini says ticked and no click.
 
+## Themes
+
+The first time Idle Master opens, it opens the way it always does — gauge
+reading, log already saying Ready — and then the whole window goes soft behind
+a sheet of frosted glass and one card asks what it should look like. Nothing is
+loading and nothing is hidden: what is behind the blur is the running app, and
+answering hands it straight back. You are asked once, ever. **Settings →
+Theme…**, or the tray menu, is the door from then on.
+
+Two ship inside the exe:
+
+| | |
+|---|---|
+| **Minimalistic** | one accent hue on a cold grey ladder — exactly what the app has always looked like. The default. |
+| **Terminal** | green phosphor on black, amber for trouble. The console, all the way out to the edges. |
+
+Picking one is instant. There is no restart: the palette that is going out is
+lined up against the one coming in, and every control on screen wearing colour
+N of the old look is handed colour N of the new one. A window switched at
+runtime is pixel-for-pixel identical to one that started that way — light
+themes included.
+
+### Making your own
+
+A theme is a text file. Both built-ins are written out to `themes\` next to the
+exe on first start precisely so there is something to copy:
+
+```ini
+name=Midnight
+about=Say something about it here.
+
+bg=#0d0f14              # the window itself
+panel=#181b22           # popups, menus, cards
+fg=#e2e6ec              # normal writing
+dim=#78808c             # hints, the small print
+accent=#8fc1f0          # titles and captions
+good=#1e4e78            # BOOST NOW and every primary action
+danger=#6e2830          # ABSOLUTE IDLE and every destructive one
+onaccent=#ffffff        # writing ON good/danger - flip this for a light theme
+monofont=Consolas
+```
+
+Eighteen colours and two font families, all optional — anything you leave out
+or mistype keeps the default, so a typo costs you one colour, not the app.
+Save it as `themes\midnight.imtheme`, restart, and it is in the picker. Delete
+the file and the theme is gone; delete `minimalistic.imtheme` and the built-in
+copy comes back, because those two are inside the exe as well and the app can
+never end up with nothing to draw with.
+
+### Getting more
+
+**Get more themes** on that card downloads `IdleMasterThemes.zip` from the same
+GitHub release post the app updates itself from, and unpacks the `.imtheme`
+files in it into `themes\`. No second server and nothing new to trust — if you
+trust the release enough to install the app from it, the themes are on the same
+page. Only `.imtheme` files are read, only their last path segment is used, and
+anything that will not parse is deleted again rather than left sitting in the
+picker doing nothing.
+
+Themes are just files, so sharing one is sending it. Or open a pull request and
+it ships in the bundle.
+
 ## The safety story
 
 This is a tool that kills processes on a machine you can only reach remotely, so
@@ -653,7 +715,9 @@ src/DiskScan.cs           the disk mapper: raw MFT reader + parallel-walk fallba
 src/Debloat.cs            the debloater: Store-app inventory, known-bloat table, removal
 src/Backup.cs             the backup kit: app inventory, zip writer, window
 src/Rebuild.cs            the standalone exe that ships inside a kit
-src/Theme.cs              the dark palette, fonts, and control styling
+src/Theme.cs              the palette facade, fonts, control styling, live re-theming
+src/Themes.cs             theme files: the format, the two built-ins, the bundle download
+src/ThemeGate.cs          the frosted first-run pane and the theme picker on it
 src/Setup.cs              the installer; carries the app as an embedded resource
 src/app.manifest          requireAdministrator + per-monitor DPI
 src/idlemaster.ico        the icon; make-icon.ps1 draws it
@@ -664,6 +728,7 @@ dist/IdleMasterSetup.exe  the thing you publish and people download
 dist/idlemaster.ini       the lists; edit in Settings or by hand
 dist/idlemaster.log       append-only record of every run
 dist/idlemaster.state     written by boost/idle, consumed by restore
+dist/themes/*.imtheme     one look each; copy one to make your own
 ```
 
 ## License

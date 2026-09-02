@@ -380,7 +380,7 @@ namespace IdleMaster
                 Label(g, c, r);
             }
 
-            if (chosen != null) Outline(g, chosen, Color.White, 2);
+            if (chosen != null) Outline(g, chosen, Theme.Fg, 2);
             if (hot != null && hot != chosen) Outline(g, hot, Theme.Accent, 1);
         }
 
