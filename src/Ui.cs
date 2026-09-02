@@ -7,7 +7,7 @@
 //   ListPane          : one editable ini section inside the advanced window.
 //   QuickSettingsForm : the handful of switches most people actually touch.
 //   ConfigForm        : the whole config - reached via "Advanced settings".
-//   EatersForm        : the full task manager behind "What's eating RAM?".
+//   EatersForm        : the full task manager behind the "Task manager" button.
 //   CleanupForm       : the disk-map tree behind "Disk cleanup".
 //   MainForm          : gauge, mode buttons, and the log console front and centre.
 //
@@ -1585,7 +1585,7 @@ namespace IdleMaster
             filter.SetBounds(152, 11, 230, 22);
             filter.TextChanged += delegate { Rebuild(); };
             Controls.Add(filter);
-            Cue(filter, "filter by name or publisher");
+            Theme.Cue(filter, "filter by name or publisher");
 
             chkPerProcess = new CheckBox();
             chkPerProcess.Text = "every process separately";
@@ -1675,20 +1675,6 @@ namespace IdleMaster
         private void Add(int i, string text, int width, HorizontalAlignment align)
         {
             cols[i] = eaters.Columns.Add(text, width, align);
-        }
-
-        // The grey prompt inside an empty filter box. Cheaper than a label that
-        // has to be shown and hidden in step with the text.
-        private const int EM_SETCUEBANNER = 0x1501;
-
-        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet =
-            System.Runtime.InteropServices.CharSet.Unicode)]
-        private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr wp, string lp);
-
-        private static void Cue(TextBox t, string text)
-        {
-            try { SendMessage(t.Handle, EM_SETCUEBANNER, (IntPtr)1, text); }
-            catch (Exception) { }
         }
 
         private ContextMenuStrip BuildMenu(out ToolStripMenuItem kill,
@@ -1796,7 +1782,7 @@ namespace IdleMaster
                 if (!rightAligned) a.X = r.Right - 12;
                 else r.X += 12;
                 r.Width -= 12;
-                TextRenderer.DrawText(e.Graphics, sortDown ? "â–¾" : "â–´", eaters.Font, a,
+                TextRenderer.DrawText(e.Graphics, sortDown ? "▾" : "▴", eaters.Font, a,
                     Theme.Accent, TextFormatFlags.HorizontalCenter
                         | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
@@ -2035,16 +2021,16 @@ namespace IdleMaster
                 : rows.Count + noun;
             // In per-process mode the row count already IS the process count,
             // and "196 processes - 196 processes running" says nothing twice.
-            if (!perProcess) what += "   Â·   " + sampler.ProcessCount + " processes running";
+            if (!perProcess) what += "   ·   " + sampler.ProcessCount + " processes running";
             status.Text = what
-                + (ProcQuery.Detailed ? "" : "   Â·   no CPU or disk figures on this machine");
+                + (ProcQuery.Detailed ? "" : "   ·   no CPU or disk figures on this machine");
 
             ulong totalMb, freeMb;
             Engine.ReadMemory(out totalMb, out freeMb);
             ulong usedMb = totalMb > freeMb ? totalMb - freeMb : 0;
 
             meter.Text = string.Format(CultureInfo.InvariantCulture,
-                "CPU {0}%   Â·   disk {1}   Â·   RAM {2:0.0} / {3:0.0} GB",
+                "CPU {0}%   ·   disk {1}   ·   RAM {2:0.0} / {3:0.0} GB",
                 sampler.HaveRates ? ProcSampler.Percent(sampler.TotalCpu) : "-",
                 ProcSampler.Rate(sampler.TotalIo),
                 usedMb / 1024.0, totalMb / 1024.0);
@@ -2311,6 +2297,15 @@ namespace IdleMaster
         private readonly Config cfg;
         private readonly Action<string> log;
         private readonly CleanTree tree;
+        // Three views of the same scan, one at a time. The findings tree is
+        // the default and the only one that can tick and clean; the other two
+        // are the drive itself, for the question a curated list cannot answer.
+        private readonly WizTreeView wiz;       // folder tree with columns
+        private readonly Panel mapPanel;        // the treemap
+        private readonly TreeMapView map;
+        private readonly Label crumb, mapInfo;
+        private readonly Button btnUp;
+        private readonly ComboBox cmbView;      // one switch, three views
         private readonly ComboBox cmbSize, cmbClass;
         private readonly TextBox txtName;
         private readonly CheckBox chkTicked;
@@ -2328,6 +2323,7 @@ namespace IdleMaster
         private CleanupScanner scanner;
         private bool working;
         private bool syncing;       // programmatic check changes, ignore events
+        private bool syncingView;   // SetView driving the switch, not the user
 
         // The model the tree is rebuilt from: every finding the scan produced
         // (filters only hide, never forget), and every tick the user made,
@@ -2364,7 +2360,7 @@ namespace IdleMaster
             // ---- the filter bar
 
             Label lf = Theme.Hint("show");
-            lf.SetBounds(16, 40, 34, 22);
+            lf.SetBounds(16, 40, 36, 22);   // 34 clipped it to "sho"
             lf.TextAlign = ContentAlignment.MiddleLeft;
             Controls.Add(lf);
 
@@ -2396,11 +2392,12 @@ namespace IdleMaster
             txtName.TextChanged += delegate { RebuildTree(); };
             Controls.Add(txtName);
 
-            Label lt = Theme.Hint("type to filter by name");
-            lt.Font = small;
-            lt.SetBounds(448, 42, 140, 18);
-            lt.TextAlign = ContentAlignment.MiddleLeft;
-            Controls.Add(lt);
+            // The prompt lives inside the box rather than on a label beside
+            // it: the label used to hold 448..588 of this row, and the two view
+            // switches below need that strip. A label there also sat ON TOP of
+            // them - controls added later paint behind, so "drive tree" was
+            // invisible until this moved.
+            Theme.Cue(txtName, "type to filter by name");
 
             // The review switch: a flat list of exactly what Clean will take,
             // paths and all, so nothing hides in a collapsed branch.
@@ -2412,6 +2409,26 @@ namespace IdleMaster
             chkTicked.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             chkTicked.CheckedChanged += delegate { RebuildTree(); };
             Controls.Add(chkTicked);
+
+            // One switch, not two checkboxes. The three views are one-or-the-
+            // other by nature, and a pair of tickboxes both says otherwise and
+            // leaves "neither ticked" needing a meaning. A dropdown makes the
+            // choice exclusive by construction, and matches the two beside it.
+            //
+            // The findings tree stays first, and stays the default: it is the
+            // only view that can tick things and clean them. The other two are
+            // the drive itself, for the question a curated list is bad at.
+            cmbView = new ComboBox();
+            cmbView.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbView.FlatStyle = FlatStyle.Flat;
+            Theme.Input_(cmbView);
+            cmbView.Items.AddRange(new object[]
+                { "findings", "drive tree", "drive map" });
+            cmbView.SelectedIndex = 0;
+            cmbView.SetBounds(452, 39, 122, 24);
+            cmbView.SelectedIndexChanged += delegate
+            { if (!syncingView) SetView(cmbView.SelectedIndex); };
+            Controls.Add(cmbView);
 
             // ---- the tree
 
@@ -2438,6 +2455,55 @@ namespace IdleMaster
                 | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(tree);
 
+            wiz = new WizTreeView();
+            wiz.SetBounds(16, 70, 812, 454);
+            wiz.Anchor = AnchorStyles.Top | AnchorStyles.Bottom
+                | AnchorStyles.Left | AnchorStyles.Right;
+            wiz.Visible = false;
+            wiz.SelectionChanged += delegate { DescribeWiz(); };
+            Controls.Add(wiz);
+
+            // Same rectangle as the tree, same anchors, shown instead of it.
+            mapPanel = new Panel();
+            mapPanel.SetBounds(16, 70, 812, 454);
+            mapPanel.Anchor = AnchorStyles.Top | AnchorStyles.Bottom
+                | AnchorStyles.Left | AnchorStyles.Right;
+            mapPanel.BackColor = Theme.Bg;
+            mapPanel.Visible = false;
+            Controls.Add(mapPanel);
+
+            btnUp = Theme.Quiet("^ up");
+            btnUp.SetBounds(0, 0, 56, 22);
+            btnUp.Font = small;
+            btnUp.Click += delegate { map.Up(); };
+            mapPanel.Controls.Add(btnUp);
+
+            crumb = Theme.Hint("");
+            crumb.SetBounds(62, 2, 750, 18);
+            crumb.AutoEllipsis = true;
+            crumb.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            mapPanel.Controls.Add(crumb);
+
+            map = new TreeMapView();
+            map.SetBounds(0, 26, 812, 404);
+            map.Anchor = AnchorStyles.Top | AnchorStyles.Bottom
+                | AnchorStyles.Left | AnchorStyles.Right;
+            map.RootChanged += delegate { UpdateCrumb(); };
+            map.CellChosen += delegate(object o, MapCellEventArgs a) { DescribeCell(a.Cell); };
+            map.CellActivated += delegate(object o, MapCellEventArgs a)
+            {
+                if (a.Cell.IsDir) map.Down(a.Cell.Node);
+                else DescribeCell(a.Cell);
+            };
+            mapPanel.Controls.Add(map);
+
+            mapInfo = Theme.Hint("click a block to see what it is - double-click a folder to go in");
+            mapInfo.Font = small;
+            mapInfo.SetBounds(0, 434, 812, 18);
+            mapInfo.AutoEllipsis = true;
+            mapInfo.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            mapPanel.Controls.Add(mapInfo);
+
             ContextMenuStrip menu = new ContextMenuStrip();
             Theme.Menu(menu);
             miOpen = new ToolStripMenuItem("Open in Explorer");
@@ -2457,6 +2523,10 @@ namespace IdleMaster
             tree.ContextMenuStrip = menu;
             tree.NodeMouseClick += delegate(object s, TreeNodeMouseClickEventArgs a)
             { if (a.Button == MouseButtons.Right) tree.SelectedNode = a.Node; };
+            // Identical menu on the map: SelectedTag() answers for whichever
+            // view is showing, so every verdict below works unchanged.
+            map.ContextMenuStrip = menu;
+            wiz.ContextMenuStrip = menu;
 
             // ---- the buttons
 
@@ -2932,7 +3002,10 @@ namespace IdleMaster
             if (item != null) return null;      // a curated finding
 
             // an ancestor already ticked takes this whole folder with it
-            for (TreeNode p = node.Parent; p != null; p = p.Parent)
+            // The map has no TreeNode behind the selection. The ticked-ancestor
+            // test is about the tree's checkboxes, so with no node there is
+            // nothing it could find - the path rules below still apply.
+            for (TreeNode p = node == null ? null : node.Parent; p != null; p = p.Parent)
             {
                 CleanupItem pi = p.Tag as CleanupItem;
                 FsRef pf = p.Tag as FsRef;
@@ -3246,10 +3319,123 @@ namespace IdleMaster
             catch (Exception) { return 0; }
         }
 
+        // ---- the map view
+
+        // Swaps the views and seeds the map the first time it is asked for.
+        // The filter row is disabled while the map is up rather than left
+        // looking live: it filters the tree's findings, and the map draws the
+        // drive, so nothing it did would show.
+        // 0 = the findings tree, 1 = the drive as a columned tree, 2 = the
+        // drive as a treemap.
+        private void SetView(int mode)
+        {
+            if (mode < 0 || mode > 2) mode = 0;
+            syncingView = true;
+            try { cmbView.SelectedIndex = mode; }
+            finally { syncingView = false; }
+
+            tree.Visible = mode == 0;
+            wiz.Visible = mode == 1;
+            mapPanel.Visible = mode == 2;
+
+            // The filter row filters the scan's FINDINGS. The other two views
+            // draw the drive, so nothing it did would show - disabled rather
+            // than left looking live.
+            bool findings = mode == 0;
+            cmbSize.Enabled = findings;
+            cmbClass.Enabled = findings;
+            txtName.Enabled = findings;
+            chkTicked.Enabled = findings;
+
+            if (mode == 1) { SeedWiz(); wiz.Focus(); }
+            else if (mode == 2) { SeedMap(); map.Focus(); }
+            UpdateCrumb();
+        }
+
+        // Both drive views open on the drive the user is already looking at.
+        private DiskTree PickTree(out int node)
+        {
+            node = -1;
+            FsRef f = tree.SelectedNode == null ? null : tree.SelectedNode.Tag as FsRef;
+            if (f != null && f.Tree != null)
+            {
+                node = f.Node;
+                try { if (!f.Tree.IsDir(node)) node = f.Tree.Parent[node]; }
+                catch (Exception) { }
+                if (node >= 0) return f.Tree;
+            }
+            if (scanner != null && scanner.Trees.Count > 0)
+            {
+                DiskTree t = scanner.Trees[0];
+                node = t.RootNode;
+                return t;
+            }
+            return null;
+        }
+
+        // The columned tree always opens at the drive root: it expands, so
+        // there is nothing to gain by starting mid-drive, and starting there
+        // would hide the branch you were trying to compare against.
+        private void SeedWiz()
+        {
+            int node;
+            DiskTree t = PickTree(out node);
+            if (t != null) wiz.Show(t, t.RootNode);
+        }
+
+        private void DescribeWiz()
+        {
+            FsRef f = wiz.Selected;
+            if (f == null) return;
+            progress.Text = CleanupScanner.Nice(f.Bytes) + "   " + f.Path;
+        }
+
+        // Start where the user already is: if a folder in the tree is selected,
+        // open the map on that folder, so the switch keeps their place instead
+        // of throwing them back to the drive root.
+        private void SeedMap()
+        {
+            int node;
+            DiskTree t = PickTree(out node);
+            if (t != null) map.Show(t, node, false);
+            else map.Show(null, -1, false);
+        }
+
+        private void UpdateCrumb()
+        {
+            if (!mapPanel.Visible) return;
+            string path = map.RootPath;
+            crumb.Text = path.Length == 0
+                ? "nothing scanned yet - press Scan"
+                : path + "     " + CleanupScanner.Nice(map.RootBytes);
+            btnUp.Enabled = map.CanGoUp;
+        }
+
+        private void DescribeCell(MapCell c)
+        {
+            if (c == null) return;
+            string path;
+            try { path = c.Tree.PathOf(c.Node); }
+            catch (Exception) { return; }
+            long bytes = 0;
+            try { bytes = c.Tree.Bytes[c.Node]; } catch (Exception) { }
+            mapInfo.Text = CleanupScanner.Nice(bytes) + "   "
+                + (c.IsDir ? "folder" : "file") + "   " + path;
+        }
+
         // ---- the right-click verdicts
 
+        // The one place the two views meet. Everything downstream - the menu,
+        // Open, Copy, Protect, Clean just this one - asks this and never has to
+        // know which view the user is looking at.
         private object SelectedTag()
         {
+            if (wiz.Visible) return wiz.Selected;
+            if (mapPanel.Visible)
+            {
+                MapCell c = map.Chosen;
+                return c == null ? null : new FsRef(c.Tree, c.Node);
+            }
             return tree.SelectedNode == null ? null : tree.SelectedNode.Tag;
         }
 
@@ -4513,7 +4699,7 @@ namespace IdleMaster
 
             btnRestore = SmallButton("Restore desktop", 22, 306);
             btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = SmallButton("What's eating RAM?", 182, 306);
+            btnEaters = SmallButton("Task manager", 182, 306);
             btnEaters.Click += delegate { OpenEaters(); };
             btnTrim = SmallButton("Trim RAM now", 342, 306);
             btnTrim.Click += delegate { Run("trim"); };

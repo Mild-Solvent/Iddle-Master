@@ -113,6 +113,21 @@ namespace IdleMaster
             return l;
         }
 
+        // The grey prompt inside an empty text box. Cheaper than a label beside
+        // it that has to be shown and hidden in step with the text - and it
+        // does not eat a strip of the row that something else could use.
+        private const int EM_SETCUEBANNER = 0x1501;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr wp, string lp);
+
+        public static void Cue(TextBox t, string text)
+        {
+            try { SendMessage(t.Handle, EM_SETCUEBANNER, (IntPtr)1, text); }
+            catch (Exception) { }
+        }
+
         public static Label Hint(string text)
         {
             Label l = new Label();

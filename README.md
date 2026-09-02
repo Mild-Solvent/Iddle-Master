@@ -549,13 +549,20 @@ Set `KillExplorer=0` in the ini and idle mode leaves the shell alone.
 
 ## Tuning it
 
-The fastest way is **What's eating RAM?**, which opens the Master's own little
-task manager: a live table that refreshes every two seconds, tags each row with
-the list it is on
-(`BOOST` / `IDLE` / `KEEP`), and a right-click offers *End it now*, *Close on
-every boost*, *Also close on absolute idle*, or *Never touch* — each choice is
-written straight into the ini, dated, and picked up by a running sentry on its
-next sweep.
+The fastest way is **Task manager**, which opens the Master's own: every
+process on the machine, not a top-thirty list, with CPU %, memory, disk, threads
+and uptime, sortable on any column and filterable by typing. A switch folds the
+rows by app or opens them out one per pid. Each row is tagged with the list it
+is on (`BOOST` / `IDLE` / `KEEP`).
+
+**Double-click ends a process. There is no confirmation dialog** — the engine
+re-checks every pid against the protected list, the protected trees and the
+protected paths before it touches anything, so a `KEEP` row cannot die however
+hard you click it. `Del` ends everything selected.
+
+A right-click also offers *Close on every boost*, *Also close on absolute idle*,
+or *Never touch* — each choice is written straight into the ini, dated, and
+picked up by a running sentry on its next sweep.
 
 **Settings** opens the switches most people touch — sentry on/off, ask-before-
 kill, tray, sweep interval, emergency trim — in plain words. **Advanced
