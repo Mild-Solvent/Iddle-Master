@@ -319,6 +319,97 @@ namespace IdleMaster
     }
 
 
+    // ------------------------------------------------------------ update badge
+
+    // "Check for updates" as a corner icon rather than a button in the grid: an
+    // arrow pointing up, top right of the window, level with the title.
+    //
+    // It has exactly two things to say and it says them with colour. White while
+    // there is nothing new - an outlined arrow, bright enough that you can still
+    // find it in the corner and click it whenever you want to ask - and a filled
+    // green disc the moment a newer release is known, because "there is an
+    // update" is worth a colour of its own. Green means: click me, it installs.
+    internal sealed class UpdateBadge : Control
+    {
+        private bool ready;             // a newer release is waiting for a click
+        private bool busy;              // asking GitHub, or downloading
+        private bool hot;
+
+        public UpdateBadge()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(34, 34);
+            BackColor = Theme.Bg;
+            Cursor = Cursors.Hand;
+            TabStop = false;
+        }
+
+        // Busy is not Enabled=false: the icon stays lit and simply goes dim and
+        // unclickable while GitHub is answering, so the corner never blinks out.
+        public bool Busy { get { return busy; } }
+
+        public void Set(bool isReady, bool isBusy)
+        {
+            if (isReady == ready && isBusy == busy) return;
+            ready = isReady;
+            busy = isBusy;
+            Cursor = isBusy ? Cursors.Default : Cursors.Hand;
+            Invalidate();
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        { hot = true; Invalidate(); base.OnMouseEnter(e); }
+
+        protected override void OnMouseLeave(EventArgs e)
+        { hot = false; Invalidate(); base.OnMouseLeave(e); }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (SolidBrush b = new SolidBrush(BackColor))
+                g.FillRectangle(b, ClientRectangle);
+
+            float s = Math.Min(Width, Height) / 34f;         // scale off the 34 px design
+            Rectangle disc = new Rectangle((int)(2 * s), (int)(2 * s),
+                (int)(Width - 4 * s) - 1, (int)(Height - 4 * s) - 1);
+
+            Color skin = busy ? Theme.Dim : (ready ? Theme.Ready : Color.White);
+            if (hot && !busy) skin = Theme.Lift(skin, ready ? 20 : 0);
+
+            // Waiting: an outline, so the corner stays quiet. Ready: the disc
+            // fills green and the arrow flips to white - visible across the room.
+            Color ink;
+            if (ready)
+            {
+                using (SolidBrush b = new SolidBrush(skin)) g.FillEllipse(b, disc);
+                ink = Color.White;
+            }
+            else
+            {
+                if (hot)
+                    using (SolidBrush b = new SolidBrush(Theme.Neutral)) g.FillEllipse(b, disc);
+                using (Pen pen = new Pen(skin, 2f * s)) g.DrawEllipse(pen, disc);
+                ink = skin;
+            }
+
+            // The arrow: a head and a shaft, pointing up, centred on the disc.
+            float cx = disc.X + disc.Width / 2f, cy = disc.Y + disc.Height / 2f;
+            using (SolidBrush b = new SolidBrush(ink))
+            {
+                g.FillPolygon(b, new PointF[]
+                {
+                    new PointF(cx,             cy - 8.0f * s),
+                    new PointF(cx - 6.4f * s,  cy - 0.6f * s),
+                    new PointF(cx + 6.4f * s,  cy - 0.6f * s)
+                });
+                g.FillRectangle(b, cx - 2.2f * s, cy - 1.6f * s, 4.4f * s, 9.2f * s);
+            }
+        }
+    }
+
+
     // ------------------------------------------------------------ repeat badge
 
     // The repeat loop, folded into the BOOST NOW button: a refresh arrow on the
@@ -4590,13 +4681,15 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnUpdate, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
+        private readonly UpdateBadge updateBadge;   // the corner arrow: white waiting, green when a release is out
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
         private readonly RepeatBadge repeatBadge;   // the repeat loop, riding on BOOST NOW
         private readonly ListBadge listBoost, listIdle;   // each button's own lists, riding on its left
         private readonly ToolTip listTip = new ToolTip();
         private readonly ToolTip repeatTip = new ToolTip();
+        private readonly ToolTip updateTip = new ToolTip();
         private readonly Label sentryLabel;
         private readonly Label updateLabel;
         private readonly System.Windows.Forms.Timer timer;
@@ -4648,6 +4741,18 @@ namespace IdleMaster
                 + App.Version);
             sub.SetBounds(22, 50, 500, 20);
             Controls.Add(sub);
+
+            // Updates live in the corner now instead of in the button grid: an
+            // arrow pointing up beside the title, white while there is nothing
+            // to say, green the moment a newer release is known. Clicking it
+            // asks GitHub; clicking it once it is green installs. The line under
+            // the buttons still carries the words - the arrow is the colour.
+            updateBadge = new UpdateBadge();
+            updateBadge.SetBounds(620, 16, 34, 34);
+            updateBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            updateBadge.Click += delegate { CheckUpdates(); };
+            Controls.Add(updateBadge);
+            updateTip.SetToolTip(updateBadge, "Check for updates");
 
             gauge = new MemGauge();
             gauge.SetBounds(22, 78, 640, 36);
@@ -4711,27 +4816,22 @@ namespace IdleMaster
             btnBackup = SmallButton("Backup kit", 182, 342);
             btnBackup.Click += delegate { OpenBackup(); };
 
-            btnUpdate = Theme.Quiet("Check for updates");
-            btnUpdate.SetBounds(342, 342, 152, 30);
-            btnUpdate.Click += delegate { CheckUpdates(); };
-            Controls.Add(btnUpdate);
-
             // The network guard's page. The button itself goes red while the
-            // guard is fighting something, the way the update button goes
-            // blue when there is news.
-            btnNetGuard = SmallButton("Network guard", 502, 342);
+            // guard is fighting something, the way the corner arrow goes green
+            // when there is news.
+            btnNetGuard = SmallButton("Network guard", 342, 342);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
 
-            btnDebloat = SmallButton("Debloat", 22, 378);
+            btnDebloat = SmallButton("Debloat", 502, 342);
             btnDebloat.Click += delegate { OpenDebloat(); };
 
-            btnRemote = SmallButton("Remote desktop setup", 182, 378);
+            btnRemote = SmallButton("Remote desktop setup", 22, 378);
             btnRemote.Click += delegate { OpenRemote(); };
 
             // Two doors to other people's debloaters - launched, not imitated.
-            btnWinUtil = SmallButton("ChrisTitus WinUtil", 342, 378);
+            btnWinUtil = SmallButton("ChrisTitus WinUtil", 182, 378);
             btnWinUtil.Click += delegate { RunWinUtil(); };
-            btnZoic = SmallButton("Zoicware", 502, 378);
+            btnZoic = SmallButton("Zoicware", 342, 378);
             btnZoic.Click += delegate { RunZoicware(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
@@ -5646,8 +5746,9 @@ namespace IdleMaster
         // say so, and the installer that arrives is the one you publish.
         private void CheckUpdates()
         {
+            if (updateBadge.Busy) return;
             if (pending != null) { InstallPending(); return; }
-            btnUpdate.Enabled = false;
+            updateBadge.Set(false, true);
             Status("asking GitHub...", Theme.Dim);
             AppendLog("Checking " + Updater.Repo + " for releases newer than " + App.Version + "...");
             Ask_(true);
@@ -5686,17 +5787,13 @@ namespace IdleMaster
             Announce(r, true);
         }
 
-        // A newer release is known: the button becomes the update, the tray
-        // says so once, and one click on either does the whole thing.
+        // A newer release is known: the corner arrow goes green, the tray says
+        // so once, and one click on either does the whole thing.
         private void Announce(Updater.Release r, bool toast)
         {
             pending = r;
-            btnUpdate.Text = "Update to " + r.Tag;
-            btnUpdate.BackColor = Theme.Good;
-            btnUpdate.ForeColor = Color.White;
-            btnUpdate.FlatAppearance.MouseOverBackColor = Theme.Lift(Theme.Good, 18);
-            btnUpdate.FlatAppearance.MouseDownBackColor = Theme.Lift(Theme.Good, -12);
-            btnUpdate.Enabled = true;
+            updateBadge.Set(true, false);
+            updateTip.SetToolTip(updateBadge, "Update to " + r.Tag + " - click to install");
             Status(r.Tag + " is available - one click installs it and brings Idle Master back", Theme.Accent);
             if (toast) AppendLog(r.Tag + " is available (you are on " + App.Version + "). "
                 + "'Update to " + r.Tag + "' does it in one click; your idlemaster.ini is kept.");
@@ -5723,7 +5820,7 @@ namespace IdleMaster
         {
             Updater.Release r = pending;
             if (r == null) return;
-            btnUpdate.Enabled = false;
+            updateBadge.Set(true, true);
             try
             {
                 AppendLog("Downloading " + r.Tag + "...");
@@ -5737,7 +5834,7 @@ namespace IdleMaster
             }
             catch (Exception ex)
             {
-                btnUpdate.Enabled = true;
+                updateBadge.Set(true, false);
                 Status("update failed - " + ex.Message.Split('\n')[0], Theme.Warn);
                 AppendLog("! update failed: " + ex.Message.Split('\n')[0]);
             }
@@ -5745,7 +5842,7 @@ namespace IdleMaster
 
         private void Finish(Updater.Release r, string failure)
         {
-            btnUpdate.Enabled = true;
+            updateBadge.Set(pending != null, false);
 
             if (failure != null)
             {
@@ -5780,8 +5877,8 @@ namespace IdleMaster
                 "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
                 != DialogResult.Yes)
             {
-                AppendLog("Update available (" + r.Tag + ") - not installed; the button stays "
-                    + "'Update to " + r.Tag + "' whenever you want it.");
+                AppendLog("Update available (" + r.Tag + ") - not installed; the corner arrow "
+                    + "stays green and installs " + r.Tag + " whenever you want it.");
                 return;
             }
             InstallPending();

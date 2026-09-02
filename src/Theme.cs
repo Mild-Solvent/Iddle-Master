@@ -34,6 +34,11 @@ namespace IdleMaster
         public static readonly Color Warn    = Color.FromArgb(208, 132, 132);   // soft red - failures, idle tag
         public static readonly Color Track   = Color.FromArgb(35, 40, 51);
 
+        // The one green in the palette, and it means exactly one thing: a newer
+        // release is sitting there waiting for a click. Nothing else in the app
+        // is allowed to go green, so the corner arrow turning colour IS the news.
+        public static readonly Color Ready   = Color.FromArgb(56, 170, 104);
+
         // Blue while fine, reddening as RAM runs out - the only place a colour
         // change is the message itself.
         public static readonly Color GaugeOk   = Color.FromArgb(61, 126, 191);

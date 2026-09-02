@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.17.0.0")]
-[assembly: AssemblyFileVersion("0.17.0.0")]
+[assembly: AssemblyVersion("0.18.0.0")]
+[assembly: AssemblyFileVersion("0.18.0.0")]
 
 namespace IdleMaster
 {
@@ -858,9 +858,10 @@ AskAboveMb=250
 # the tray menu when you actually want it gone.
 Tray=1
 # Ask GitHub for a newer release this many hours apart (first check a minute
-# after start). Something newer = a tray toast and an ""Update to vX"" button;
-# one click downloads it, installs it in place and brings Idle Master back.
-# Your idlemaster.ini is never touched. 0 = only when you press the button.
+# after start). Something newer = a tray toast and the arrow in the top right
+# corner going green; one click on it downloads the release, installs it in
+# place and brings Idle Master back. Your idlemaster.ini is never touched.
+# 0 = only when you press the arrow.
 UpdateCheckHours=6
 # Start Idle Master as you log in (a logon scheduled task, created or removed
 # when you save Settings - the checkbox there is the switch).
