@@ -7,7 +7,7 @@
 //   ListPane          : one editable ini section inside the advanced window.
 //   QuickSettingsForm : the handful of switches most people actually touch.
 //   ConfigForm        : the whole config - reached via "Advanced settings".
-//   EatersForm        : the live task manager behind "What's eating RAM?".
+//   EatersForm        : the full task manager behind "What's eating RAM?".
 //   CleanupForm       : the disk-map tree behind "Disk cleanup".
 //   MainForm          : gauge, mode buttons, and the log console front and centre.
 //
@@ -20,6 +20,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.ServiceProcess;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -1474,25 +1475,89 @@ namespace IdleMaster
     // by the task manager and the disk cleanup window.
     internal sealed class BufferedListView : ListView
     {
+        [System.Runtime.InteropServices.DllImport("uxtheme.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr h, string app, string idList);
+
         public BufferedListView() { DoubleBuffered = true; }
+
+        // A dark list with a bright white scrollbar down the side is the one
+        // thing that gives the theme away. Same trick as CleanTree, and it has
+        // to be the Explorer class: DarkMode_ItemsView leaves the scrollbar
+        // white. It also rules a hairline down every column boundary, which on
+        // a ten-column table is worth having.
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try { SetWindowTheme(Handle, "DarkMode_Explorer", null); } catch (Exception) { }
+        }
     }
 
-    // The Master's task manager: what's eating RAM, live, with the verdicts one
-    // right-click away. Opened by the main window; non-modal so the log stays
-    // visible while you work through the list.
+    // The Master's task manager. It started as a top-30 list of who was holding
+    // the most RAM; it is now the whole machine - every process, with CPU, disk,
+    // threads, handles, uptime and the exe's real name, sortable on any column
+    // and filterable by typing. The census behind it is ProcSampler, which asks
+    // the kernel for one table rather than opening a handle per process, so a
+    // 400-process list costs about as much as the old 30-name one did.
+    //
+    // Three things make it feel like a tool rather than a report:
+    //   - the list is virtual, so sorting 400 rows is instant and never flickers
+    //   - a row is one app by default and one process when you ask, because the
+    //     kill lists are written per name but a runaway is usually one pid
+    //   - double-click ends it, with no dialog in the way. That is deliberate.
+    //     The engine already refuses to touch anything protected (Reap re-checks
+    //     every pid), so the dialog was only ever asking permission for things
+    //     that were already safe to do - and asking it every single time.
+    //
+    // Non-modal, so the log stays visible while you work through the list.
     internal sealed class EatersForm : Form
     {
-        private const int MaxRows = 30;
+        // Columns, in the order they are added. Sorting, painting and the
+        // header arrow all index off this.
+        private const int ColProcess = 0;
+        private const int ColDesc = 1;
+        private const int ColWho = 2;      // "Instances" grouped, "PID" expanded
+        private const int ColCpu = 3;
+        private const int ColMem = 4;
+        private const int ColDisk = 5;
+        private const int ColThreads = 6;
+        private const int ColUp = 7;
+        private const int ColWindow = 8;
+        private const int ColTag = 9;
+        private const int ColCount = 10;
+
+        private static readonly int[] Rates = new int[] { 1000, 2000, 5000, 0 };
 
         private readonly Config cfg;
         private readonly Engine engine;
         private readonly Action<string> log;
         private readonly Func<bool> sentryAlive;
+        private readonly ProcSampler sampler = new ProcSampler();
+
         private readonly BufferedListView eaters;
-        private readonly ColumnHeader colName, colCount, colMem, colTag;
-        private readonly ToolStripMenuItem miKill, miBoost, miIdle, miProtect;
+        private readonly ColumnHeader[] cols = new ColumnHeader[ColCount];
+        private readonly TextBox filter;
+        private readonly CheckBox chkPerProcess;
+        private readonly Button btnRate;
+        private readonly Label status, meter;
+        private readonly ToolStripMenuItem miKill, miKillAndList, miBoost, miIdle, miProtect,
+            miWhere, miCopyName, miCopyPath, miPerProcess;
         private readonly System.Windows.Forms.Timer timer;
-        private bool rowMenuOpen;
+
+        // "all" is the last census; "rows" is what survived the filter and the
+        // sort, and is what the virtual list indexes into. They have to stay
+        // separate: filtering "rows" in place would narrow the list with every
+        // keystroke and never widen it again when you backspace.
+        private List<ProcRow> all = new List<ProcRow>();
+        private List<ProcRow> rows = new List<ProcRow>();
+        private ListViewItem[] cache = new ListViewItem[0];
+
+        private int sortCol = ColMem;
+        private bool sortDown = true;       // biggest first
+        private bool perProcess;
+        private int rateIndex = 1;          // 2 s
+        private bool sampling;
+        private bool menuOpen;
 
         public EatersForm(Config c, Engine e, Action<string> logger, Func<bool> sentryUp)
         {
@@ -1503,28 +1568,51 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER - task manager";
-            Size = new Size(640, 560);
-            MinimumSize = new Size(480, 320);
+            Size = new Size(980, 660);
+            MinimumSize = new Size(680, 380);
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
+            KeyPreview = true;
 
-            Label cap = Theme.Caption("WHAT'S EATING RAM");
-            cap.SetBounds(16, 12, 240, 18);
+            Label cap = Theme.Caption("TASK MANAGER");
+            cap.SetBounds(16, 14, 130, 18);
             Controls.Add(cap);
 
-            Label hint = Theme.Hint("updates every 2 s - right-click a row to act on it");
+            filter = new TextBox();
+            Theme.Input_(filter);
+            filter.SetBounds(152, 11, 230, 22);
+            filter.TextChanged += delegate { Rebuild(); };
+            Controls.Add(filter);
+            Cue(filter, "filter by name or publisher");
+
+            chkPerProcess = new CheckBox();
+            chkPerProcess.Text = "every process separately";
+            chkPerProcess.ForeColor = Theme.Fg;
+            chkPerProcess.FlatStyle = FlatStyle.Flat;
+            chkPerProcess.SetBounds(394, 11, 176, 22);
+            chkPerProcess.CheckedChanged += delegate { SetPerProcess(chkPerProcess.Checked); };
+            Controls.Add(chkPerProcess);
+
+            btnRate = Theme.Quiet("every 2 s");
+            btnRate.SetBounds(580, 10, 88, 24);
+            btnRate.Font = Theme.Small();
+            btnRate.Click += delegate { CycleRate(); };
+            Controls.Add(btnRate);
+
+            Label hint = Theme.Hint("double-click ends it - Del ends everything selected");
             hint.Font = Theme.Small();
             hint.TextAlign = ContentAlignment.MiddleRight;
-            hint.SetBounds(264, 12, 344, 18);
+            hint.SetBounds(676, 13, 288, 18);
             hint.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             Controls.Add(hint);
 
             eaters = new BufferedListView();
             eaters.View = View.Details;
+            eaters.VirtualMode = true;
             eaters.FullRowSelect = true;
-            eaters.MultiSelect = false;
+            eaters.MultiSelect = true;
             eaters.HideSelection = false;
-            eaters.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            eaters.HeaderStyle = ColumnHeaderStyle.Clickable;
             eaters.BorderStyle = BorderStyle.FixedSingle;
             eaters.BackColor = Theme.Input;
             eaters.ForeColor = Theme.Fg;
@@ -1532,176 +1620,547 @@ namespace IdleMaster
             eaters.DrawColumnHeader += DrawHeader;
             eaters.DrawItem += delegate(object s, DrawListViewItemEventArgs a) { a.DrawDefault = true; };
             eaters.DrawSubItem += delegate(object s, DrawListViewSubItemEventArgs a) { a.DrawDefault = true; };
-            colName = eaters.Columns.Add("Process", 320);
-            colCount = eaters.Columns.Add("Instances", 74, HorizontalAlignment.Right);
-            colMem = eaters.Columns.Add("Memory", 96, HorizontalAlignment.Right);
-            colTag = eaters.Columns.Add("Tag", 80);
-            eaters.SetBounds(16, 36, 592, 476);
+            eaters.RetrieveVirtualItem += Retrieve;
+            eaters.ColumnClick += HeaderClicked;
+            eaters.DoubleClick += delegate { EndSelected(); };
+            eaters.KeyDown += ListKey;
+
+            Add(ColProcess, "Process", 148, HorizontalAlignment.Left);
+            Add(ColDesc, "Description", 214, HorizontalAlignment.Left);
+            Add(ColWho, "Instances", 76, HorizontalAlignment.Right);
+            // Widths allow for the sort arrow, which takes a 12-pixel strip out
+            // of whichever column is sorted - too tight and the caption itself
+            // ellipsises the moment you sort by it.
+            Add(ColCpu, "CPU %", 70, HorizontalAlignment.Right);
+            Add(ColMem, "Memory", 88, HorizontalAlignment.Right);
+            Add(ColDisk, "Disk", 80, HorizontalAlignment.Right);
+            Add(ColThreads, "Threads", 70, HorizontalAlignment.Right);
+            Add(ColUp, "Running", 72, HorizontalAlignment.Right);
+            Add(ColWindow, "Open", 48, HorizontalAlignment.Left);
+            Add(ColTag, "Tag", 58, HorizontalAlignment.Left);
+
+            eaters.SetBounds(16, 42, 932, 542);
             eaters.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             eaters.Resize += delegate { SizeColumns(); };
             Controls.Add(eaters);
             SizeColumns();
 
-            ContextMenuStrip menu = new ContextMenuStrip();
-            Theme.Menu(menu);
-            miKill = new ToolStripMenuItem("End it now");
-            miKill.Click += delegate { KillSelected(); };
-            miBoost = new ToolStripMenuItem("Close on every boost");
-            miBoost.Click += delegate { AddSelected("boost.kill", "boost list"); };
-            miIdle = new ToolStripMenuItem("Also close on absolute idle");
-            miIdle.Click += delegate { AddSelected("idle.kill", "idle list"); };
-            miProtect = new ToolStripMenuItem("Never touch (protect)");
-            miProtect.Click += delegate { AddSelected("protect", "protected list"); };
-            menu.Items.Add(miKill);
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(miBoost);
-            menu.Items.Add(miIdle);
-            menu.Items.Add(miProtect);
-            menu.Opening += MenuOpening;
-            menu.Closed += delegate { rowMenuOpen = false; };
-            eaters.ContextMenuStrip = menu;
+            status = Theme.Hint("reading the process table...");
+            status.SetBounds(16, 594, 520, 20);
+            status.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            Controls.Add(status);
+
+            meter = Theme.Hint("");
+            meter.TextAlign = ContentAlignment.MiddleRight;
+            meter.ForeColor = Theme.ListFg;
+            meter.SetBounds(540, 594, 408, 20);
+            meter.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            Controls.Add(meter);
+
+            eaters.ContextMenuStrip = BuildMenu(out miKill, out miKillAndList, out miBoost,
+                out miIdle, out miProtect, out miWhere, out miCopyName, out miCopyPath,
+                out miPerProcess);
+
+            sampler.Prime();
 
             timer = new System.Windows.Forms.Timer();
-            timer.Interval = 2000;
+            timer.Interval = Rates[rateIndex];
             timer.Tick += delegate { RefreshNow(); };
             timer.Start();
             RefreshNow();
         }
 
+        private void Add(int i, string text, int width, HorizontalAlignment align)
+        {
+            cols[i] = eaters.Columns.Add(text, width, align);
+        }
+
+        // The grey prompt inside an empty filter box. Cheaper than a label that
+        // has to be shown and hidden in step with the text.
+        private const int EM_SETCUEBANNER = 0x1501;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet =
+            System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr wp, string lp);
+
+        private static void Cue(TextBox t, string text)
+        {
+            try { SendMessage(t.Handle, EM_SETCUEBANNER, (IntPtr)1, text); }
+            catch (Exception) { }
+        }
+
+        private ContextMenuStrip BuildMenu(out ToolStripMenuItem kill,
+            out ToolStripMenuItem killAndList, out ToolStripMenuItem boost,
+            out ToolStripMenuItem idle, out ToolStripMenuItem protect,
+            out ToolStripMenuItem where, out ToolStripMenuItem copyName,
+            out ToolStripMenuItem copyPath, out ToolStripMenuItem perProc)
+        {
+            ContextMenuStrip m = new ContextMenuStrip();
+            Theme.Menu(m);
+
+            kill = Item("End it now", delegate { EndSelected(); });
+            kill.ShortcutKeyDisplayString = "Del";
+            killAndList = Item("End it and close it on every boost from now on",
+                delegate { EndSelected(); AddSelected("boost.kill", "boost list"); });
+
+            boost = Item("Close on every boost", delegate { AddSelected("boost.kill", "boost list"); });
+            idle = Item("Also close on absolute idle", delegate { AddSelected("idle.kill", "idle list"); });
+            protect = Item("Never touch (protect)", delegate { AddSelected("protect", "protected list"); });
+
+            where = Item("Open the folder it lives in", delegate { OpenFolder(); });
+            copyName = Item("Copy name", delegate { Copy(false); });
+            copyPath = Item("Copy full path", delegate { Copy(true); });
+
+            perProc = Item("Show every process separately",
+                delegate { SetPerProcess(!perProcess); });
+            perProc.CheckOnClick = false;
+
+            m.Items.Add(kill);
+            m.Items.Add(killAndList);
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(boost);
+            m.Items.Add(idle);
+            m.Items.Add(protect);
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(where);
+            m.Items.Add(copyName);
+            m.Items.Add(copyPath);
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(perProc);
+            m.Opening += MenuOpening;
+            m.Closed += delegate { menuOpen = false; };
+            return m;
+        }
+
+        private static ToolStripMenuItem Item(string text, EventHandler onClick)
+        {
+            ToolStripMenuItem i = new ToolStripMenuItem(text);
+            i.Click += onClick;
+            return i;
+        }
+
+        // Process and description share whatever is left over; everything else
+        // is a number and keeps the width it was given.
+        //
+        // Only ever called when the width actually available has changed, so a
+        // column the user has dragged to their own width stays dragged. That
+        // includes the vertical scrollbar appearing: it takes its 17 pixels out
+        // of ClientSize the moment the list overflows, and columns laid out
+        // before that happened are what put a horizontal scrollbar underneath.
+        private int lastWidth = -1;
+
         private void SizeColumns()
         {
-            int rest = colCount.Width + colMem.Width + colTag.Width;
-            int w = eaters.ClientSize.Width - rest - 4;
-            if (w > 80) colName.Width = w;
+            // ClientSize only stops counting the vertical scrollbar once the
+            // scrollbar is actually up, and a list of every process on the
+            // machine always ends up with one. Laid out before it appears, the
+            // columns come out ~17px too wide and the list flashes a horizontal
+            // scrollbar on its first frame. So reserve it either way: the gap
+            // between Width and ClientSize says whether it is already counted.
+            int avail = eaters.ClientSize.Width;
+            int bar = SystemInformation.VerticalScrollBarWidth;
+            if (eaters.Width - avail < bar) avail -= bar;
+            lastWidth = eaters.ClientSize.Width;
+
+            int fixedWidth = 0;
+            for (int i = 0; i < ColCount; i++)
+                if (i != ColProcess && i != ColDesc) fixedWidth += cols[i].Width;
+
+            int spare = avail - fixedWidth - 4;
+            if (spare < 200) return;
+            cols[ColProcess].Width = (int)(spare * 0.42);
+            cols[ColDesc].Width = spare - cols[ColProcess].Width;
         }
 
         private void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
         {
             using (SolidBrush b = new SolidBrush(Theme.Panel))
                 e.Graphics.FillRectangle(b, e.Bounds);
-            TextFormatFlags align = e.ColumnIndex == 1 || e.ColumnIndex == 2
-                ? TextFormatFlags.Right : TextFormatFlags.Left;
+
+            bool sorted = e.ColumnIndex == sortCol;
+            bool rightAligned = e.Header.TextAlign == HorizontalAlignment.Right;
+
             Rectangle r = e.Bounds;
             r.Inflate(-6, 0);
-            TextRenderer.DrawText(e.Graphics, e.Header.Text, eaters.Font, r, Theme.Dim,
-                align | TextFormatFlags.VerticalCenter);
+
+            // The arrow gets a strip of its own rather than being glued onto
+            // the caption: "CPU %" in a 58-pixel column has no room to spare,
+            // and an appended arrow just pushed the caption into an ellipsis.
+            // It sits on the side the text is running away from.
+            if (sorted)
+            {
+                Rectangle a = r;
+                a.Width = 12;
+                if (!rightAligned) a.X = r.Right - 12;
+                else r.X += 12;
+                r.Width -= 12;
+                TextRenderer.DrawText(e.Graphics, sortDown ? "â–¾" : "â–´", eaters.Font, a,
+                    Theme.Accent, TextFormatFlags.HorizontalCenter
+                        | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+
+            TextRenderer.DrawText(e.Graphics, e.Header.Text, eaters.Font, r,
+                sorted ? Theme.Accent : Theme.Dim,
+                (rightAligned ? TextFormatFlags.Right : TextFormatFlags.Left)
+                    | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         }
 
-        // Rows are updated in place, keyed by name, so scroll position and the
-        // selection survive every 2-second refresh.
+        private void HeaderClicked(object sender, ColumnClickEventArgs e)
+        {
+            if (e.Column == sortCol) sortDown = !sortDown;
+            else
+            {
+                sortCol = e.Column;
+                // Numbers want their biggest first; names want A first. "Open"
+                // counts as a number here - the point of clicking it is to see
+                // what you have on screen, not what you do not.
+                sortDown = e.Column != ColProcess && e.Column != ColDesc
+                    && e.Column != ColTag;
+            }
+            eaters.Invalidate();
+            Rebuild();
+        }
+
+        private void CycleRate()
+        {
+            rateIndex = (rateIndex + 1) % Rates.Length;
+            int ms = Rates[rateIndex];
+            timer.Stop();
+            if (ms > 0)
+            {
+                timer.Interval = ms;
+                timer.Start();
+                btnRate.Text = "every " + (ms / 1000) + " s";
+                RefreshNow();
+            }
+            else btnRate.Text = "paused";
+        }
+
+        private void SetPerProcess(bool on)
+        {
+            if (perProcess == on) return;
+            perProcess = on;
+            if (chkPerProcess.Checked != on) chkPerProcess.Checked = on;
+            cols[ColWho].Text = on ? "PID" : "Instances";
+            eaters.Invalidate();
+            RefreshNow();
+        }
+
+        private void ListKey(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Delete) { EndSelected(); e.Handled = true; }
+            else if (e.KeyCode == Keys.F5) { RefreshNow(); e.Handled = true; }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keys)
+        {
+            if (keys == (Keys.Control | Keys.F)) { filter.Focus(); filter.SelectAll(); return true; }
+            if (keys == Keys.Escape && filter.Text.Length > 0) { filter.Clear(); return true; }
+            return base.ProcessCmdKey(ref msg, keys);
+        }
+
+        // ---- the census
+
+        // The sample itself is quick, but resolving an exe path the first time
+        // it is seen reads a file, and there is no reason for the UI thread to
+        // wait on a disk. One in flight at a time; a tick that lands while the
+        // last one is still out is simply dropped.
         public void RefreshNow()
         {
-            if (!Visible || WindowState == FormWindowState.Minimized || rowMenuOpen) return;
+            if (!Visible || WindowState == FormWindowState.Minimized || menuOpen) return;
+            if (sampling) return;
+            sampling = true;
 
-            List<ProcRow> rows = Engine.Snapshot(engine);
-            int n = Math.Min(MaxRows, rows.Count);
+            Thread t = new Thread(delegate()
+            {
+                List<ProcRow> got = null;
+                try { got = sampler.Sample(engine, perProcess); }
+                catch (Exception) { }
 
-            string selected = eaters.SelectedItems.Count > 0 ? eaters.SelectedItems[0].Name : null;
+                List<ProcRow> result = got;
+                try
+                {
+                    BeginInvoke((Action)delegate
+                    {
+                        sampling = false;
+                        if (result == null || IsDisposed) return;
+                        all = result;
+                        Rebuild();
+                    });
+                }
+                catch (Exception) { sampling = false; }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // Filter, sort, hand the list to the virtual view - and put the
+        // selection back on the same processes it was on before, which after a
+        // sort by CPU are almost never at the same row numbers.
+        private void Rebuild()
+        {
+            HashSet<string> selected = new HashSet<string>();
+            foreach (int i in eaters.SelectedIndices)
+                if (i >= 0 && i < rows.Count) selected.Add(rows[i].ListKey);
+
+            List<ProcRow> shown = Filtered();
+            shown.Sort(Compare);
+
             eaters.BeginUpdate();
             try
             {
-                Dictionary<string, bool> want = new Dictionary<string, bool>();
-                for (int i = 0; i < n; i++) want[rows[i].Key] = true;
-                for (int i = eaters.Items.Count - 1; i >= 0; i--)
-                    if (!want.ContainsKey(eaters.Items[i].Name)) eaters.Items.RemoveAt(i);
+                // Shrinking a virtual list under a live selection throws, so the
+                // selection is dropped first and restored by key afterwards.
+                eaters.SelectedIndices.Clear();
+                rows = shown;
+                cache = new ListViewItem[shown.Count];
+                eaters.VirtualListSize = shown.Count;
 
-                for (int i = 0; i < n; i++)
-                {
-                    ProcRow r = rows[i];
-                    int at = eaters.Items.IndexOfKey(r.Key);
-                    ListViewItem it;
-                    if (at < 0)
-                    {
-                        it = new ListViewItem(r.Name);
-                        it.Name = r.Key;
-                        it.UseItemStyleForSubItems = false;
-                        it.SubItems.Add("");
-                        it.SubItems.Add("");
-                        it.SubItems.Add("");
-                        eaters.Items.Insert(Math.Min(i, eaters.Items.Count), it);
-                    }
-                    else
-                    {
-                        it = eaters.Items[at];
-                        if (at != i)
-                        {
-                            eaters.Items.RemoveAt(at);
-                            eaters.Items.Insert(Math.Min(i, eaters.Items.Count), it);
-                        }
-                    }
-                    SetRow(it, r);
-                }
-
-                if (selected != null)
-                {
-                    int back = eaters.Items.IndexOfKey(selected);
-                    if (back >= 0) eaters.Items[back].Selected = true;
-                }
+                // Selection follows the process, not the row number - sorting
+                // by CPU moves things every tick. Deliberately no EnsureVisible:
+                // a list that scrolls itself every two seconds is unusable.
+                if (selected.Count > 0)
+                    for (int i = 0; i < shown.Count; i++)
+                        if (selected.Contains(shown[i].ListKey)) eaters.SelectedIndices.Add(i);
             }
+            catch (Exception) { }
             finally { eaters.EndUpdate(); }
+
+            if (eaters.ClientSize.Width != lastWidth) SizeColumns();
+            eaters.Invalidate();
+            Status();
         }
 
-        private void SetRow(ListViewItem it, ProcRow r)
+        private List<ProcRow> Filtered()
         {
-            it.Tag = r;
-            Put(it.SubItems[1], r.Count.ToString(CultureInfo.InvariantCulture));
-            Put(it.SubItems[2], Engine.Size(r.Bytes));
+            string q = filter.Text.Trim();
+            if (q.Length == 0) return new List<ProcRow>(all);
 
-            if (it.SubItems[3].Text != r.Tag)
+            List<ProcRow> keep = new List<ProcRow>();
+            foreach (ProcRow r in all)
             {
-                it.SubItems[3].Text = r.Tag;
-                it.SubItems[3].ForeColor =
-                    r.Tag == "BOOST" ? Theme.Accent :
-                    r.Tag == "IDLE" ? Theme.Warn :
-                    r.Tag == "KEEP" ? Theme.Dim : Theme.Fg;
-                Color row = r.Tag == "KEEP" ? Theme.Dim : Theme.Fg;
-                it.ForeColor = row;
-                it.SubItems[1].ForeColor = row;
-                it.SubItems[2].ForeColor = row;
+                if (r.Name.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0
+                    || (r.Desc != null && r.Desc.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                    || (r.Tag.Length > 0 && r.Tag.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+                    || (perProcess && r.Pid.ToString(CultureInfo.InvariantCulture) == q))
+                    keep.Add(r);
             }
+            return keep;
         }
 
-        private static void Put(ListViewItem.ListViewSubItem s, string text)
+        private int Compare(ProcRow a, ProcRow b)
         {
-            if (s.Text != text) s.Text = text;
+            int n;
+            switch (sortCol)
+            {
+                case ColProcess: n = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase); break;
+                case ColDesc: n = string.Compare(a.Desc, b.Desc, StringComparison.OrdinalIgnoreCase); break;
+                case ColWho: n = perProcess ? a.Pid.CompareTo(b.Pid) : a.Count.CompareTo(b.Count); break;
+                case ColCpu: n = a.Cpu.CompareTo(b.Cpu); break;
+                case ColDisk: n = a.Disk.CompareTo(b.Disk); break;
+                case ColThreads: n = a.Threads.CompareTo(b.Threads); break;
+                // The column shows an uptime, not a start time, so it sorts
+                // as one: descending must put the longest-running first, and
+                // that is the EARLIEST start.
+                case ColUp: n = b.Started.CompareTo(a.Started); break;
+                case ColWindow: n = a.HasWindow.CompareTo(b.HasWindow); break;
+                case ColTag: n = string.Compare(a.Tag, b.Tag, StringComparison.OrdinalIgnoreCase); break;
+                default: n = a.Bytes.CompareTo(b.Bytes); break;
+            }
+            // Ties fall back to size, so the order never jitters between ticks.
+            if (n == 0) n = a.Bytes.CompareTo(b.Bytes);
+            if (n == 0) n = string.Compare(a.ListKey, b.ListKey, StringComparison.OrdinalIgnoreCase);
+            return sortDown ? -n : n;
+        }
+
+        // ---- painting rows
+
+        private void Retrieve(object sender, RetrieveVirtualItemEventArgs e)
+        {
+            if (e.ItemIndex < 0 || e.ItemIndex >= rows.Count)
+            {
+                e.Item = new ListViewItem("");
+                return;
+            }
+            if (cache.Length == rows.Count && cache[e.ItemIndex] != null)
+            {
+                e.Item = cache[e.ItemIndex];
+                return;
+            }
+
+            ProcRow r = rows[e.ItemIndex];
+            ListViewItem it = new ListViewItem(r.Name);
+            it.UseItemStyleForSubItems = false;
+            it.Tag = r;
+            for (int i = 1; i < ColCount; i++) it.SubItems.Add("");
+
+            it.SubItems[ColDesc].Text = r.Desc;
+            it.SubItems[ColWho].Text = perProcess
+                ? r.Pid.ToString(CultureInfo.InvariantCulture)
+                : r.Count.ToString(CultureInfo.InvariantCulture);
+            it.SubItems[ColCpu].Text = ProcSampler.Percent(r.Cpu);
+            it.SubItems[ColMem].Text = Engine.Size(r.Bytes);
+            it.SubItems[ColDisk].Text = ProcSampler.Rate(r.Disk);
+            it.SubItems[ColThreads].Text = r.Threads.ToString(CultureInfo.InvariantCulture);
+            it.SubItems[ColUp].Text = ProcSampler.Age(r.Started);
+            it.SubItems[ColWindow].Text = r.HasWindow ? "open" : "";
+            it.SubItems[ColTag].Text = r.Tag;
+
+            Color body = r.Tag == "KEEP" ? Theme.Dim : Theme.Fg;
+            for (int i = 0; i < ColCount; i++) it.SubItems[i].ForeColor = body;
+            it.SubItems[ColDesc].ForeColor = Theme.Dim;
+
+            // The two numbers worth catching out of the corner of an eye.
+            if (r.Cpu >= 15) it.SubItems[ColCpu].ForeColor = Theme.Warn;
+            else if (r.Cpu >= 3) it.SubItems[ColCpu].ForeColor = Theme.Accent;
+            if (r.Disk >= 4 * 1024 * 1024) it.SubItems[ColDisk].ForeColor = Theme.Accent;
+
+            it.SubItems[ColWindow].ForeColor = r.HasWindow ? Theme.Accent : Theme.Dim;
+            it.SubItems[ColTag].ForeColor =
+                r.Tag == "BOOST" ? Theme.Accent :
+                r.Tag == "IDLE" ? Theme.Warn :
+                r.Tag == "KEEP" ? Theme.Dim : Theme.Fg;
+
+            if (cache.Length == rows.Count) cache[e.ItemIndex] = it;
+            e.Item = it;
+        }
+
+        private void Status()
+        {
+            string noun = perProcess ? " processes" : " apps";
+            string what = rows.Count < all.Count
+                ? rows.Count + " of " + all.Count + noun + " shown"
+                : rows.Count + noun;
+            // In per-process mode the row count already IS the process count,
+            // and "196 processes - 196 processes running" says nothing twice.
+            if (!perProcess) what += "   Â·   " + sampler.ProcessCount + " processes running";
+            status.Text = what
+                + (ProcQuery.Detailed ? "" : "   Â·   no CPU or disk figures on this machine");
+
+            ulong totalMb, freeMb;
+            Engine.ReadMemory(out totalMb, out freeMb);
+            ulong usedMb = totalMb > freeMb ? totalMb - freeMb : 0;
+
+            meter.Text = string.Format(CultureInfo.InvariantCulture,
+                "CPU {0}%   Â·   disk {1}   Â·   RAM {2:0.0} / {3:0.0} GB",
+                sampler.HaveRates ? ProcSampler.Percent(sampler.TotalCpu) : "-",
+                ProcSampler.Rate(sampler.TotalIo),
+                usedMb / 1024.0, totalMb / 1024.0);
+        }
+
+        // ---- acting on a row
+
+        private List<ProcRow> Selection()
+        {
+            List<ProcRow> picked = new List<ProcRow>();
+            foreach (int i in eaters.SelectedIndices)
+                if (i >= 0 && i < rows.Count) picked.Add(rows[i]);
+            return picked;
         }
 
         private void MenuOpening(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            if (eaters.SelectedItems.Count == 0) { e.Cancel = true; return; }
-            rowMenuOpen = true;
-            ProcRow r = (ProcRow)eaters.SelectedItems[0].Tag;
-            miKill.Text = "End " + r.Name + " now  (" + Engine.Size(r.Bytes) + ")";
-            miKill.Enabled = r.Tag != "KEEP";
-            miBoost.Enabled = r.Tag == "" || r.Tag == "IDLE";
-            miIdle.Enabled = r.Tag == "";
-            miProtect.Enabled = r.Tag != "KEEP";
+            List<ProcRow> picked = Selection();
+            if (picked.Count == 0) { e.Cancel = true; return; }
+            menuOpen = true;
+
+            bool one = picked.Count == 1;
+            ProcRow r = picked[0];
+            string what = one
+                ? r.Name + (perProcess ? " (" + r.Pid + ")" : "")
+                : picked.Count + " selected";
+
+            miKill.Text = "End " + what + " now  (" + Engine.Size(Total(picked)) + ")";
+            miKill.Enabled = AnyKillable(picked);
+            miKillAndList.Text = one
+                ? "End it, and close it on every boost from now on"
+                : "End them, and close them on every boost from now on";
+            miKillAndList.Enabled = miKill.Enabled && AnyUnlisted(picked);
+
+            miBoost.Enabled = AnyUnlisted(picked);
+            miIdle.Enabled = AnyTagged(picked, "");
+            miProtect.Enabled = AnyKillable(picked);
+
+            miWhere.Enabled = one && r.Path.Length > 0;
+            miCopyName.Enabled = true;
+            miCopyPath.Enabled = one && r.Path.Length > 0;
+            miPerProcess.Checked = perProcess;
         }
 
-        private void KillSelected()
+        private static long Total(List<ProcRow> picked)
         {
-            if (eaters.SelectedItems.Count == 0) return;
-            ProcRow r = (ProcRow)eaters.SelectedItems[0].Tag;
+            long n = 0;
+            foreach (ProcRow r in picked) n += r.Bytes;
+            return n;
+        }
 
-            if (r.Tag.Length == 0 && MessageBox.Show(this,
-                "End all " + r.Count + " process(es) named '" + r.Name + "'?\n\n"
-                + "It is on no list - unsaved work in it is gone.",
-                "Idle Master", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+        private static bool AnyKillable(List<ProcRow> picked)
+        {
+            foreach (ProcRow r in picked) if (r.Tag != "KEEP") return true;
+            return false;
+        }
+
+        private static bool AnyUnlisted(List<ProcRow> picked)
+        {
+            foreach (ProcRow r in picked) if (r.Tag == "" || r.Tag == "IDLE") return true;
+            return false;
+        }
+
+        private static bool AnyTagged(List<ProcRow> picked, string tag)
+        {
+            foreach (ProcRow r in picked) if (r.Tag == tag) return true;
+            return false;
+        }
+
+        // No confirmation. The engine's Reap re-checks every pid against the
+        // protected list, the protected trees and the protected paths before it
+        // touches anything, so the only processes that can actually die here are
+        // ones the user picked and the Master was already willing to close.
+        // Reap waits up to 3 s per pid, so it never runs on the UI thread.
+        private void EndSelected()
+        {
+            List<ProcRow> picked = Selection();
+            if (picked.Count == 0) return;
+
+            List<Candidate> jobs = new List<Candidate>();
+            foreach (ProcRow r in picked)
+            {
+                if (r.Tag == "KEEP") continue;
+                Candidate c = new Candidate(r.Name);
+                c.Bytes = r.Bytes;
+                c.Pids.AddRange(r.Pids);
+                jobs.Add(c);
+            }
+            if (jobs.Count == 0)
+            {
+                log("Nothing ended - everything selected is protected.");
                 return;
+            }
 
-            Candidate c = new Candidate(r.Name);
-            c.Bytes = r.Bytes;
-            c.Pids.AddRange(r.Pids);
-
-            // Reap waits up to 3 s per pid - keep that off the UI thread.
             Thread t = new Thread(delegate()
             {
-                List<KillHit> hits = engine.Reap(c);
-                string line = hits.Count > 0
-                    ? "Ended " + r.Name + " - " + Engine.Size(Engine.TotalOf(hits)) + " back."
-                    : "Nothing died - " + r.Name + " was gone already or refused.";
+                long freed = 0;
+                int died = 0;
+                List<string> names = new List<string>();
+                foreach (Candidate c in jobs)
+                {
+                    List<KillHit> hits = engine.Reap(c);
+                    if (hits.Count == 0) continue;
+                    died += hits.Count;
+                    freed += Engine.TotalOf(hits);
+                    names.Add(c.Name);
+                }
+
+                string line;
+                if (died == 0)
+                    line = "Nothing died - already gone, or it refused.";
+                else if (names.Count == 1)
+                    line = "Ended " + names[0] + " - " + Engine.Size(freed) + " back.";
+                else
+                    line = "Ended " + died + " processes across " + names.Count
+                         + " apps - " + Engine.Size(freed) + " back.";
                 log(line);
+
                 try { BeginInvoke((Action)RefreshNow); }
                 catch (Exception) { }
             });
@@ -1711,23 +2170,57 @@ namespace IdleMaster
 
         private void AddSelected(string section, string label)
         {
-            if (eaters.SelectedItems.Count == 0) return;
-            ProcRow r = (ProcRow)eaters.SelectedItems[0].Tag;
+            List<ProcRow> picked = Selection();
+            if (picked.Count == 0) return;
 
-            if (!Config.Append(section, r.Name.ToLowerInvariant()))
+            List<string> written = new List<string>();
+            bool trouble = false;
+            foreach (ProcRow r in picked)
             {
-                log("! could not write " + r.Name + " into the " + label + ".");
-                return;
+                if (r.Tag == "KEEP" && section != "protect") continue;
+                if (Config.Append(section, r.Name.ToLowerInvariant())) written.Add(r.Name);
+                else trouble = true;
             }
+
+            if (trouble) log("! could not write every name into the " + label + ".");
+            if (written.Count == 0) return;
+
             try
             {
                 cfg.CopyFrom(Config.Load());
-                log(r.Name + " added to the " + label + ".");
+                log((written.Count == 1 ? written[0] : written.Count + " apps")
+                    + " added to the " + label + ".");
                 if (sentryAlive())
                     log("The sentry is using the new lists from its next sweep.");
             }
             catch (Exception ex) { log("! could not reload the config: " + ex.Message); }
             RefreshNow();
+        }
+
+        private void OpenFolder()
+        {
+            List<ProcRow> picked = Selection();
+            if (picked.Count != 1 || picked[0].Path.Length == 0) return;
+            try
+            {
+                System.Diagnostics.Process.Start("explorer.exe",
+                    "/select,\"" + picked[0].Path + "\"");
+            }
+            catch (Exception ex) { log("! could not open the folder: " + ex.Message); }
+        }
+
+        private void Copy(bool fullPath)
+        {
+            List<ProcRow> picked = Selection();
+            if (picked.Count == 0) return;
+            StringBuilder sb = new StringBuilder();
+            foreach (ProcRow r in picked)
+            {
+                string s = fullPath ? r.Path : r.Name;
+                if (s.Length > 0) sb.AppendLine(s);
+            }
+            try { if (sb.Length > 0) Clipboard.SetText(sb.ToString().TrimEnd()); }
+            catch (Exception) { }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

@@ -1530,6 +1530,23 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         public string Tag = "";     // "KEEP" | "BOOST" | "IDLE" | ""
         public readonly List<int> Pids = new List<int>();
         public string Key { get { return Name.ToLowerInvariant(); } }
+
+        // Everything below is filled in by ProcSampler for the task manager
+        // window. The sweep itself only ever needs Name/Bytes/Pids, so a row
+        // built by Engine.Snapshot leaves these at zero and nothing minds.
+        public long PrivateBytes;
+        public double Cpu;          // percent of the whole machine
+        public double Disk;         // bytes per second, read + write + other
+        public int Threads;
+        public int Handles;
+        public bool HasWindow;      // the user has something of this on screen
+        public string Desc = "";    // what the exe's version resource calls it
+        public string Path = "";
+        public DateTime Started = DateTime.MinValue;
+        public int Pid;             // set only when the list is one row per process
+        public string RowKey;       // list identity: name, or name#pid
+
+        public string ListKey { get { return RowKey ?? Key; } }
     }
 
     // One snapshot of "what does the user have open on the desktop": every
