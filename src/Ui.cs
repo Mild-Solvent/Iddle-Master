@@ -4720,6 +4720,8 @@ namespace IdleMaster
         private BackupForm backupWin;
         private bool reallyExit;
         private bool askedTheme;                // the first-run picker has had its turn
+        private CaptionBar caption;             // the theme's own title bar, when it draws one
+        private bool chromeCustom;              // ...and whether it does
         private bool startHidden;
         private bool watchMode;
         private bool busyNow;                   // a mode is running right now
@@ -4958,6 +4960,24 @@ namespace IdleMaster
                 try { BeginInvoke((MethodInvoker)delegate { ShowWindow(); }); }
                 catch (Exception) { }
             });
+
+            // Last, because it slides everything above down to make room: a
+            // theme that draws its own title bar gets Windows' one taken away.
+            // Only if the theme asked - the default is the frame you know.
+            if (Chrome.Wanted)
+            {
+                try { caption = Chrome.Install(this); chromeCustom = true; }
+                catch (Exception ex) { AppendLog("! could not build the window frame: " + ex.Message); }
+            }
+        }
+
+        // The theme's own title bar needs the eight resize grips and the
+        // maximise rectangle handing back by hand; a system-framed window must
+        // never see any of it.
+        protected override void WndProc(ref Message m)
+        {
+            if (chromeCustom && Chrome.WndProc(this, ref m)) return;
+            base.WndProc(ref m);
         }
 
         // --guard: the guard alone, whatever the ini says about it.
@@ -5413,6 +5433,17 @@ namespace IdleMaster
                 updateBadge.Invalidate();       // the one control that wears Theme.Ready
                 listBoost.Invalidate();
                 listIdle.Invalidate();
+                if (caption != null) caption.Invalidate();
+
+                // Colours change under your hands; the frame cannot. Swapping
+                // FormBorderStyle on a live window means destroying and
+                // rebuilding its handle, which drops the tray hook, the solo
+                // instance watch and every timer hanging off it - for a border.
+                // So say so plainly instead of half-doing it.
+                if (Chrome.Wanted != chromeCustom)
+                    AppendLog("Theme: " + Theme.Current.Name + " asks for "
+                        + (Chrome.Wanted ? "its own title bar" : "the Windows title bar")
+                        + " - that part arrives on the next start. Everything else is already on.");
             }
             catch (Exception) { }
         }

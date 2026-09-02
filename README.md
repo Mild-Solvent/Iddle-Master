@@ -432,25 +432,27 @@ reading, log already saying Ready — and then the whole window goes soft behind
 a sheet of frosted glass and one card asks what it should look like. Nothing is
 loading and nothing is hidden: what is behind the blur is the running app, and
 answering hands it straight back. You are asked once, ever. **Settings →
-Theme…**, or the tray menu, is the door from then on.
+Theme...**, or the tray menu, is the door from then on.
 
-Two ship inside the exe:
+Three ship inside the exe:
 
 | | |
 |---|---|
 | **Minimalistic** | one accent hue on a cold grey ladder — exactly what the app has always looked like. The default. |
 | **Terminal** | green phosphor on black, amber for trouble. The console, all the way out to the edges. |
+| **Cortex** | rounded slabs lit from above, a green bloom inside every edge, and its own title bar instead of Windows'. |
 
 Picking one is instant. There is no restart: the palette that is going out is
 lined up against the one coming in, and every control on screen wearing colour
 N of the old look is handed colour N of the new one. A window switched at
 runtime is pixel-for-pixel identical to one that started that way — light
-themes included.
+themes included. The one exception is the window frame, which needs the handle
+rebuilt, so a theme that changes it says so in the log and does it next start.
 
 ### Making your own
 
-A theme is a text file. Both built-ins are written out to `themes\` next to the
-exe on first start precisely so there is something to copy:
+A theme is a text file. All three built-ins are written out to `themes\` next to
+the exe on first start precisely so there is something to copy:
 
 ```ini
 name=Midnight
@@ -464,6 +466,7 @@ accent=#8fc1f0          # titles and captions
 good=#1e4e78            # BOOST NOW and every primary action
 danger=#6e2830          # ABSOLUTE IDLE and every destructive one
 onaccent=#ffffff        # writing ON good/danger - flip this for a light theme
+ready=#38aa68           # ONLY the corner arrow when a release is waiting
 monofont=Consolas
 ```
 
@@ -471,18 +474,54 @@ Nineteen colours and two font families, all optional — anything you leave out
 or mistype keeps the default, so a typo costs you one colour, not the app.
 Save it as `themes\midnight.imtheme`, restart, and it is in the picker. Delete
 the file and the theme is gone; delete `minimalistic.imtheme` and the built-in
-copy comes back, because those two are inside the exe as well and the app can
+copy comes back, because those three are inside the exe as well and the app can
 never end up with nothing to draw with.
+
+### Changing the shape, not just the colour
+
+Colour is most of a look but not all of it. Six more keys change the drawing
+itself, and **every one of them is off by default**:
+
+```ini
+radius=4                # corner rounding, 0-24
+gradient=22             # how much lighter the top of a slab is, 0-90
+glow=64                 # accent bloom just inside the edge, 0-255
+borderwidth=1           # outline on every button, 0-4
+border=#2f7a24          # ...in this colour. Blank = mixed from the fill.
+
+chrome=custom           # the theme draws the title bar instead of Windows
+caption=#0a0b0a         # ...and that strip's background
+```
+
+Off is not "our painting code, configured to look flat" — it is WinForms
+painting the button, the same code path the app has always used. That is a
+deliberate guarantee, and it is tested: the regression check builds a window in
+Minimalistic, switches it to another theme at runtime, and requires **zero of
+564,900 pixels** to differ from a window that started that way. A theme cannot
+change the default look by accident, because the default look does not go
+through the new code at all.
+
+`chrome=custom` gives up Windows' title bar for one the theme draws — same
+drag, same Aero snap, same double-click-to-maximise, in your colours.
+**Cortex** turns all seven on and is the worked example; everything it does is
+a line in a text file you can copy.
 
 ### Getting more
 
+**The extra themes are not in the installer, and that is deliberate.** Idle
+Master is one small exe you download once. Bundling a gallery of looks that
+most people will never open would make every install bigger and every update
+slower, for paint. So three ship inside the app and the rest are fetched only
+if you ask for them.
+
 **Get more themes** on that card downloads `IdleMasterThemes.zip` from the same
 GitHub release post the app updates itself from, and unpacks the `.imtheme`
-files in it into `themes\`. No second server and nothing new to trust — if you
-trust the release enough to install the app from it, the themes are on the same
-page. Only `.imtheme` files are read, only their last path segment is used, and
-anything that will not parse is deleted again rather than left sitting in the
-picker doing nothing.
+files in it into `themes\`. It is a few KB of text — themes contain no images
+and no code, which is also why they are safe to pass around. No second server
+and nothing new to trust: if you trust the release enough to install the app
+from it, the themes are on the same page. Only `.imtheme` entries are read,
+only their last path segment is used, and anything that will not parse is
+deleted again rather than left sitting in the picker doing nothing.
 
 Themes are just files, so sharing one is sending it. Or open a pull request and
 it ships in the bundle.
@@ -717,7 +756,8 @@ src/Debloat.cs            the debloater: Store-app inventory, known-bloat table,
 src/Backup.cs             the backup kit: app inventory, zip writer, window
 src/Rebuild.cs            the standalone exe that ships inside a kit
 src/Theme.cs              the palette facade, fonts, control styling, live re-theming
-src/Themes.cs             theme files: the format, the two built-ins, the bundle download
+src/Themes.cs             theme files: the format, the three built-ins, the bundle download
+src/Skin.cs               shape rather than colour: skinned buttons, the theme-drawn title bar
 src/ThemeGate.cs          the frosted first-run pane and the theme picker on it
 src/Setup.cs              the installer; carries the app as an embedded resource
 src/app.manifest          requireAdministrator + per-monitor DPI

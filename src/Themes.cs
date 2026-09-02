@@ -3,16 +3,16 @@
 // A theme is a text file. Not a plugin, not a DLL, not a manifest with a
 // schema: nineteen colours and two font names in the same key=value shape as
 // idlemaster.ini, saved as themes\something.imtheme next to the exe. The app
-// ships two of them and writes both out on first start, precisely so that the
-// way to make a third is "copy one and edit it" - no build, no account, no
+// ships three of them and writes them out on first start, precisely so that the
+// way to make a fourth is "copy one and edit it" - no build, no account, no
 // asking anybody. That is the whole extension story.
 //
 // Three sources, in the order they win:
 //
-//   built in     Minimalistic and Terminal are compiled into the exe, so the
-//                app always has something to draw with even if themes\ is
+//   built in     Minimalistic, Terminal and Cortex are compiled into the exe, so
+//                the app always has something to draw with even if themes\ is
 //                empty or every file in it is broken.
-//   themes\      anything on disk, including edited copies of those two -
+//   themes\      anything on disk, including edited copies of those three -
 //                a file named the same as a built-in replaces it.
 //   the release  "Get more themes" pulls IdleMasterThemes.zip off the newest
 //                GitHub release that carries one and unpacks the .imtheme
@@ -103,11 +103,55 @@ namespace IdleMaster
             return p;
         }
 
+        // The third one, and the reason the shape knobs exist at all: a theme
+        // that changes more than colour. Rounded slabs lit from above, a green
+        // bloom inside every edge, and the window's own title bar instead of
+        // Windows'. It is here as the worked example - everything it does is a
+        // line in a text file anybody can copy.
+        public static Palette Cortex()
+        {
+            Palette p = new Palette();
+            p.Name = "Cortex";
+            p.Author = "Idle Master";
+            p.About = "Rounded, lit from above, and wearing its own title bar. The one that shows off the shape keys.";
+            p.Builtin = true;
+
+            p.Bg       = Color.FromArgb(16, 17, 16);
+            p.Panel    = Color.FromArgb(26, 28, 26);
+            p.Input    = Color.FromArgb(10, 11, 10);
+            p.LogBg    = Color.FromArgb(11, 13, 11);
+            p.LogFg    = Color.FromArgb(142, 232, 122);
+            p.ListFg   = Color.FromArgb(201, 212, 198);
+            p.Fg       = Color.FromArgb(232, 236, 231);
+            p.Dim      = Color.FromArgb(122, 133, 122);
+            p.Accent   = Color.FromArgb(68, 214, 44);
+            p.Good     = Color.FromArgb(31, 107, 22);
+            p.Danger   = Color.FromArgb(122, 31, 31);
+            p.Neutral  = Color.FromArgb(31, 35, 32);
+            p.Warn     = Color.FromArgb(255, 176, 32);
+            p.Track    = Color.FromArgb(38, 42, 37);
+            p.OnAccent = Color.FromArgb(240, 255, 238);
+            p.Ready    = Color.FromArgb(44, 214, 214);      // green is the theme; news has to be cyan
+            p.GaugeOk   = Color.FromArgb(68, 214, 44);
+            p.GaugeWarn = Color.FromArgb(255, 176, 32);
+            p.GaugeBad  = Color.FromArgb(226, 72, 58);
+
+            p.Radius = 4;
+            p.Gradient = 22;
+            p.Glow = 64;
+            p.BorderWidth = 1;
+            p.Border = Color.FromArgb(47, 122, 36);
+            p.Chrome = "custom";
+            p.Caption = Color.FromArgb(10, 11, 10);
+            return p;
+        }
+
         public static List<Palette> Builtins()
         {
             List<Palette> b = new List<Palette>();
             b.Add(Minimalistic());
             b.Add(Terminal());
+            b.Add(Cortex());
             return b;
         }
 
@@ -252,6 +296,17 @@ namespace IdleMaster
                     case "uisize":   p.UiSize = Num(v, p.UiSize); break;
                     case "monosize": p.MonoSize = Num(v, p.MonoSize); break;
 
+                    case "radius":      p.Radius = Whole(v, p.Radius, 0, 24); break;
+                    case "gradient":    p.Gradient = Whole(v, p.Gradient, 0, 90); break;
+                    case "glow":        p.Glow = Whole(v, p.Glow, 0, 255); break;
+                    case "borderwidth": p.BorderWidth = Whole(v, p.BorderWidth, 0, 4); break;
+                    case "border":      Col(v, ref p.Border); break;
+                    case "caption":     Col(v, ref p.Caption); break;
+                    case "chrome":
+                        p.Chrome = v.Equals("custom", StringComparison.OrdinalIgnoreCase)
+                            ? "custom" : "system";
+                        break;
+
                     case "bg":        Col(v, ref p.Bg); break;
                     case "panel":     Col(v, ref p.Panel); break;
                     case "input":     Col(v, ref p.Input); break;
@@ -295,6 +350,16 @@ namespace IdleMaster
         {
             Color c;
             if (Theme.TryColor(v, out c)) target = c;
+        }
+
+        // A shape knob, clamped. Out-of-range is a typo, not a request: a
+        // radius of 400 on a 30px button is not a look, it is a crash waiting
+        // for a GraphicsPath.
+        private static int Whole(string v, int fallback, int lo, int hi)
+        {
+            int n;
+            if (!int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) return fallback;
+            return n < lo ? lo : (n > hi ? hi : n);
         }
 
         private static float Num(string v, float fallback)
@@ -348,6 +413,28 @@ namespace IdleMaster
             s.AppendLine("gaugewarn=" + Theme.Hex(p.GaugeWarn));
             s.AppendLine("gaugebad=" + Theme.Hex(p.GaugeBad));
             s.AppendLine();
+            s.AppendLine("# --- shape. All of these are off at 0, and off means WinForms paints");
+            s.AppendLine("# the button exactly as it always did - not an imitation of it. Turn any");
+            s.AppendLine("# one of them up and the app starts drawing its own buttons instead.");
+            s.AppendLine("radius=" + p.Radius.ToString(CultureInfo.InvariantCulture)
+                       + "                     # corner rounding, 0-24");
+            s.AppendLine("gradient=" + p.Gradient.ToString(CultureInfo.InvariantCulture)
+                       + "                   # how much lighter the top of a slab is, 0-90");
+            s.AppendLine("glow=" + p.Glow.ToString(CultureInfo.InvariantCulture)
+                       + "                       # accent bloom just inside the edge, 0-255");
+            s.AppendLine("borderwidth=" + p.BorderWidth.ToString(CultureInfo.InvariantCulture)
+                       + "                # outline on every button, 0-4");
+            s.AppendLine("border=" + (p.Border.IsEmpty ? "" : Theme.Hex(p.Border))
+                       + "                      # ...in this colour. Blank = mixed from the fill.");
+            s.AppendLine();
+            s.AppendLine("# --- the window frame. 'custom' means the theme draws the title bar");
+            s.AppendLine("# instead of Windows: same drag, snap and double-click-to-maximise, but");
+            s.AppendLine("# in your colours. Changing this one takes effect on the next start -");
+            s.AppendLine("# everything else on this page changes the moment you pick the theme.");
+            s.AppendLine("chrome=" + p.Chrome);
+            s.AppendLine("caption=" + (p.Caption.IsEmpty ? "" : Theme.Hex(p.Caption))
+                       + "                     # that strip's background. Blank = panel.");
+            s.AppendLine();
             s.AppendLine("# --- type. uisize is the base; captions and titles scale off it.");
             s.AppendLine("# The window layout is fixed-pixel, so a much wider face or a much");
             s.AppendLine("# bigger size will clip long labels. Consider that a dare.");
@@ -378,9 +465,16 @@ the exe as well, so the app can never end up with nothing to draw with.
 
 Getting more
 ------------
+The extra themes are NOT in the installer, and that is deliberate. Idle Master
+is one small exe you download once; bundling a gallery of looks most people
+never open would make every install bigger and every update slower, for paint.
+So three ship inside the app and the rest are fetched only if you ask.
+
 Settings > Theme > Get more themes downloads IdleMasterThemes.zip from the
 same GitHub release the app updates itself from, and unpacks the .imtheme
-files in it here. Nothing else in the zip is read.
+files in it here. Nothing else in the zip is read. It is a few KB of text -
+themes have no images and no code in them, which is also why they are safe to
+swap around.
 
 Sharing one
 -----------

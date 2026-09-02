@@ -60,7 +60,7 @@ $resIcon = "/resource:$icon,idlemaster.ico"
 & $csc /nologo /target:winexe /platform:x64 /optimize+ `
   /win32manifest:"$root\src\app.manifest" $iconArg $resRebuild $resIcon `
   /out:"$out" $refs "$root\src\IdleMaster.cs" "$root\src\Theme.cs" `
-  "$root\src\Themes.cs" "$root\src\ThemeGate.cs" "$root\src\Ui.cs" `
+  "$root\src\Themes.cs" "$root\src\Skin.cs" "$root\src\ThemeGate.cs" "$root\src\Ui.cs" `
   "$root\src\Cleanup.cs" "$root\src\DiskScan.cs" "$root\src\TreeMap.cs" "$root\src\WizTree.cs" "$root\src\Debloat.cs" "$root\src\Backup.cs" `
   "$root\src\NetGuard.cs" "$root\src\Vpn.cs" "$root\src\Procs.cs" `
   "$root\src\SoloInstance.cs" "$root\src\Feedback.cs"

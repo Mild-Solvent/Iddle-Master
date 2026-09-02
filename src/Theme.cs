@@ -72,6 +72,30 @@ namespace IdleMaster
         public float  UiSize   = 9f;
         public float  MonoSize = 9f;
 
+        // ---- shape
+        //
+        // Every one of these is zero or "system" by default, and that default
+        // is not "our painting code, configured to look flat" - it is WinForms
+        // painting the button, the same code path the app has always used. A
+        // theme that mentions none of them cannot look even a shade different
+        // from the way it did before any of this existed.
+
+        public int Radius = 0;              // corner radius on buttons
+        public int Gradient = 0;            // how much lighter the top of a slab is; 0 = flat
+        public int Glow = 0;                // accent bloom inside the edge, 0-255
+        public int BorderWidth = 0;         // outline on every button
+        public Color Border = Color.Empty;  // ...in this colour. Empty = derived from the fill.
+
+        public string Chrome = "system";    // "system" or "custom" title bar
+        public Color Caption = Color.Empty; // the custom strip's background. Empty = Panel.
+
+        // Is any of it on? One question, asked on every button paint, so it
+        // stays a field comparison rather than anything cleverer.
+        public bool Shaped
+        {
+            get { return Radius > 0 || Gradient > 0 || Glow > 0 || BorderWidth > 0; }
+        }
+
         // Where this one came from: a built-in, or a file somebody can edit.
         public string File = "";
         public bool Builtin;
@@ -190,7 +214,7 @@ namespace IdleMaster
 
         public static Button Button(string text, Color back, Color fore)
         {
-            Button b = new Button();
+            SkinButton b = new SkinButton();
             b.Text = text;
             b.BackColor = back;
             b.ForeColor = fore;

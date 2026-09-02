@@ -369,8 +369,14 @@ namespace IdleMaster
             folder.Text = "Open themes\\";
             folder.Enabled = !busy;
 
-            footer.Text = "A theme is a text file in themes\\ next to the exe. Copy one, change "
-                        + "the colours, restart - it turns up here. Open source, so send yours back.";
+            // The one thing worth saying out loud about the download: it is a
+            // separate file on purpose. Three themes are inside the exe and
+            // that is where it stops - the installer stays one small download
+            // instead of carrying a gallery most people will never open.
+            footer.Text = "Themes are text files in themes\\ next to the exe - copy one, change the "
+                        + "colours, restart. The extra ones are a separate download on purpose: the "
+                        + "installer stays small and the app stays quick, so the gallery is fetched "
+                        + "only if you want it.";
             footer.Font = new Font(Safe(p.UiFont), p.UiSize * 0.85f);
             footer.ForeColor = p.Dim;
             footer.BackColor = p.Panel;
