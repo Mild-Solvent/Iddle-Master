@@ -116,6 +116,25 @@ non-interactive) and Chris Titus WinUtil (a preset applied headless, then left
 open). The zip contains IdleMasterRebuild.exe, a plain-text rebuild.ini,
 apps.json in winget-import format, and files\. Building a kit changes nothing.
 
+## Themes
+
+Idle Master ships three looks inside the exe: Minimalistic (the default, and the
+look the app has always had), Terminal (green phosphor on black) and Cortex
+(rounded, gradient-lit, with a title bar the theme draws instead of Windows).
+The picker appears once, on first run, over a blurred copy of the running
+window; after that it is Settings > Theme.
+
+A theme is a plain text file - nineteen colours, two font families and six keys
+for shape - saved as themes
+ame.imtheme next to the exe. No plugin, no DLL, no
+code in a theme. All three built-ins are written out on first start so the way
+to make a fourth is copy, edit, restart. Switching is instant and does not need
+a restart; only a change of window frame waits for the next start.
+
+Extra themes are deliberately NOT bundled in the installer, to keep the download
+small: "Get more themes" fetches IdleMasterThemes.zip from the same GitHub
+release the app updates itself from and unpacks the .imtheme files locally.
+
 ## Install and use
 
 The app checks GitHub for a newer release every 6 hours (UpdateCheckHours) and

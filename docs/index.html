@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Idle Master — free RAM on Windows, and keep it free</title>
-<meta name="description" content="Free RAM on Windows 10 and 11 by killing the updaters, launcher services and tray webviews you never opened — then a background sentry keeps them from coming back. Free, source available, 50 KB, no bloated suite to install, reversible by a reboot.">
+<meta name="description" content="Free RAM on Windows 10 and 11 by killing the updaters, launcher services and tray webviews you never opened — then a background sentry keeps them from coming back. Free, source available, 660 KB, no bloated suite to install, reversible by a reboot.">
 <link rel="canonical" href="https://mild-solvent.github.io/Iddle-Master/">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 <meta property="og:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
-<meta property="og:description" content="A single 50 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
+<meta property="og:description" content="A single 660 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/">
 <meta property="og:site_name" content="Idle Master">
@@ -18,7 +18,7 @@
 <meta property="og:image:alt" content="Idle Master — your RAM is full. You opened a third of it.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
-<meta name="twitter:description" content="A 50 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
+<meta name="twitter:description" content="A 660 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
 <meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
 <meta name="theme-color" content="#111318">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Crect x='.6' y='.6' width='30.8' height='30.8' rx='6.4' fill='none' stroke='%238fc1f0' stroke-opacity='.3' stroke-width='.7'/%3E%3Cpath d='M6.5 8.5h3.2v14H6.5zM12.5 22.5V8.5h3.2l3.55 7.1 3.55-7.1H26v14h-3v-8.6l-2.8 5.5h-1.9l-2.8-5.5v8.6z' fill='%238fc1f0'/%3E%3Cpath d='M7 25h3v1.6H7zM11.5 25h3v1.6h-3zM16 25h3v1.6h-3zM20.5 25h3v1.6h-3z' fill='%238fc1f0' fill-opacity='.55'/%3E%3C/svg%3E">
@@ -48,7 +48,7 @@
       "license": "https://github.com/Mild-Solvent/Iddle-Master/blob/main/LICENSE.md",
       "copyrightHolder": { "@type": "Person", "name": "Mild-Solvent" },
       "copyrightYear": "2026",
-      "description": "A 50 KB Windows utility that frees 1.5-2 GB of RAM by closing background updaters, launcher services and tray webviews, then runs a sentry that stops them respawning. Services are stopped, never disabled, so a reboot undoes everything.",
+      "description": "A 660 KB Windows utility that frees 1.5-2 GB of RAM by closing background updaters, launcher services and tray webviews, then runs a sentry that stops them respawning. Services are stopped, never disabled, so a reboot undoes everything.",
       "featureList": [
         "Boost mode: frees 1.5-2 GB without closing anything you opened",
         "Absolute idle: drops the whole machine to about 1.5-2 GB in use",
@@ -150,7 +150,7 @@
   <div class="wrap">
     <h1>Windows just started and RAM is already full?<br>  <span class="hl">Claim it back</span> now.</h1>
     <p class="sub">
-      A single 50&nbsp;KB exe that hunts down the updaters, launcher services and tray
+      A single 660&nbsp;KB exe that hunts down the updaters, launcher services and tray
       webviews eating your RAM, gives it back in a click — and then keeps it that way,
       instead of letting it all drift back within the hour.
     </p>
@@ -334,7 +334,7 @@
 <section id="tour">
   <div class="wrap">
     <p class="kicker">The whole tour</p>
-    <h2>One 50&nbsp;KB window. Rather a lot behind it.</h2>
+    <h2>One small window. Rather a lot behind it.</h2>
     <p class="lead">Two buttons and a log are the front door. Behind them is a task manager, a
        tuning page for the sentry, a review-first disk cleaner, and a one-zip backup kit —
        every one of them the real window, recorded on this machine.</p>
@@ -382,6 +382,35 @@
         <figcaption><b>Backup kit.</b> For the day you reinstall Windows: apps by winget id,
           the folders you name, and the whole setup written to <b>one zip</b> that puts a fresh
           install back the way this one is.</figcaption>
+      </figure>
+
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — themes</span>
+          </div>
+          <img src="media/themes-picker.png" width="700" height="807" loading="lazy" decoding="async"
+               alt="The theme picker on first run: the whole Idle Master window blurred behind frosted glass, with one card over it headed PICK A LOOK, a row of live preview tiles each drawn in its own palette, and the choice between using Minimalistic or downloading more themes.">
+        </div>
+        <figcaption><b>Pick a look, once.</b> The app starts normally &mdash; gauge reading, log
+          already running &mdash; then goes soft behind frosted glass while one card asks. Each
+          tile is drawn in the palette it is offering. Answer it and it never asks again.</figcaption>
+      </figure>
+
+      <figure class="clip">
+        <div class="shot">
+          <div class="bar">
+            <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+            <span class="t">Idle Master — Cortex theme</span>
+          </div>
+          <img src="media/themes-cortex.png" width="684" height="802" loading="lazy" decoding="async"
+               alt="Idle Master wearing the Cortex theme: near-black background, bright green accents, rounded buttons with a gradient lit from above and a green glow inside each edge, and a title bar drawn by the theme itself instead of the Windows one.">
+        </div>
+        <figcaption><b>A theme is a text file.</b> Nineteen colours, two fonts, and six keys for
+          shape &mdash; corner radius, gradient, glow, border, and whether the window draws its own
+          title bar. Copy one of the three that ship, change the numbers, restart. Every knob is
+          off by default, so the look you already like cannot drift.</figcaption>
       </figure>
 
       <figure class="clip">

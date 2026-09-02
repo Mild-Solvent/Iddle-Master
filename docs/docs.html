@@ -74,6 +74,7 @@
     <a href="#windows">The windows</a>
     <a href="#cleanup">Disk cleanup</a>
     <a href="#backup">Backup kit</a>
+    <a href="#themes">Themes</a>
     <b>Reference</b>
     <a href="#config">idlemaster.ini</a>
     <a href="#settings">Every setting</a>
@@ -681,19 +682,90 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
         code 1.</p>
     </section>
 
+    <!-- ------------------------------------------------------------- themes -->
+    <section id="themes">
+      <h2>Themes <a class="anchor" href="#themes">#</a></h2>
+      <p>The first time Idle Master opens it starts normally &mdash; gauge reading, log already
+        saying <em>Ready</em> &mdash; and then the window goes soft behind frosted glass while one
+        card asks what it should look like. <strong>You are asked once, ever.</strong> Answering it
+        or dismissing it both write <code>ThemeIntro=1</code>; after that the door is
+        <strong>Settings &rarr; Theme&hellip;</strong> or the tray menu.</p>
+
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>Theme</th><th>What it is</th></tr></thead>
+          <tbody>
+            <tr><td class="n">Minimalistic</td><td class="wrap-ok">One accent hue on a cold grey ladder &mdash; exactly what the app has always looked like. <strong>The default.</strong></td></tr>
+            <tr><td class="n">Terminal</td><td class="wrap-ok">Green phosphor on black, amber for trouble, a wider face in the log. The console, all the way out to the edges.</td></tr>
+            <tr><td class="n">Cortex</td><td class="wrap-ok">Rounded slabs lit from above, a green bloom inside every edge, and a title bar the theme draws instead of Windows.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Switching is <strong>instant</strong> &mdash; no restart. The outgoing palette is lined up
+        against the incoming one and every control on screen wearing colour N of the old look is
+        handed colour N of the new one. The single exception is the window frame: changing that
+        rebuilds the window handle, which would drop the tray icon and every running timer, so a
+        theme that asks for its own title bar says so in the log and applies it next start.</p>
+
+      <h3>Writing your own</h3>
+      <p>A theme is a plain text file &mdash; no plugin, no DLL, no code. All three built-ins are
+        written into <code>themes\</code> next to the exe on first start precisely so there is
+        something to copy. Nineteen colours, two font families, and six keys for shape; anything
+        you leave out or mistype keeps the default, so a typo costs one colour rather than the
+        app.</p>
+      <div class="code">
+<pre>name=Midnight
+bg=#0d0f14        <span class="d">the window itself</span>
+fg=#e2e6ec        <span class="d">normal writing</span>
+accent=#8fc1f0    <span class="d">titles and captions</span>
+good=#1e4e78      <span class="d">BOOST NOW and every primary action</span>
+danger=#6e2830    <span class="d">ABSOLUTE IDLE and every destructive one</span>
+onaccent=#ffffff  <span class="d">writing ON those - flip it for a light theme</span>
+ready=#38aa68     <span class="d">ONLY the corner arrow when a release is waiting</span>
+
+radius=4          <span class="d">corner rounding, 0-24</span>
+gradient=22       <span class="d">how much lighter the top of a slab is, 0-90</span>
+glow=64           <span class="d">accent bloom just inside the edge, 0-255</span>
+borderwidth=1     <span class="d">outline on every button, 0-4</span>
+chrome=custom     <span class="d">the theme draws the title bar, not Windows</span></pre>
+      </div>
+      <p>Save it as <code>themes\midnight.imtheme</code>, restart, and it is in the picker. Delete
+        the file and the theme is gone; delete a built-in&rsquo;s file and the compiled-in copy
+        comes back, so the app can never end up with nothing to draw with.</p>
+      <p><strong>Every shape key is off by default, and off means WinForms paints the button</strong>
+        &mdash; the same code path the app has always used, not an imitation of it. That is tested,
+        not asserted: the regression check builds a window in Minimalistic, switches it to another
+        theme at runtime, and requires zero of 564,900 pixels to differ from a window that started
+        that way.</p>
+
+      <h3>Getting more</h3>
+      <p><strong>The extra themes are not in the installer, on purpose.</strong> Idle Master is one
+        small download; shipping a gallery of looks most people never open would make every install
+        bigger and every update slower, for paint. Three live inside the app and the rest are
+        fetched only if you ask.</p>
+      <p><strong>Get more themes</strong> pulls <code>IdleMasterThemes.zip</code> from the same
+        GitHub release the app updates itself from and unpacks the <code>.imtheme</code> files into
+        <code>themes\</code>. A few KB of text &mdash; themes hold no images and no code, which is
+        why they are safe to pass around. Only <code>.imtheme</code> entries are read, only the last
+        segment of each name is used, and anything that will not parse afterwards is deleted rather
+        than left in the picker doing nothing.</p>
+    </section>
+
     <!-- -------------------------------------------------------------- files -->
     <section id="files">
       <h2>Files and paths <a class="anchor" href="#files">#</a></h2>
-      <p>All four runtime files live <strong>next to the exe</strong> — for an installed copy,
+      <p>The runtime files live <strong>next to the exe</strong> — for an installed copy,
         <code>%LOCALAPPDATA%\Programs\IdleMaster</code>.</p>
       <div class="scroll">
         <table class="tbl">
           <thead><tr><th>File</th><th>What it is</th></tr></thead>
           <tbody>
-            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~280 KB, no dependencies; carries the rebuild exe and its icon inside.</td></tr>
+            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~610 KB, no dependencies; carries the rebuild exe and its icon inside.</td></tr>
             <tr><td class="n">idlemaster.ini</td><td class="wrap-ok">The lists and settings. Written on first run, never overwritten by an update.</td></tr>
             <tr><td class="n">idlemaster.log</td><td class="wrap-ok">Append-only record, written only when something actually happens.</td></tr>
             <tr><td class="n">idlemaster.state</td><td class="wrap-ok">Written by boost and idle, consumed by restore. The undo list.</td></tr>
+            <tr><td class="n">themes\</td><td class="wrap-ok">One <code>.imtheme</code> text file per look, plus a README. Written on first start; copy one to make your own.</td></tr>
           </tbody>
         </table>
       </div>
