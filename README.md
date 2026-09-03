@@ -167,16 +167,25 @@ gets a toast in the corner instead:
 The toast shows the app's own icon, the description and company from the exe, and
 the path — so *Update.exe, 300 MB* reads as *Discord Inc.* before you decide.
 
-- **Keep it** — left alone for 30 minutes, then asked again.
+- **Keep it** — left alone, and not asked about again, until you restart
+  IdleMaster. Nothing written. (Through 0.24.0 this was a 30-minute backoff
+  and then the same toast again.)
 - **Always keep** — written into `[protect]`, remembered forever. (Through
   0.13.3 this quietly wrote nothing whenever the name already appeared anywhere
   else in the file — which for an app the toast asks about means the kill list
   it is on. The log said *"claude is protected from now on"* and the ini never
   changed. The duplicate check is now scoped to the section being written.)
-- **Trash once** — closed now, nothing written; if it comes back you are asked again.
-- **Always trash** — closed now and every time it returns. The name is written
-  into `[ask.never]`, and an unlisted one also into `[boost.kill]`, so the lists
-  learn from what you actually do. (Through 0.13.3 the only record of *always*
+- **Trash once** — closed now, and closed on sight every time it comes back,
+  until you restart IdleMaster. Nothing written. Open the app yourself and the
+  window guard spares it, children and all, for as long as its window is up.
+  (Through 0.24.0 *once* meant once: a 30-minute backoff, then the same
+  question again about the thing you had just trashed.)
+- **Always trash** — closed now and every time it returns, across restarts. The
+  name is written into `[ask.never]` and onto `[boost.kill]` whenever it is not
+  there already, so the lists learn from what you actually do. (Through 0.24.0
+  the boost list was only written when the name was on no list at all, so a
+  name answered from an idle watch that was only on the idle list survived the
+  next boost. Through 0.13.3 the only record of *always*
   was the census — which is memory, and forgets at the next start. Worse, a name
   a kill list already covered had nothing to append there at all, so the answer
   was written nowhere: Lenovo Vantage's add-ins, restarted by their own service

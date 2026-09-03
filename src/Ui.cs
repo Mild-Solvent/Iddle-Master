@@ -143,9 +143,8 @@ namespace IdleMaster
             Controls.Add(body);
 
             Label legend = Theme.Hint(
-                "Keep it = leave it, ask again later        Always keep = protect it forever\n"
-                + "Trash once = close it, ask if it returns        Always trash = close it every time"
-                + (q.OnKillList ? "" : ", via the BOOST list"));
+                "Keep it = leave it until restart        Always keep = protect it forever\n"
+                + "Trash once = close it until restart        Always trash = close it every time, via the BOOST list");
             legend.Font = Theme.Small();
             legend.SetBounds(16, 122, 448, 32);
             Controls.Add(legend);
@@ -4356,7 +4355,7 @@ namespace IdleMaster
                 case "Sweep for new junk every (seconds)": return "sweep processes every (s)";
                 case "Re-stop restarted services every (minutes)": return "re-stop services every (min)";
                 case "Re-trim RAM every (minutes)": return "re-trim RAM every (min)";
-                case "...and leave it alone for (minutes)": return "'Keep it' / backoff lasts (min)";
+                case "...and leave it alone for (minutes)": return "respawn backoff lasts (min)";
                 case "Ask about unlisted newcomers bigger than (MB, 0 = off)": return "also ask about anything new over (MB, 0 = off)";
                 case "Dialog answers itself after (seconds)": return "dialog answers itself after (s)";
             }

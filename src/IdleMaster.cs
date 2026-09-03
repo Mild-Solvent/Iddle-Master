@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.25.1.0")]
-[assembly: AssemblyFileVersion("0.25.1.0")]
+[assembly: AssemblyVersion("0.26.0.0")]
+[assembly: AssemblyFileVersion("0.26.0.0")]
 
 namespace IdleMaster
 {
@@ -863,12 +863,16 @@ RepeatBoostMinutes=0
 # The sentry takes a census on its first sweep. Everything already running that
 # matches a list is junk you asked it to clear, and dies without a word. Anything
 # that shows up AFTER that is something YOU started, so it gets a dialog instead:
-#   Keep it      - left alone for SentryBackoffMinutes, then asked again
+#   Keep it      - left alone and never asked about again until you restart
+#                  IdleMaster. Nothing written.
 #   Always keep  - written into [protect] below, remembered forever
-#   Trash once   - closed now; if it comes back you are asked again
-#   Always trash - closed now and every time. The name goes into [ask.never] at
-#                  the bottom of this file, which is what makes the answer
-#                  outlive the app; unlisted names also go into [boost.kill].
+#   Trash once   - closed now, and closed on sight every time it comes back
+#                  until you restart IdleMaster. Nothing written. Open the app
+#                  yourself and the window guard spares it, children and all,
+#                  for as long as its window is up.
+#   Always trash - closed now and every time, across restarts. The name goes
+#                  into [ask.never] at the bottom of this file and onto
+#                  [boost.kill] if it is not there already.
 AskBeforeKill=1
 # No answer in this many seconds = AskTimeoutAction.
 AskTimeoutSeconds=47
@@ -3064,6 +3068,21 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
         private readonly HashSet<string> census = new HashSet<string>();
         private bool firstSweep = true;
 
+        // The "once" answers. Static because a Sentry lives for one mode and
+        // the answers are for the SESSION: close this app and they are gone,
+        // stop a watch and start another and they still hold. "Trash once"
+        // used to mean a 30-minute backoff and then the same toast again, so
+        // the thing you had just trashed came back and asked to be trashed
+        // again. Now: trashed on sight for as long as the app is open. The
+        // window guard still wins - open the app yourself and it, and
+        // everything it spawns, is left alone until you close it. "Keep it"
+        // is the mirror: not touched and not asked about again until you
+        // restart the app.
+        private static readonly HashSet<string> sessionTrash =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> sessionKeep =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         // Set by whoever owns a UI. Null means nobody can answer, so nothing is asked.
         public Func<Question, Verdict> Ask;
 
@@ -3305,6 +3324,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             HashSet<string> skip = new HashSet<string>();
             foreach (KeyValuePair<string, DateTime> kv in cooling) skip.Add(kv.Key);
+            foreach (string name in sessionKeep) skip.Add(name.ToLowerInvariant());
 
             // Overclocked: nobody is at the keyboard, so nothing is spared and
             // everything not protected counts as listed. [protect] still wins -
@@ -3324,7 +3344,13 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             foreach (Candidate c in all)
             {
-                bool listed = over || engine.OnList(patterns, c.Name);
+                // Answered already - "Always trash" in some earlier session
+                // ([ask.never]), or "Trash once" in this one. Both count as
+                // listed from here on: reaped on sight, on the first sweep and
+                // every sweep after, never asked about. Reap still honours the
+                // window guard, so a name you have open stays up regardless.
+                bool answered = engine.OnList(cfg.AskNever, c.Name) || sessionTrash.Contains(c.Name);
+                bool listed = over || answered || engine.OnList(patterns, c.Name);
 
                 if (firstSweep)
                 {
@@ -3336,8 +3362,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
                 bool newcomer = !census.Contains(c.Key);
 
-                // Answered in some earlier session. There is nothing left to ask.
-                if (newcomer && engine.OnList(cfg.AskNever, c.Name))
+                if (newcomer && answered)
                 {
                     census.Add(c.Key);
                     hits.AddRange(engine.Reap(c, guard));
@@ -3371,17 +3396,26 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 switch (v)
                 {
                     case Verdict.KillOnce:
-                        // Gone now; not on the census, so if it comes back after
-                        // the backoff it is a newcomer again and you are asked again.
+                        // Gone now, and gone every time it shows up again for
+                        // as long as this app is open. Nothing written: restart
+                        // the app and it is a newcomer again, and you are asked.
                         hits.AddRange(engine.Reap(c, guard));
-                        cooling[c.Key] = DateTime.Now.AddMinutes(cfg.SentryBackoffMinutes);
-                        log("[sentry] " + c.Name + " closed once - asking again if it returns");
+                        census.Add(c.Key);
+                        sessionTrash.Add(c.Name);
+                        log("[sentry] " + c.Name + " closed - and on sight until you restart IdleMaster");
                         break;
 
                     case Verdict.Kill:
                         hits.AddRange(engine.Reap(c, guard));
                         census.Add(c.Key);                          // silent from now on
-                        if (!listed && Config.Append("boost.kill", c.Name))
+                        sessionTrash.Add(c.Name);
+
+                        // Onto the BOOST list whenever it is not there already -
+                        // not only when it was on no list at all. A name that
+                        // was only on the IDLE list, answered "always" from an
+                        // idle watch, used to be written nowhere, and the next
+                        // boost left it standing.
+                        if (!engine.OnList(cfg.BoostKill, c.Name) && Config.Append("boost.kill", c.Name))
                         {
                             cfg.BoostKill.Add(c.Name);
                             log("[sentry] " + c.Name + " added to the boost kill list");
@@ -3402,6 +3436,7 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                         break;
 
                     case Verdict.KeepAlways:
+                        sessionKeep.Add(c.Name);
                         if (Config.Append("protect", c.Name))
                         {
                             cfg.Protect.Add(c.Name);
@@ -3409,10 +3444,22 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                         }
                         break;
 
-                    default:    // Keep, or nobody answered
-                        cooling[c.Key] = DateTime.Now.AddMinutes(cfg.SentryBackoffMinutes);
-                        log("[sentry] leaving " + c.Name + " alone for "
-                            + cfg.SentryBackoffMinutes + " min");
+                    default:    // Keep
+                        if (asked && !stopping)
+                        {
+                            // Your answer: not touched, not asked about, until
+                            // the app restarts.
+                            sessionKeep.Add(c.Name);
+                            log("[sentry] leaving " + c.Name + " alone until you restart IdleMaster");
+                        }
+                        else
+                        {
+                            // The lists deciding on their own, or a toast the
+                            // stop closed for you: a backoff, not a verdict.
+                            cooling[c.Key] = DateTime.Now.AddMinutes(cfg.SentryBackoffMinutes);
+                            log("[sentry] leaving " + c.Name + " alone for "
+                                + cfg.SentryBackoffMinutes + " min");
+                        }
                         break;
                 }
             }
