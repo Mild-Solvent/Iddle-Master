@@ -491,6 +491,15 @@ namespace IdleMaster
         public bool Internet;                 // something on the internet answered
         public bool Dns;                      // ...and names resolve
 
+        // Only ICMP answered: TCP to both anycast addresses failed, but they
+        // ping. That is not a healthy machine and it is not "the internet is
+        // down" either - it is the signature of the default route pointing at
+        // a gateway that is gone, which is what a VPN leaves behind when it is
+        // stopped after having been connected. Ping still works because the
+        // router is a directly-connected route; nothing that needs a real path
+        // out does.
+        public bool PingOnly;
+
         public bool TailscaleInstalled;
         public bool TailscaleService;
         public string TailscaleState = "";    // BackendState: Running, Stopped, NeedsLogin, NoState
@@ -911,7 +920,10 @@ namespace IdleMaster
                 else if (Tcp(IPAddress.Parse("1.1.1.1"), 443, 3000) || Tcp(IPAddress.Parse("8.8.8.8"), 443, 3000))
                     r.Internet = true;
                 else if (Ping_("1.1.1.1") || Ping_("8.8.8.8"))
+                {
                     r.Internet = true;
+                    r.PingOnly = true;
+                }
             }
 
             // 4. Tailscale
@@ -971,6 +983,16 @@ namespace IdleMaster
             }
             else if (!r.Internet)
                 r.Problems.Add("link up (" + r.LinkText + ") but the internet does not answer" + (r.Dns ? "" : " and DNS fails"));
+            else if (r.PingOnly)
+                // Counted as trouble in its own right. It used to be silence:
+                // Internet was set true off the ping and no problem was raised,
+                // so the guard called the machine healthy and never reached the
+                // repair ladder - which is where the fix for exactly this state
+                // lives. A machine that can ping but cannot open a socket is
+                // not one to leave alone.
+                r.Problems.Add("link up (" + r.LinkText + ") but only ping answers - TCP does not get out"
+                    + (r.Dns ? "" : " and DNS fails")
+                    + " (a VPN stopped after being connected leaves the default route on a dead gateway)");
             if (r.TailscaleInstalled && !r.TailscaleOk) r.Problems.Add(r.TailscaleText);
             if (r.SunshineInstalled && !r.SunshineOk) r.Problems.Add(r.SunshineText);
             return r;
