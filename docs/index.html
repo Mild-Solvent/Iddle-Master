@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Idle Master — free RAM on Windows, and keep it free</title>
-<meta name="description" content="Free RAM on Windows 10 and 11 by killing the updaters, launcher services and tray webviews you never opened — then a background sentry keeps them from coming back. Free, source available, 660 KB, no bloated suite to install, reversible by a reboot.">
+<meta name="description" content="Free RAM on Windows 10 and 11 by killing the updaters, launcher services and tray webviews you never opened — then a background sentry keeps them from coming back. Free, source available, 675 KB, no bloated suite to install, reversible by a reboot.">
 <link rel="canonical" href="https://mild-solvent.github.io/Iddle-Master/">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 <meta property="og:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
-<meta property="og:description" content="A single 660 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
+<meta property="og:description" content="A single 675 KB exe that frees 1.5–2 GB of RAM from software you never opened, then keeps it free. Nothing you're using — and nothing you reach the machine with — is ever touched.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mild-solvent.github.io/Iddle-Master/">
 <meta property="og:site_name" content="Idle Master">
@@ -18,7 +18,7 @@
 <meta property="og:image:alt" content="Idle Master — your RAM is full. You opened a third of it.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Idle Master — free 1.5–2 GB of RAM on Windows, and keep it free">
-<meta name="twitter:description" content="A 660 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
+<meta name="twitter:description" content="A 675 KB exe that frees 1.5–2 GB of Windows background clutter in a click, then keeps it free. Nothing you're using is ever touched.">
 <meta name="twitter:image" content="https://mild-solvent.github.io/Iddle-Master/og.png">
 <meta name="theme-color" content="#111318">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Crect x='.6' y='.6' width='30.8' height='30.8' rx='6.4' fill='none' stroke='%238fc1f0' stroke-opacity='.3' stroke-width='.7'/%3E%3Cpath d='M6.5 8.5h3.2v14H6.5zM12.5 22.5V8.5h3.2l3.55 7.1 3.55-7.1H26v14h-3v-8.6l-2.8 5.5h-1.9l-2.8-5.5v8.6z' fill='%238fc1f0'/%3E%3Cpath d='M7 25h3v1.6H7zM11.5 25h3v1.6h-3zM16 25h3v1.6h-3zM20.5 25h3v1.6h-3z' fill='%238fc1f0' fill-opacity='.55'/%3E%3C/svg%3E">
@@ -48,7 +48,7 @@
       "license": "https://github.com/Mild-Solvent/Iddle-Master/blob/main/LICENSE.md",
       "copyrightHolder": { "@type": "Person", "name": "Mild-Solvent" },
       "copyrightYear": "2026",
-      "description": "A 660 KB Windows utility that frees 1.5-2 GB of RAM by closing background updaters, launcher services and tray webviews, then runs a sentry that stops them respawning. Services are stopped, never disabled, so a reboot undoes everything.",
+      "description": "A 675 KB Windows utility that frees 1.5-2 GB of RAM by closing background updaters, launcher services and tray webviews, then runs a sentry that stops them respawning. Services are stopped, never disabled, so a reboot undoes everything.",
       "featureList": [
         "Boost mode: frees 1.5-2 GB without closing anything you opened",
         "Absolute idle: drops the whole machine to about 1.5-2 GB in use",
@@ -138,6 +138,7 @@
       <a href="#modes">Modes</a>
       <a href="#sentry">Sentry</a>
       <a href="#tour">Tour</a>
+      <a href="#guard">Network guard</a>
       <a href="#safety">Safety</a>
       <a href="#faq">FAQ</a>
       <a class="docs" href="docs.html">Docs</a>
@@ -150,7 +151,7 @@
   <div class="wrap">
     <h1>Windows just started and RAM is already full?<br>  <span class="hl">Claim it back</span> now.</h1>
     <p class="sub">
-      A single 660&nbsp;KB exe that hunts down the updaters, launcher services and tray
+      A single 675&nbsp;KB exe that hunts down the updaters, launcher services and tray
       webviews eating your RAM, gives it back in a click — and then keeps it that way,
       instead of letting it all drift back within the hour.
     </p>
@@ -161,7 +162,7 @@
       <a class="btn btn-ghost" href="https://github.com/Mild-Solvent/Iddle-Master">Source on GitHub</a>
     </div>
     <p class="meta">
-      ~120 KB installer, the app carried inside it · installs to your own profile, no admin ·
+      675&nbsp;KB installer, the app carried inside it · installs to your own profile, no admin ·
       never disables anything, a reboot undoes it all ·
       <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">all releases</a>
     </p>
@@ -170,14 +171,14 @@
       <div class="shot">
         <div class="bar">
           <i class="dot"></i><i class="dot"></i><i class="dot"></i>
-          <span class="t">Idle Master</span>
-          <span class="live">BOOST NOW</span>
+          <span class="t">Idle Master v0.25.1</span>
         </div>
-        <img src="media/boost.webp" width="684" height="703" loading="eager" decoding="async"
-             alt="Idle Master running a boost: the RAM gauge falls from 11.4 GB to 9.7 GB used while the log lists each process and service it closes, then the sentry arms and starts reaping respawns.">
+        <img src="media/window.png" width="700" height="816" loading="eager" decoding="async"
+             alt="The Idle Master window: a RAM gauge, the BOOST NOW and ABSOLUTE IDLE slabs, then four named bands of buttons - after the boost, disk and system, the way back, and Idle Master itself - over a console log.">
       </div>
-      <figcaption>One click, recorded on a real machine: <b>1.9&nbsp;GB freed in about three
-        seconds</b>, then the sentry keeps hunting so it stays freed.</figcaption>
+      <figcaption>The whole program. <b>Two slabs</b> that free the RAM, <b>four bands</b> that
+        hold everything else, and a console that says what it did &mdash; and nothing that needs
+        a second window to explain itself.</figcaption>
     </figure>
   </div>
 </header>
@@ -247,7 +248,8 @@
         <ul>
           <li><b>Keep it</b> — left alone 30 minutes, then asked again.</li>
           <li><b>Always keep</b> — written into <code>[protect]</code>, remembered forever.</li>
-          <li><b>Trash it</b> — closed now, and silently from then on.</li>
+          <li><b>Trash once</b> — closed now, and asked again if it comes back.</li>
+          <li><b>Always trash</b> — closed now and every time after, never asked again.</li>
         </ul>
         <p class="lead">No answer in 25 seconds counts as <em>keep it</em>. The tool should never
            be the reason you lost work while you were away from the keyboard.</p>
@@ -275,6 +277,13 @@
               owns a visible window is never touched. Close the window and the leftovers
               are reclaimed as usual.</li>
         </ul>
+
+        <h3>...and one switch that removes both</h3>
+        <p class="lead"><b style="color:var(--fg)">Overclocked sentry</b> is the away switch:
+           while it hunts, everything not on the protected list goes, no toast, no census. Turn it
+           on, press <b style="color:var(--fg)">ABSOLUTE IDLE</b>, walk away. It is red in the
+           window on purpose — with nobody at the keyboard there is nothing to ask, and nothing to
+           lose by not asking.</p>
       </div>
     </div>
   </div>
@@ -307,7 +316,22 @@
       </table>
     </div>
 
-    <p class="lead">
+    <figure class="clip" style="margin:30px 0 0">
+      <div class="shot">
+        <div class="bar">
+          <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+          <span class="t">the console, during one boost</span>
+          <span class="live">RECORDED</span>
+        </div>
+        <img src="media/boost-log.webp" width="656" height="235" loading="lazy" decoding="async"
+             alt="The log during a boost: it confirms Sunshine and Tailscale are still running and listening, trims 176 working sets, purges the standby list, reports 1936 MB freed, then the sentry goes on watch and starts reaping msedgewebview2 and NordUpdateService as they respawn.">
+      </div>
+      <figcaption>One real run, start to finish: the way back is <b>checked before and after</b>,
+        <b>1.9&nbsp;GB comes back</b> in about three seconds, and then the sentry starts reaping
+        the things that try to return.</figcaption>
+    </figure>
+
+    <p class="lead" style="margin-top:26px">
       Boost takes the <span class="pill b">BOOST</span> rows and leaves you working —
       about 1.5–2&nbsp;GB back. Absolute idle takes both columns and lands the machine near
       1.5–2&nbsp;GB in use total; that floor is Windows kernel and Defender, and there is no
@@ -360,14 +384,15 @@
             <i class="dot"></i><i class="dot"></i><i class="dot"></i>
             <span class="t">Idle Master — disk cleanup</span>
           </div>
-          <img src="media/cleanup.png" width="744" height="554" loading="lazy" decoding="async"
-               alt="The disk cleanup window as a tree: a temp-files finding opened into the folders actually inside it, biggest first, each row with a checkbox, an owner column naming the app the bytes belong to, its size, and a share-of-parent bar — plus filters for minimum size, safe or review, and a name search.">
+          <img src="media/cleanup.png" width="860" height="640" loading="lazy" decoding="async"
+               alt="The disk cleanup window: nine findings — temp files, caches, crash dumps, Windows update leftovers, old installers, the recycle bin, possible leftovers, big folders and the drive map — with the Windows update finding opened into the packages inside it, each row carrying a checkbox, the owner of the bytes, a size, a share-of-parent bar and a safe or review verdict.">
         </div>
         <figcaption><b>Disk cleanup.</b> The drive's own file table is read raw — the whole of
-          C: sized in seconds — and every finding opens into what is actually inside it, with an
-          owner column naming whose bytes they are. Known junk arrives pre-ticked; everything
-          else is your call. Nothing is deleted — it all goes to the <b>Recycle Bin</b>, so a
-          wrong tick is one restore away.</figcaption>
+          C: sized in about a minute — and every finding opens into what is actually inside it,
+          with an owner column naming whose bytes they are. Known junk arrives pre-ticked;
+          everything else is your call. It goes to the <b>Recycle Bin</b>, with one exception the
+          confirmation names out loud: Windows update leftovers are deleted outright, because
+          moving 300,000 files to the bin takes hours and frees nothing until you empty it.</figcaption>
       </figure>
 
       <figure class="clip">
@@ -390,7 +415,7 @@
             <i class="dot"></i><i class="dot"></i><i class="dot"></i>
             <span class="t">Idle Master — themes</span>
           </div>
-          <img src="media/themes-picker.png" width="700" height="807" loading="lazy" decoding="async"
+          <img src="media/themes-picker.png" width="700" height="816" loading="lazy" decoding="async"
                alt="The theme picker on first run: the whole Idle Master window blurred behind frosted glass, with one card over it headed PICK A LOOK, a row of live preview tiles each drawn in its own palette, and the choice between using Minimalistic or downloading more themes.">
         </div>
         <figcaption><b>Pick a look, once.</b> The app starts normally &mdash; gauge reading, log
@@ -404,7 +429,7 @@
             <i class="dot"></i><i class="dot"></i><i class="dot"></i>
             <span class="t">Idle Master — Cortex theme</span>
           </div>
-          <img src="media/themes-cortex.png" width="684" height="802" loading="lazy" decoding="async"
+          <img src="media/themes-cortex.png" width="700" height="816" loading="lazy" decoding="async"
                alt="Idle Master wearing the Cortex theme: near-black background, bright green accents, rounded buttons with a gradient lit from above and a green glow inside each edge, and a title bar drawn by the theme itself instead of the Windows one.">
         </div>
         <figcaption><b>A theme is a text file.</b> Nineteen colours, two fonts, and six keys for
@@ -426,6 +451,87 @@
           <b>Advanced</b> behind it opens every list, interval and default, no text editor in
           sight.</figcaption>
       </figure>
+    </div>
+  </div>
+</section>
+
+<section id="guard">
+  <div class="wrap">
+    <p class="kicker">The network guard</p>
+    <h2>A machine you reach over the network is a brick the moment the network goes.</h2>
+    <p class="lead">Freeing RAM on a box in another room is only useful while you can still get
+       to it. So whenever Idle Master is running — window, tray or logon task — it measures the
+       link, the internet, your mesh VPN and your streaming host every minute, repairs the first
+       thing that is wrong, and measures again. It is silent while everything is fine.</p>
+
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th style="width:220px">What it finds</th><th>What it does about it</th></tr></thead>
+        <tbody>
+          <tr><td>Wi-Fi dropped</td><td>reconnects to a known network from your own ordered list, and stops Windows powering the adapter down</td></tr>
+          <tr><td>Adapter up, no address</td><td>renews the DHCP lease</td></tr>
+          <tr><td>A network service stopped</td><td>starts it again — the ones you named, not a guess</td></tr>
+          <tr><td>Ping answers but nothing connects</td><td>treated as trouble in its own right, because that is the signature of a machine that only <em>looks</em> online</td></tr>
+          <tr><td>A stopped VPN left its routes behind</td><td>removes the two dead half-routes and the DNS it left on that adapter — only ever while none of that VPN's services are running</td></tr>
+          <tr><td>Your own apps not where you calibrated them</td><td>restarts or relaunches them until the picture matches again</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cols" style="margin-top:30px">
+      <div>
+        <h3>It will not guess at a login</h3>
+        <p class="lead">A mesh VPN can log itself out while DNS is dead, and bringing it back can
+           need an interactive sign-in. The guard says so at the keyboard rather than starting
+           something it cannot finish. Two rules it never breaks: it does not touch a live
+           tunnel's configuration, and it does not disable anything.</p>
+      </div>
+      <div>
+        <h3>Remote desktop setup teaches it your stack</h3>
+        <p class="lead">Get everything connected the way you like it — stream running, apps signed
+           in — and press <b style="color:var(--fg)">Calibrate</b>. It records each app's exe, its
+           service and the ports it is listening on, and from then on every check includes them.
+           Sunshine and Tailscale ship as the worked example; the list is yours.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="toolbox">
+  <div class="wrap">
+    <p class="kicker">The rest of the window</p>
+    <h2>Four bands, twelve doors.</h2>
+    <p class="lead">Everything else the program does is one click from the front, grouped by what
+       it costs you: what a boost can undo, what survives a reboot, what keeps you able to reach
+       the machine, and the program itself.</p>
+
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th style="width:210px">Band</th><th>What is in it</th></tr></thead>
+        <tbody>
+          <tr><td class="n">AFTER THE BOOST</td><td><b>Restore desktop</b> puts back exactly what the last run took away. <b>Task manager</b> is a live table of what is eating RAM, every row tagged with the mode that would close it, right-click to write that choice into the config. <b>Trim RAM now</b> squeezes working sets and purges the standby list without closing anything.</td></tr>
+          <tr><td class="n">DISK AND SYSTEM</td><td>Removal that a reboot does not undo. <b>Disk cleanup</b> reads the drive's file table and shows you the junk before it moves any of it. <b>Debloat</b> uninstalls the Store apps nobody asked for — listed with package, category and size, reviewed before anything goes. <b>ChrisTitus WinUtil</b> and <b>Zoicware</b> are doors to other people's debloaters, launched rather than imitated.</td></tr>
+          <tr><td class="n">THE WAY BACK</td><td><b>Network guard</b> is the page above. <b>Remote desktop setup</b> adds your own apps to its watch. <b>Backup kit</b> writes one zip that can put a fresh Windows back the way this one is.</td></tr>
+          <tr><td class="n">IDLE MASTER</td><td><b>Settings</b> in plain words, with every list and interval behind <em>Advanced</em>. <b>Report a bug</b> opens a pre-typed GitHub issue with the build, the Windows version and the last log lines — shown to you byte for byte first, and nothing leaves the machine until you press Submit in your own browser.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cols" style="margin-top:30px">
+      <div>
+        <h3>Boost again, on a timer</h3>
+        <p class="lead">The dial on the right of <b style="color:var(--fg)">BOOST NOW</b> is not a
+           second kind of boost: it is that button, pressed for you every N minutes for as long as
+           the window is up. The ring fills as the next one comes round. The sentry keeps hunting
+           in between; this is the whole pass coming round again.</p>
+      </div>
+      <div>
+        <h3>Two lists, one per slab</h3>
+        <p class="lead">The handle on the left of each slab opens what that mode closes and stops
+           — the boost list and the idle list, each editable from what is running right now. The
+           arrow in the top corner is the update check: white while there is nothing to say, green
+           the moment a release is out, and one click installs it.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -506,7 +612,12 @@ IdleMaster.exe --report      <span class="d">print what's eating RAM, and the pl
 IdleMaster.exe --boost --watch   <span class="d">boost, then keep hunting</span>
 IdleMaster.exe --watch       <span class="d">take up the watch for the last mode</span>
 IdleMaster.exe --unwatch     <span class="d">stop the sentry</span>
-IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span></pre>
+IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span>
+IdleMaster.exe --removetask  <span class="d">...and take it away again</span>
+IdleMaster.exe --guard       <span class="d">the network guard alone, no window</span>
+IdleMaster.exe --network     <span class="d">print what the guard sees, right now</span>
+IdleMaster.exe --cleanup-report  <span class="d">print the disk findings, delete nothing</span>
+IdleMaster.exe --debloat-report  <span class="d">print the removable Store apps</span></pre>
     </div>
 
     <div class="cols" style="margin-top:38px">
@@ -517,10 +628,11 @@ IdleMaster.exe --installtask <span class="d">run the sentry at every logon</span
            administrator is needed (the app elevates itself when it runs, which is where
            admin is actually needed). Start Menu shortcut, normal entry in
            <em>Installed apps</em>, optional logon task.</p>
-        <p class="lead">Updating is the same file, and <b style="color:var(--fg)">Check for
-           updates</b> in the window does it for you — a portable copy updates itself where
-           it stands. Nothing downloads until you say yes. Your <code>idlemaster.ini</code>
-           is never overwritten.</p>
+        <p class="lead">Updating is the same file, and the <b style="color:var(--fg)">arrow in
+           the top corner</b> does it for you — white while there is nothing to say, green when a
+           release is out, one click to install. A portable copy updates itself where it stands.
+           Nothing downloads until you say yes, and your <code>idlemaster.ini</code> is never
+           overwritten.</p>
       </div>
       <div>
         <h3>Build it yourself</h3>

@@ -80,6 +80,17 @@ changes nothing.
   off after six failed tries, and can also stop Windows powering the Wi-Fi
   adapter down. `--network` runs one check from a script; `--guard` runs only the
   guard from the tray.
+- **Ping is not proof.** If ICMP to the anycast addresses answers while TCP to
+  both of them fails, the guard calls that trouble in its own right: on a
+  stranded machine the router still pings, because it is a directly connected
+  route, and nothing else works.
+- **It clears what a stopped VPN leaves behind.** A VPN client stopped after
+  being connected can leave its adapter up holding 0.0.0.0/1 and 128.0.0.0/1
+  pointed at a dead gateway, plus DNS servers that only ever resolved through
+  the tunnel. Between them those two routes cover the whole address space and
+  are more specific than the real default route, so the machine looks online and
+  nothing connects. The guard removes both halves and that DNS - every step
+  gated on no service of that VPN running, so a live tunnel is never touched.
 - **Nothing is disabled.** Services are stopped only, so a reboot restores the
   machine with no further action.
 - **Every run is recorded** and can be undone with `--restore`.
@@ -116,6 +127,51 @@ non-interactive) and Chris Titus WinUtil (a preset applied headless, then left
 open). The zip contains IdleMasterRebuild.exe, a plain-text rebuild.ini,
 apps.json in winget-import format, and files\. Building a kit changes nothing.
 
+## Disk cleanup
+
+A separate window, unrelated to RAM. It reads the drive's own file table and
+lists what it found: temp files, caches, crash dumps, Windows update leftovers,
+old installers, the recycle bin, possible leftovers from uninstalled software,
+and big folders. Every finding opens into what is actually inside it, with an
+owner column naming the app the bytes belong to and a safe-or-review verdict.
+The same scan can be shown as a folder tree or as a treemap of the whole drive.
+
+Nothing is deleted until the user ticks something and presses Clean, and what is
+ticked goes to the **Recycle Bin** - with one exception the confirmation names
+out loud: `C:\Windows\SoftwareDistribution\Download` is deleted outright,
+because moving hundreds of thousands of files to the bin takes hours and frees
+nothing until the bin is emptied. `[cleanup.protect]` is never touched at all.
+Each item names itself and its size before it starts, and Stop cleaning prevents
+the next item starting. `--cleanup-report` prints the findings and deletes
+nothing.
+
+## Debloat
+
+Removes preinstalled Store apps: it lists every removable package with its
+category (preinstalled junk, sponsored apps, Xbox and gaming, Microsoft extras,
+everything else), its package name and its size, and removes only what is
+ticked. This is an uninstall, not a boost - no reboot brings it back and the
+only undo is the Store, which is why the Store itself, winget, the App
+Installer, Windows Terminal, WSL, the app runtimes, the codec extensions and the
+NVIDIA display stack are protected in code where no config edit can reach them.
+`[debloat.protect]` adds the user's own. `--debloat-report` lists and removes
+nothing.
+
+## Remote desktop setup
+
+Adds the user's own apps to the network guard's watch. `[remote.apps]` is the
+list; **Calibrate now** records each app's exe, its service and the ports it is
+listening on while everything is connected the way the user wants it, and from
+then on every check restarts or relaunches anything that no longer matches that
+picture.
+
+## Reporting a bug
+
+A **Report a bug** button writes a report containing the build, the Windows
+version, whether it was elevated, and the last lines of idlemaster.log, shows it
+byte for byte in a preview, and then opens github.com with it pre-typed. Nothing
+leaves the machine until the user presses Submit in their own browser.
+
 ## Themes
 
 Idle Master ships three looks inside the exe: Minimalistic (the default, and the
@@ -125,8 +181,7 @@ The picker appears once, on first run, over a blurred copy of the running
 window; after that it is Settings > Theme.
 
 A theme is a plain text file - nineteen colours, two font families and six keys
-for shape - saved as themes
-ame.imtheme next to the exe. No plugin, no DLL, no
+for shape - saved as themes\name.imtheme next to the exe. No plugin, no DLL, no
 code in a theme. All three built-ins are written out on first start so the way
 to make a fourth is copy, edit, restart. Switching is instant and does not need
 a restart; only a change of window frame waits for the next start.
@@ -152,12 +207,15 @@ IdleMaster.exe --boost       boost mode, no UI
 IdleMaster.exe --idle        absolute idle, no UI
 IdleMaster.exe --restore     undo, and stop the sentry
 IdleMaster.exe --report      print what is eating RAM, change nothing
+IdleMaster.exe --cleanup-report  scan the disk, print findings, delete nothing
+IdleMaster.exe --debloat-report  list removable Store apps, remove nothing
 IdleMaster.exe --boost --watch   boost, then keep hunting
 IdleMaster.exe --unwatch     stop the sentry
 IdleMaster.exe --network      check link, internet, Tailscale, Sunshine; fix what is down
 IdleMaster.exe --guard       run only the network guard, in the tray
 IdleMaster.exe --installtask run the sentry (and the guard) at every logon
 IdleMaster.exe --installtask --guard   only the network guard at logon
+IdleMaster.exe --removetask  undo that
 ```
 
 Builds with the .NET Framework compiler already present in Windows:

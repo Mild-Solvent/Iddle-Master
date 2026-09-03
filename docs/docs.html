@@ -73,6 +73,9 @@
     <a href="#netguard">Network guard</a>
     <a href="#windows">The windows</a>
     <a href="#cleanup">Disk cleanup</a>
+    <a href="#debloat">Debloat</a>
+    <a href="#remote">Remote desktop setup</a>
+    <a href="#feedback">Report a bug</a>
     <a href="#backup">Backup kit</a>
     <a href="#themes">Themes</a>
     <b>Reference</b>
@@ -95,7 +98,7 @@
     <h1>The manual</h1>
     <p class="lead" style="font-size:1.06rem;margin-bottom:26px">
       Everything Idle Master does, what each setting changes, and how to undo any of it.
-      Written against v0.7.2. If you only read one section, make it
+      Written against v0.25.1. If you only read one section, make it
       <a href="#recovery">Recovery</a> — that is the one you will want at 3am.
     </p>
 
@@ -104,7 +107,7 @@
       <h2>Install <a class="anchor" href="#install">#</a></h2>
       <p>Download <code>IdleMasterSetup.exe</code> from
         <a href="https://github.com/Mild-Solvent/Iddle-Master/releases">Releases</a> and run it.
-        One file, about 330 KB, with the app carried inside it as an embedded resource.</p>
+        One file, about 675 KB, with the app carried inside it as an embedded resource.</p>
 
       <p>It installs to <code>%LOCALAPPDATA%\Programs\IdleMaster</code> — your own profile, so
         <strong>installing needs no administrator</strong>. The app elevates itself when it runs,
@@ -173,7 +176,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         itself where it stands — and Idle Master comes back on its own with your
         <code>idlemaster.ini</code> untouched. The arrow is white while there is nothing to say,
         and clicking it then asks right now and tells you where you stand —
-        <em>v0.6.1 is the newest</em>, or <em>v0.7.0 is available</em>. <strong>Nothing downloads
+        <em>v0.25.1 is the newest</em>, or <em>v0.26.0 is available</em>. <strong>Nothing downloads
         until you click.</strong></p>
       <p>Uninstall from <em>Installed apps</em> like any other program, or run
         <code>IdleMasterSetup.exe --uninstall</code>. Either way it stands the sentry down first
@@ -352,7 +355,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <thead><tr><th style="width:90px">It checks</th><th style="width:230px">Healthy means</th><th>If not, it</th></tr></thead>
           <tbody>
             <tr><td class="n">link</td><td class="wrap-ok">a real adapter is up with a default gateway</td><td class="wrap-ok">restarts WLAN AutoConfig / DHCP / DNS if they died; switches the Wi-Fi radio back on if software turned it off; turns Wi-Fi auto-connect back on; <strong>reconnects to a known network</strong> — <code>[network.wifi]</code> first, then every other saved profile (in range first if you let it scan); renews DHCP; re-enables a disabled adapter; as a last resort bounces the adapter</td></tr>
-            <tr><td class="n">internet</td><td class="wrap-ok"><code>controlplane.tailscale.com</code> answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online</td><td class="wrap-ok">flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter</td></tr>
+            <tr><td class="n">internet</td><td class="wrap-ok"><code>controlplane.tailscale.com</code> answers on 443 (or 1.1.1.1 / 8.8.8.8 do), or Tailscale itself says it is online. <strong>Ping is not enough:</strong> if ICMP to those addresses works while TCP to both of them does not, that counts as trouble on its own</td><td class="wrap-ok">clears the routes and DNS a stopped VPN left behind (below); flushes DNS, renews the lease; restarts network services a mode stopped (NordVPN's service with its kill switch armed is the famous one); rebuilds the Wi-Fi connection; bounces the adapter</td></tr>
             <tr><td class="n">Tailscale</td><td class="wrap-ok">service running, <code>BackendState: Running</code>, an address, adapter up</td><td class="wrap-ok">restarts the service; runs <code>tailscale up</code> if it was Stopped; a needed login is said loudly once — nothing can type that for you</td></tr>
             <tr><td class="n">Sunshine</td><td class="wrap-ok">service running and listening on its ports</td><td class="wrap-ok">restarts the service; up-but-deaf twice in a row gets restarted too</td></tr>
           </tbody>
@@ -364,6 +367,21 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         so a router that is genuinely off does not get the adapter bounced all night. The moment a
         check comes back clean it says how long the outage was and what fixed it, and goes quiet
         again.</p>
+
+      <h3>The VPN that cannot be turned off</h3>
+      <p>Stop a VPN client <em>after</em> it has been connected and it can leave its adapter up
+        holding two routes — <code>0.0.0.0/1</code> and <code>128.0.0.0/1</code> — pointed at a
+        gateway that died with the tunnel. Between them those two cover the whole address space
+        and they are <em>more specific</em> than the real default route, so they win however good
+        its metric is. The DNS servers left on that adapter only ever resolved through the tunnel.
+        The machine then looks online: the router still pings, because that is a directly
+        connected route, and nothing else works. Turning the VPN back on appears to fix it, which
+        is how people end up believing the VPN can never be switched off.</p>
+      <p>The guard removes that residue — the two dead half-routes and the adapter's DNS. Every
+        step is gated on <strong>no service of that VPN running</strong>: all of it is legitimate
+        while the tunnel is up, and the client rebuilds it on the next connect, so a live tunnel's
+        configuration is never touched. It runs before the guard tries restarting a stopped
+        network service, because restarting the VPN is the wrong repair for this.</p>
 
       <h3>Two rules it will not break</h3>
       <ul>
@@ -410,6 +428,24 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
     <!-- ------------------------------------------------------------ windows -->
     <section id="windows">
       <h2>The windows <a class="anchor" href="#windows">#</a></h2>
+      <p>Under the two mode slabs the buttons are grouped into four named bands, each one running
+        the full width of the window:</p>
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th style="width:190px">Band</th><th>Buttons</th></tr></thead>
+          <tbody>
+            <tr><td class="n">AFTER THE BOOST</td><td class="wrap-ok">Restore desktop &middot; Task manager &middot; Trim RAM now &mdash; everything a reboot would have undone anyway</td></tr>
+            <tr><td class="n">DISK AND SYSTEM</td><td class="wrap-ok"><a href="#cleanup">Disk cleanup</a> &middot; <a href="#debloat">Debloat</a> &middot; ChrisTitus WinUtil &middot; Zoicware &mdash; removal that survives a reboot, ours and other people's</td></tr>
+            <tr><td class="n">THE WAY BACK</td><td class="wrap-ok"><a href="#netguard">Network guard</a> &middot; <a href="#remote">Remote desktop setup</a> &middot; <a href="#backup">Backup kit</a> &mdash; keeping the machine reachable, and rebuildable if it is not</td></tr>
+            <tr><td class="n">IDLE MASTER</td><td class="wrap-ok">Settings &middot; <a href="#feedback">Report a bug</a>, with the version and the last update check centred underneath</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Two things ride on the slabs themselves rather than in a band: the handle on the left of
+        each one opens the list that mode kills, and the dial on the right of <strong>BOOST
+        NOW</strong> is the repeat loop below. The arrow in the top corner is the update check —
+        white while there is nothing to say, green once a release is out, one click to install.</p>
+
       <p><strong>Sentry lists &amp; timers</strong> (button on the sentry row, and on the tray menu)
         is the sentry's own page: the active mode's kill list and service list as checklists —
         add from what is running, type a name, remove, untick to comment out — plus every timer
@@ -467,8 +503,100 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
         (that is what it means), and anything matching <code>[cleanup.protect]</code> is never
         touched at all, whatever the scanner thinks. That section takes full paths, supports
         <code>*</code>, and a path protects everything underneath it.</p>
+      <h3>The one thing that is not recycled</h3>
+      <p><code>C:\Windows\SoftwareDistribution\Download</code> is routinely several GB spread
+        across <strong>hundreds of thousands of files</strong>. Sending that to the Recycle Bin
+        means moving every file individually, each with its own metadata record: it runs for
+        hours, and when it finishes the bin is holding all of it, so nothing is actually freed
+        until you empty the bin as well. Those are <strong>deleted outright</strong>. Windows' own
+        Disk Cleanup does the same, and they are payloads for updates that are already
+        installed.</p>
+      <p>The confirmation lists by name anything going for good and what it adds up to, so the
+        exception is never a surprise. Everything else still goes to the bin.</p>
+
+      <h3>Three views of the same scan</h3>
+      <ul>
+        <li><strong>Findings</strong> — the default. Every finding opens into what is actually
+          inside it, biggest first, with an owner column naming the app the bytes belong to and a
+          <em>safe</em> or <em>review</em> verdict.</li>
+        <li><strong>Drive tree</strong> — the whole of C: as a tree, sorted by size, the way a
+          disk-space tool shows it.</li>
+        <li><strong>Drive map</strong> — the same walk as a treemap. Click a block to see what it
+          is, double-click a folder to go in, <em>up</em> to come back. Right-click gives the same
+          verdicts as the list.</li>
+      </ul>
+
+      <h3>While it is running</h3>
+      <p>Each item names itself before it starts, with its size, and says whether it is going to
+        the bin or for good — the item that takes a long time is the one you most need named.
+        <strong>Stop cleaning</strong> is honest about its limit: a single shell delete cannot be
+        called off once Windows has it, so Stop prevents the <em>next</em> item starting and tells
+        you it is finishing the current one first.</p>
+
       <p><code>IdleMaster.exe --cleanup-report</code> prints the same findings to a console and
         deletes nothing, ever.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------ debloat -->
+    <section id="debloat">
+      <h2>Debloat <a class="anchor" href="#debloat">#</a></h2>
+      <p>The Store apps nobody asked for. <strong>Debloat</strong> (main window, second band) asks
+        Windows what is installed, groups it, and shows every package with its category, its
+        package name and how much disk it is holding. Nothing happens until you tick something and
+        press <strong>Remove</strong>.</p>
+      <p>Groups, in the order they are listed: <em>Preinstalled junk</em>, <em>Sponsored apps</em>,
+        <em>Xbox &amp; gaming</em>, <em>Microsoft extras</em>, <em>Everything else</em> — top-down
+        from "tick it" to "your call". Anything Windows itself marks as non-removable, and every
+        framework package, is left out of the list entirely.</p>
+      <p><strong>This one is not a boost.</strong> Removing is an uninstall: no reboot brings it
+        back, and the only undo is the Store. That is why it sits in the same band as disk
+        cleanup rather than next to the two mode slabs.</p>
+      <p>The machine's own lifelines are protected <strong>in code</strong>, where no ini edit can
+        reach them: the Store, its purchase app, the App Installer and winget, Windows Terminal,
+        the Security health UI, Edge, the app runtimes, WSL, the language and handwriting packs,
+        the video and image codec extensions, and the NVIDIA display stack. Losing the Store means
+        losing the way to undo a removal, so the remover is never pointed at it.</p>
+      <p><code>[debloat.protect]</code> adds your own — package names as
+        <code>Get-AppxPackage</code> lists them, <code>*</code> works — and that list wins over
+        every suggestion. <code>IdleMaster.exe --debloat-report</code> prints the same table to a
+        console and removes nothing, ever.</p>
+    </section>
+
+    <!-- ------------------------------------------------------------- remote -->
+    <section id="remote">
+      <h2>Remote desktop setup <a class="anchor" href="#remote">#</a></h2>
+      <p>The <a href="#netguard">network guard</a> keeps the link, Tailscale and Sunshine alive on
+        its own. This page adds <em>your</em> apps to that watch, so a machine you only reach from
+        another room is checked for the things you actually reach it with.</p>
+      <p><code>[remote.apps]</code> is the list — process names, <code>*</code> works. The window
+        offers the common streaming and remote tools first, but anything can be added, and the
+        live picture at the top shows the guard's four lines followed by one line per app.</p>
+      <h3>Calibrated reconnects</h3>
+      <p>Get everything connected the way you like it — stream running, apps signed in — and press
+        <strong>Calibrate now</strong>. The guard records each app's exe, its service, and the
+        ports it is listening on. From then on every check also checks that list: an app that is
+        gone, or no longer on its calibrated ports, is restarted or relaunched until the picture
+        matches again.</p>
+      <p>Calibrate saves the list first, so what you see ticked is what gets calibrated. Apps that
+        are not running are skipped — start them, then calibrate again. Timing, Wi-Fi and the
+        guard's own switches live on the <em>Network guard</em> page, not here.</p>
+    </section>
+
+    <!-- ----------------------------------------------------------- feedback -->
+    <section id="feedback">
+      <h2>Report a bug <a class="anchor" href="#feedback">#</a></h2>
+      <p>Something looked wrong; say so without leaving the app or hunting for the repo.
+        <strong>Report a bug</strong> (main window, bottom band) writes the report for you: which
+        build, which Windows, whether it was running elevated, and the last lines of
+        <code>idlemaster.log</code> — which is usually the difference between a report somebody
+        can act on and one nobody can.</p>
+      <p><strong>Nothing leaves the machine by itself.</strong> The preview shows the report byte
+        for byte before anything happens. Pressing the button opens
+        <code>github.com</code> in your browser with it pre-typed, and the Submit press over there
+        is the sending. Close the browser tab and nothing was sent.</p>
+      <p>The log tail is the part worth reading before you send: it is your machine's process and
+        service names. Edit anything out of the preview that you would rather not publish — it is
+        an ordinary text box.</p>
     </section>
 
     <!-- ------------------------------------------------------------- backup -->
@@ -596,6 +724,8 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">AskTimeoutAction</td><td class="n">trash</td><td class="wrap-ok"><code>trash</code> = trash once, <code>keep</code> = leave it alone, <code>always</code> = always trash.</td></tr>
             <tr><td class="n">AskAboveMb</td><td class="n">250</td><td class="wrap-ok">Also ask about newcomers on no list at all but bigger than this. <code>0</code> = only ask about listed processes.</td></tr>
             <tr><td class="n">Tray</td><td class="n">1</td><td class="wrap-ok">Closing the window hides to the tray and keeps hunting. Exit from the tray menu to actually quit.</td></tr>
+            <tr><td class="n">Theme</td><td class="n">Minimalistic</td><td class="wrap-ok">Which look to wear, by name — see <a href="#themes">Themes</a>. Changed from <em>Settings &rsaquo; Theme</em>, not usually by hand.</td></tr>
+            <tr><td class="n">UiScale</td><td class="n">1.0</td><td class="wrap-ok">Everything in the window, larger or smaller together (0.5&ndash;2.0). The window is 700&times;882 at 1.0 on any screen at any DPI — the text is asked for at the size the layout was drawn for, rather than the layout being stretched to meet the text. Turn it down if the window is taller than your screen; the window also clamps itself to the work area on its own.</td></tr>
           </tbody>
         </table>
       </div>
@@ -667,10 +797,11 @@ IdleMaster.exe --idle            <span class="d">absolute idle, no UI</span>
 IdleMaster.exe --restore         <span class="d">undo the last run (also stops the sentry)</span>
 IdleMaster.exe --report          <span class="d">print what's eating RAM, and the plan</span>
 IdleMaster.exe --cleanup-report  <span class="d">scan the disk, print findings, delete nothing</span>
+IdleMaster.exe --debloat-report  <span class="d">list the removable Store apps, remove nothing</span>
 IdleMaster.exe --boost --watch   <span class="d">boost, then keep hunting</span>
 IdleMaster.exe --watch           <span class="d">take up the watch for whichever mode ran last</span>
 IdleMaster.exe --unwatch         <span class="d">stop the sentry</span>
-IdleMaster.exe --network          <span class="d">check link + internet + Tailscale + Sunshine, fix what is down (exit 0 = all up)</span>
+IdleMaster.exe --network         <span class="d">check link + internet + Tailscale + Sunshine, fix what is down (exit 0 = all up)</span>
 IdleMaster.exe --guard           <span class="d">sit in the tray running only the network guard</span>
 IdleMaster.exe --installtask     <span class="d">run the sentry (and the guard) at every logon</span>
 IdleMaster.exe --installtask --guard   <span class="d">...or only the network guard at logon</span>
@@ -761,7 +892,7 @@ chrome=custom     <span class="d">the theme draws the title bar, not Windows</sp
         <table class="tbl">
           <thead><tr><th>File</th><th>What it is</th></tr></thead>
           <tbody>
-            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~610 KB, no dependencies; carries the rebuild exe and its icon inside.</td></tr>
+            <tr><td class="n">IdleMaster.exe</td><td class="wrap-ok">The app. ~628 KB, no dependencies; carries the rebuild exe and its icon inside.</td></tr>
             <tr><td class="n">idlemaster.ini</td><td class="wrap-ok">The lists and settings. Written on first run, never overwritten by an update.</td></tr>
             <tr><td class="n">idlemaster.log</td><td class="wrap-ok">Append-only record, written only when something actually happens.</td></tr>
             <tr><td class="n">idlemaster.state</td><td class="wrap-ok">Written by boost and idle, consumed by restore. The undo list.</td></tr>
@@ -772,9 +903,14 @@ chrome=custom     <span class="d">the theme draws the title bar, not Windows</sp
       <p>In the repository: <code>src/IdleMaster.cs</code> is the engine, config, sentry, updater
         and CLI entry point; <code>src/NetGuard.cs</code> is the network guard — the WLAN API wrapper,
         the measuring, the repair ladder; <code>src/Ui.cs</code> is every window; <code>src/Cleanup.cs</code>
-        is the disk scanner; <code>src/Backup.cs</code> is the backup kit (inventory, zip
-        writer, window); <code>src/Rebuild.cs</code> is the standalone exe that ships inside a
-        kit; <code>src/Theme.cs</code> is the palette; <code>src/Setup.cs</code> is the installer,
+        is the disk scanner; <code>src/DiskScan.cs</code> reads the drive's file table and
+        <code>src/TreeMap.cs</code> draws it as a map; <code>src/Debloat.cs</code> is the Store-app
+        remover; <code>src/Vpn.cs</code> is the stopped-VPN residue the guard clears;
+        <code>src/Feedback.cs</code> is the bug-report door; <code>src/Backup.cs</code> is the
+        backup kit (inventory, zip writer, window); <code>src/Rebuild.cs</code> is the standalone
+        exe that ships inside a kit; <code>src/Theme.cs</code>, <code>src/Themes.cs</code>,
+        <code>src/Skin.cs</code> and <code>src/ThemeGate.cs</code> are the palette, the three
+        built-in looks, the painting and the first-run picker; <code>src/Setup.cs</code> is the installer,
         which carries the app as an embedded resource. <code>src/idlemaster.ico</code> is the
         icon, drawn by <code>make-icon.ps1</code>.</p>
     </section>
