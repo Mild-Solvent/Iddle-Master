@@ -879,6 +879,26 @@ namespace IdleMaster
         // batch their targets into a single shell call - one undo entry, not
         // thousands. Locked files fail inside the batch; we report and let a
         // rescan tell the truth rather than fight the lock.
+        // Some findings have no business going to the Recycle Bin, and the
+        // Windows update payloads are the case that proved it: 9.6 GB across
+        // 313,000 files. Recycling those means moving every one individually
+        // and writing a $I record for each - it runs for hours, and at the end
+        // of it the bin is holding 9.6 GB, so nothing has actually been freed
+        // until you empty it. Windows' own Disk Cleanup deletes them outright
+        // for exactly this reason, and they are payloads for updates that are
+        // already installed - there is nothing to restore them for.
+        //
+        // The rule lives here rather than at the scan, so the confirmation
+        // dialog and the delete itself can never disagree about what is about
+        // to happen.
+        public static bool IsPermanent(CleanupItem it)
+        {
+            if (it == null) return false;
+            if (it.IsRecycleBin) return true;      // emptying the bin already is
+            return string.Equals(it.Category, "Windows update",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool Recycle(CleanupItem it, CleanupScanner guard, Action<string> log)
         {
             if (it.IsRecycleBin) return EmptyBin(it, log);
@@ -913,16 +933,26 @@ namespace IdleMaster
                 return false;
             }
 
+            bool permanent = IsPermanent(it);
+
             Native.SHFILEOPSTRUCT op = new Native.SHFILEOPSTRUCT();
             op.wFunc = Native.FO_DELETE;
             op.pFrom = string.Join("\0", targets.ToArray()) + "\0";
-            op.fFlags = (ushort)(Native.FOF_ALLOWUNDO | Native.FOF_NOCONFIRMATION
-                | Native.FOF_SILENT | Native.FOF_NOERRORUI | Native.FOF_WANTNUKEWARNING);
+
+            // FOF_WANTNUKEWARNING is gone with the undo. It exists to warn that
+            // something is about to be destroyed rather than recycled, and it
+            // partially overrides FOF_NOCONFIRMATION to do it - which on a
+            // permanent delete is a prompt nobody would ever see, because
+            // FOF_SILENT means there is no progress window for it to sit on.
+            op.fFlags = (ushort)(Native.FOF_NOCONFIRMATION | Native.FOF_SILENT
+                | Native.FOF_NOERRORUI
+                | (permanent ? 0 : Native.FOF_ALLOWUNDO | Native.FOF_WANTNUKEWARNING));
 
             int rc = Native.SHFileOperation(ref op);
             if (rc == 0 && !op.fAnyOperationsAborted)
             {
-                log("   x " + it.Name + " - " + CleanupScanner.Nice(it.Bytes) + " to the bin");
+                log("   x " + it.Name + " - " + CleanupScanner.Nice(it.Bytes)
+                    + (permanent ? " deleted for good" : " to the bin"));
                 return true;
             }
             log("   ! could not fully remove " + it.Name

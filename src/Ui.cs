@@ -2493,6 +2493,8 @@ namespace IdleMaster
         private CleanupScanner scanner;
         private bool working;
         private bool syncing;       // programmatic check changes, ignore events
+        private volatile bool cleaning;     // a clean is running, not a scan
+        private volatile bool stopClean;    // ...and Stop has been pressed
         private bool syncingView;   // SetView driving the switch, not the user
 
         // The model the tree is rebuilt from: every finding the scan produced
@@ -2710,7 +2712,20 @@ namespace IdleMaster
             btnStop.SetBounds(124, 556, 100, 30);
             btnStop.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             btnStop.Visible = false;
-            btnStop.Click += delegate { if (scanner != null) scanner.Cancel(); };
+            btnStop.Click += delegate
+            {
+                if (cleaning)
+                {
+                    // Between items, not inside one: a single SHFileOperation
+                    // cannot be called off once the shell has it, so the most
+                    // this can promise is that nothing NEW is started.
+                    stopClean = true;
+                    btnStop.Enabled = false;
+                    progress.Text = "stopping after this item...";
+                    log("   . stop pressed - finishing the current item, then stopping");
+                }
+                else if (scanner != null) scanner.Cancel();
+            };
             Controls.Add(btnStop);
 
             progress = Theme.Hint("no scan yet");
@@ -2826,7 +2841,11 @@ namespace IdleMaster
                     arrived.Clear();
                 }
             }
-            if (working) progress.Text = where;
+            // Not during a clean: "working" covers both a scan and a clean,
+            // so this line was repainting the last SCAN phase over the clean's
+            // own progress every 200 ms - which is why a clean grinding through
+            // 313,000 files sat there reading "scan finished".
+            if (working && !cleaning) progress.Text = where;
             if (take == null) return;
 
             tree.BeginUpdate();
@@ -3277,18 +3296,46 @@ namespace IdleMaster
                 if (it.IsRecycleBin) bin = true;
             }
 
-            string msg = "Send " + pickedNow.Count + " item(s) - " + CleanupScanner.Nice(bytes)
-                + " - to the Recycle Bin?\n\nEverything can be restored from the bin afterwards."
-                + (bin ? "\n\nEXCEPT: the Recycle Bin row itself is ticked. Emptying the bin"
-                       + " is permanent. It is done last, after everything else has arrived."
-                       : "");
+            // Split the list by where each item is actually going, and say so.
+            // The dialog used to promise "everything can be restored from the
+            // bin", which was about to stop being true for the update payloads.
+            List<string> forGood = new List<string>();
+            long forGoodBytes = 0;
+            foreach (CleanupItem it in pickedNow)
+                if (CleanupActions.IsPermanent(it) && !it.IsRecycleBin)
+                {
+                    forGood.Add(it.Name);
+                    forGoodBytes += it.Bytes;
+                }
+
+            string msg = "Clean " + pickedNow.Count + " item(s) - "
+                + CleanupScanner.Nice(bytes) + "?\n\n"
+                + "Everything goes to the Recycle Bin and can be restored"
+                + (forGood.Count == 0 ? "." : ", except:");
+
+            if (forGood.Count > 0)
+                msg += "\n\nDELETED FOR GOOD (" + CleanupScanner.Nice(forGoodBytes) + "):\n  "
+                    + string.Join("\n  ", forGood.ToArray())
+                    + "\n\nThese are payloads for updates already installed. Windows' own"
+                    + " Disk Cleanup deletes them outright too - recycling them would move"
+                    + " hundreds of thousands of files one at a time and free nothing until"
+                    + " you emptied the bin afterwards.";
+
+            if (bin)
+                msg += "\n\nThe Recycle Bin row itself is ticked - emptying it is permanent,"
+                    + " and it is done last, after everything else has arrived.";
             if (MessageBox.Show(this, msg, "Disk cleanup", MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                 return;
 
             working = true;
+            cleaning = true;
+            stopClean = false;
             btnScan.Enabled = false;
             btnClean.Enabled = false;
+            btnStop.Text = "Stop cleaning";
+            btnStop.Enabled = true;
+            btnStop.Visible = true;
             progress.Text = "cleaning...";
             log("-- disk cleanup");
 
@@ -3301,9 +3348,33 @@ namespace IdleMaster
             Thread t = new Thread(delegate()
             {
                 long freed = 0;
+                int at = 0;
                 List<CleanupItem> gone = new List<CleanupItem>();
                 foreach (CleanupItem it in pickedNow)
                 {
+                    if (stopClean)
+                    {
+                        log("   . stopped - " + (pickedNow.Count - at)
+                            + " item(s) left untouched");
+                        break;
+                    }
+
+                    at++;
+                    // Name what is being worked on BEFORE it starts: the item
+                    // that takes an hour is the one you most need named.
+                    CleanupItem cur = it;
+                    int n = at;
+                    try
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            progress.Text = "cleaning " + n + " of " + pickedNow.Count
+                                + " - " + cur.Name + " (" + CleanupScanner.Nice(cur.Bytes) + ")"
+                                + (CleanupActions.IsPermanent(cur) ? " - for good" : "");
+                        });
+                    }
+                    catch (Exception) { }
+
                     if (!CleanupActions.Recycle(it, guard, log)) continue;
                     freed += it.Bytes;
                     gone.Add(it);
@@ -3320,6 +3391,10 @@ namespace IdleMaster
 
         private void CleanDone(List<CleanupItem> gone, int asked)
         {
+            cleaning = false;
+            btnStop.Visible = false;
+            btnStop.Text = "Stop scan";
+            btnStop.Enabled = true;
             foreach (CleanupItem it in gone)
             {
                 picked.Remove(it.Key);
