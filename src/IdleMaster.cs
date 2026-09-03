@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.25.0.0")]
-[assembly: AssemblyFileVersion("0.25.0.0")]
+[assembly: AssemblyVersion("0.25.1.0")]
+[assembly: AssemblyFileVersion("0.25.1.0")]
 
 namespace IdleMaster
 {
@@ -383,6 +383,12 @@ namespace IdleMaster
         // --- the look. A name, matched against themes\*.imtheme and the two
         // built-ins; ThemeIntro is the one-shot "you have been asked".
         public string Theme = Themes.Default;
+
+        // How big the whole window is, 1.0 being the size it was drawn at. It
+        // multiplies the layout AND the fonts together, so the window is the
+        // same picture at a different size rather than the same pixels with
+        // different text in them. See Theme.Fit().
+        public float UiScale = 1f;
         public bool ThemeIntro = false;             // 0 = the picker still owes you a first appearance
         public bool StartWithWindows = false;       // logon task: Idle Master opens as you log in
         public string StartupAction = "none";       // ...and then runs: none | boost | idle
@@ -465,6 +471,7 @@ namespace IdleMaster
                             break;
                         }
                         case "theme": if (v.Length > 0) c.Theme = v; break;
+                        case "uiscale": c.UiScale = Flt(v, c.UiScale, 0.5f, 2.0f); break;
                         case "themeintro": c.ThemeIntro = b; break;
                         case "sentryseconds": c.SentrySeconds = Int(v, c.SentrySeconds, 5); break;
                         case "sentryserviceminutes": c.SentryServiceMinutes = Int(v, c.SentryServiceMinutes, 1); break;
@@ -738,6 +745,14 @@ namespace IdleMaster
             catch (Exception) { return false; }
         }
 
+        private static float Flt(string v, float fallback, float min, float max)
+        {
+            float n;
+            if (!float.TryParse(v.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out n))
+                return fallback;
+            return n < min ? min : (n > max ? max : n);
+        }
+
         private static int Int(string v, int fallback, int min)
         {
             int n;
@@ -890,6 +905,16 @@ Theme=Minimalistic
 # time Idle Master opens. This is the note that it has. Set it back to 0 to be
 # asked again on the next start.
 ThemeIntro=0
+# How big the window is. 1.0 is the size every window was drawn at; 0.85 is
+# fifteen percent smaller, 1.2 is twenty percent bigger. It multiplies the
+# layout and the text together, so what changes is the size of the picture
+# and not the proportions of it. Anything from 0.5 to 2.0; missing = 1.0.
+#
+# It is NOT a display-scaling setting. Idle Master already draws itself at
+# the size its own numbers say, whatever DPI the screen reports - the text
+# comes down to meet the layout rather than the layout going up to meet the
+# text. This is on top of that, for when that size is not the one you want.
+UiScale=1.0
 
 # --- NETWORK GUARD ----------------------------------------------------------
 # The sentry guards the RAM; this guards the way back in. With NetworkGuard=1,
@@ -3585,7 +3610,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             // The look, before a single window exists - Theme.Form() copies
             // colours into controls as they are built, so a theme applied any
-            // later would only reach the windows opened after it.
+            // later would only reach the windows opened after it. The size
+            // goes in first: every font the theme hands out is multiplied by
+            // it, so it has to be true before the first Theme.Base() call.
+            Theme.UiScale = cfg.UiScale;
             Themes.Startup(cfg);
 
             // One Idle Master per machine. Every long-lived shape of the app -

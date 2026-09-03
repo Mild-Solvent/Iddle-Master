@@ -1420,7 +1420,12 @@ namespace IdleMaster
 
             Label hint = Theme.Hint("Unchecked entries stay in the file, commented out. Nothing here can "
                 + "override 'Never touch'.");
-            hint.SetBounds(14, 600, 520, 32);
+            // Two lines of room, not one and a bit. The same string comes out a
+            // few pixels wider on a scaled screen than at 96dpi - the glyph
+            // heights match to the pixel but the advance widths do not quite -
+            // so a label cut to fit exactly at 96dpi wraps here and loses the
+            // line it wrapped onto.
+            hint.SetBounds(14, 594, 528, 40);
             hint.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             Controls.Add(hint);
 

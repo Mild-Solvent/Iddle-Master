@@ -167,7 +167,7 @@ namespace IdleMaster
         public static Font Small() { return Ui(0.89f, FontStyle.Regular); }
         public static Font Big()   { return Ui(1.44f, FontStyle.Bold); }
         public static Font Title() { return Ui(2.22f, FontStyle.Bold); }
-        public static Font Mono()  { return Safe(cur.MonoFont, cur.MonoSize, FontStyle.Regular, "Consolas"); }
+        public static Font Mono()  { return Safe(cur.MonoFont, cur.MonoSize * FontK, FontStyle.Regular, "Consolas"); }
 
         // The band labels on the button wall. 7.5pt against a 9pt base, so it
         // scales with the theme like everything else instead of being pinned.
@@ -175,7 +175,7 @@ namespace IdleMaster
 
         private static Font Ui(float scale, FontStyle style)
         {
-            return Safe(cur.UiFont, cur.UiSize * scale, style, "Segoe UI");
+            return Safe(cur.UiFont, cur.UiSize * scale * FontK, style, "Segoe UI");
         }
 
         // A theme naming a font nobody has installed must not take the app
@@ -326,7 +326,32 @@ namespace IdleMaster
             }
         }
 
-        private static int K(int v) { return (int)Math.Round(v * DpiScale); }
+        // The one number that says how big the app is, 1.0 being the size every
+        // window was drawn at. Config reads it out of the ini; it is set once,
+        // before the first window exists, because the fonts below depend on it.
+        public static float UiScale = 1f;
+
+        // What a point size has to be multiplied by so that it comes out the
+        // number of PIXELS it was drawn as.
+        //
+        // This is the answer to the DPI problem, and it goes the other way from
+        // the obvious one. A 9pt font on a 120dpi screen is 25% more pixels than
+        // the same 9pt font on a 96dpi one, and the layout around it is typed in
+        // pixels: v0.25.0 pushed the layout up to meet the text, which is
+        // correct and made the window 25% bigger on a 125% desktop. The window
+        // was the thing that was too big. So the text comes down to meet the
+        // layout instead - 9pt at 120dpi is asked for as 7.2pt, which is the
+        // same twelve pixels tall it was at 96dpi, and the window is the size
+        // its own numbers say on every screen.
+        //
+        // UiScale then moves both together: it is the whole picture's size, and
+        // the proportions inside it never change.
+        public static float FontK
+        {
+            get { return UiScale / DpiScale; }
+        }
+
+        private static int K(int v) { return (int)Math.Round(v * UiScale); }
 
         // Every control's bounds, parents before children, read before anything
         // moves. The form is resized first and that drags the anchored ones out
@@ -346,8 +371,8 @@ namespace IdleMaster
             if (f == null) return;
             try
             {
-                float k = DpiScale;
-                if (k > 1.01f)
+                float k = UiScale;
+                if (k < 0.99f || k > 1.01f)
                 {
                     List<Control> flat = new List<Control>();
                     List<Rectangle> was = new List<Rectangle>();
