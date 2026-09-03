@@ -169,6 +169,10 @@ namespace IdleMaster
         public static Font Title() { return Ui(2.22f, FontStyle.Bold); }
         public static Font Mono()  { return Safe(cur.MonoFont, cur.MonoSize, FontStyle.Regular, "Consolas"); }
 
+        // The band labels on the button wall. 7.5pt against a 9pt base, so it
+        // scales with the theme like everything else instead of being pinned.
+        public static Font Tag()   { return Ui(0.83f, FontStyle.Bold); }
+
         private static Font Ui(float scale, FontStyle style)
         {
             return Safe(cur.UiFont, cur.UiSize * scale, style, "Segoe UI");
@@ -211,6 +215,17 @@ namespace IdleMaster
         }
 
         private static int Cap(int v) { return v < 0 ? 0 : (v > 255 ? 255 : v); }
+
+        // A colour part of the way towards another one - how a band rule under
+        // the big buttons gets a quieter version of an existing hue instead of
+        // a new colour nobody chose.
+        public static Color Mix(Color a, Color b, double t)
+        {
+            if (t < 0) t = 0; else if (t > 1) t = 1;
+            return Color.FromArgb((int)(a.R + (b.R - a.R) * t),
+                                  (int)(a.G + (b.G - a.G) * t),
+                                  (int)(a.B + (b.B - a.B) * t));
+        }
 
         public static Button Button(string text, Color back, Color fore)
         {

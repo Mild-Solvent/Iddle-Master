@@ -600,6 +600,75 @@ namespace IdleMaster
         }
     }
 
+    // --------------------------------------------------------------- band rule
+
+    // The divider under the two big buttons. The dozen small buttons used to
+    // be one undifferentiated grid of gray slabs - "Trim RAM now" sat next to
+    // "Settings", and the two that launch somebody else's installer sat
+    // wherever there was a gap. They are bands now, and this is what heads a
+    // band: its name in the middle of a hairline that runs out to both sides
+    // and fades as it goes.
+    //
+    // Deliberately short. Four of these had to be found inside the window
+    // without taking any height from the console or pushing the window past
+    // the bottom of an 816px desktop, so a rule is one line of 7.5pt and
+    // nothing else - no box, no padding, no second colour behind it.
+    //
+    // The name carries the band's colour, and the line starts in the same
+    // colour before it dies away: steel for the boost's own row, soft red for
+    // the row that takes things away for good, gray for the program's own.
+    internal sealed class BandRule : Control
+    {
+        private readonly Color ink;
+
+        public BandRule(string name, Color color)
+        {
+            ink = color;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Text = name;
+            Font = Theme.Tag();
+            BackColor = Theme.Bg;
+            TabStop = false;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            using (SolidBrush b = new SolidBrush(Theme.Bg)) g.FillRectangle(b, ClientRectangle);
+
+            const TextFormatFlags flags = TextFormatFlags.HorizontalCenter
+                | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+                | TextFormatFlags.SingleLine;
+            Size sz = TextRenderer.MeasureText(g, Text, Font, new Size(Width, Height), flags);
+            TextRenderer.DrawText(g, Text, Font, new Rectangle(0, 0, Width, Height), ink, flags);
+
+            // The hairline, in a quieter version of the name's colour: out of
+            // the name in both directions, fading as it goes, so the band is
+            // announced from the middle and the line ends nowhere in
+            // particular rather than stopping against something.
+            int y = Height / 2;
+            int gap = 10;
+            int left = (Width - sz.Width) / 2 - gap;
+            int right = (Width + sz.Width) / 2 + gap;
+            Color lit = Theme.Mix(ink, Theme.Bg, 0.45);
+            if (left > 2)
+            {
+                Rectangle r = new Rectangle(0, y, left, 1);
+                using (LinearGradientBrush lg = new LinearGradientBrush(r, Theme.Bg, lit,
+                           LinearGradientMode.Horizontal))
+                    g.FillRectangle(lg, r);
+            }
+            if (right < Width - 2)
+            {
+                Rectangle r = new Rectangle(right, y, Width - right, 1);
+                using (LinearGradientBrush lg = new LinearGradientBrush(r, lit, Theme.Bg,
+                           LinearGradientMode.Horizontal))
+                    g.FillRectangle(lg, r);
+            }
+        }
+    }
+
     // What one button closes and what it stops, side by side, with Save. The
     // panes are the very same ListPane the settings window builds, reading and
     // writing the very same idlemaster.ini - this is a shorter way in, not a
@@ -4746,12 +4815,12 @@ namespace IdleMaster
             title.Text = "IDLE MASTER";
             title.Font = Theme.Title();
             title.ForeColor = Theme.Accent;
-            title.SetBounds(20, 14, 400, 36);
+            title.SetBounds(20, 8, 400, 34);
             Controls.Add(title);
 
             Label sub = Theme.Hint("Sunshine + Tailscale stay up. Everything else is negotiable.   v"
                 + App.Version);
-            sub.SetBounds(22, 50, 500, 20);
+            sub.SetBounds(22, 42, 500, 18);
             Controls.Add(sub);
 
             // Updates live in the corner now instead of in the button grid: an
@@ -4760,20 +4829,20 @@ namespace IdleMaster
             // asks GitHub; clicking it once it is green installs. The line under
             // the buttons still carries the words - the arrow is the colour.
             updateBadge = new UpdateBadge();
-            updateBadge.SetBounds(620, 16, 34, 34);
+            updateBadge.SetBounds(620, 10, 34, 34);
             updateBadge.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             updateBadge.Click += delegate { CheckUpdates(); };
             Controls.Add(updateBadge);
             updateTip.SetToolTip(updateBadge, "Check for updates");
 
             gauge = new MemGauge();
-            gauge.SetBounds(22, 78, 640, 36);
+            gauge.SetBounds(22, 66, 640, 34);
             gauge.Font = Theme.Bold();
             gauge.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(gauge);
 
             btnBoost = BigButton("BOOST NOW",
-                "Kill the background junk. Desktop stays usable.", Theme.Good, 130);
+                "Kill the background junk. Desktop stays usable.", Theme.Good, 108);
             btnBoost.Click += delegate { Run("boost"); };
 
             // The repeat loop. Not a second kind of boost: it is this button,
@@ -4808,76 +4877,109 @@ namespace IdleMaster
             listTip.SetToolTip(listBoost, "What Boost closes and stops - click to edit");
 
             btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to Windows vitals", Theme.Danger, 218);
+                "Strip to Windows vitals", Theme.Danger, 188);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
             listIdle = ListsHandle(btnIdle, Theme.Danger, "idle");
             listTip.SetToolTip(listIdle, "What Absolute Idle closes and stops - click to edit");
 
-            btnRestore = SmallButton("Restore desktop", 22, 306);
-            btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = SmallButton("Task manager", 182, 306);
-            btnEaters.Click += delegate { OpenEaters(); };
-            btnTrim = SmallButton("Trim RAM now", 342, 306);
-            btnTrim.Click += delegate { Run("trim"); };
-            btnConfig = SmallButton("Settings", 502, 306);
-            btnConfig.Click += delegate { EditConfig(); };
+            // ---- the toolbox, in bands ---------------------------------
+            //
+            // A dozen identical gray slabs in one grid read as a wall: nothing
+            // said which button belonged with which, so "Trim RAM now" sat
+            // beside "Settings" and the two doors to somebody else's installer
+            // sat wherever a gap was left over.
+            //
+            // Four bands now, each headed by a rule with the band's name in
+            // the middle of it. A band's buttons share the full width of the
+            // window between them - three wide ones or four narrower ones - so
+            // every row runs edge to edge and the rules are the only thing
+            // dividing them.
+            //
+            // The height had to come from somewhere and it was not going to
+            // come from the console: a rule is one 7.5pt line, the header
+            // gives up a dozen pixels, and the fourth row stands where the
+            // version line used to - which now rides on that row, beside the
+            // two buttons that are the program's own. The window still fits an
+            // 816px desktop, which is the point.
 
-            btnCleanup = SmallButton("Disk cleanup", 22, 342);
+            Band("AFTER THE BOOST", Theme.Accent, 270,
+                 "Put the desktop back, or look at what the boost went after.");
+            btnRestore = Slot("Restore desktop", 0, 3, 270);
+            btnRestore.Click += delegate { Run("restore"); };
+            btnEaters = Slot("Task manager", 1, 3, 270);
+            btnEaters.Click += delegate { OpenEaters(); };
+            btnTrim = Slot("Trim RAM now", 2, 3, 270);
+            btnTrim.Click += delegate { Run("trim"); };
+
+            // Red, because this is the band that takes things away and they
+            // stay away - a boost is over when you reboot, this is not. The
+            // last two are doors to other people's debloaters, launched rather
+            // than imitated; they belong here, with ours.
+            Band("GONE FOR GOOD", Theme.Warn, 321,
+                 "Removal that survives a reboot - disk, apps, and other people's debloaters.");
+            btnCleanup = Slot("Disk cleanup", 0, 4, 321);
             btnCleanup.Click += delegate { OpenCleanup(); };
-            btnBackup = SmallButton("Backup kit", 182, 342);
-            btnBackup.Click += delegate { OpenBackup(); };
+            btnDebloat = Slot("Debloat", 1, 4, 321);
+            btnDebloat.Click += delegate { OpenDebloat(); };
+            btnWinUtil = Slot("ChrisTitus WinUtil", 2, 4, 321);
+            btnWinUtil.Click += delegate { RunWinUtil(); };
+            btnZoic = Slot("Zoicware", 3, 4, 321);
+            btnZoic.Click += delegate { RunZoicware(); };
+
+            // How you get back to a machine you have stripped from across the
+            // house: the link stays up, the desktop stays reachable, and the
+            // kit rebuilds the box if neither of those held.
+            Band("THE WAY BACK", Theme.Mix(Theme.Accent, Theme.Dim, 0.5), 372,
+                 "Keeping the machine reachable - and rebuildable if it is not.");
 
             // The network guard's page. The button itself goes red while the
             // guard is fighting something, the way the corner arrow goes green
             // when there is news.
-            btnNetGuard = SmallButton("Network guard", 342, 342);
+            btnNetGuard = Slot("Network guard", 0, 3, 372);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
-
-            btnDebloat = SmallButton("Debloat", 502, 342);
-            btnDebloat.Click += delegate { OpenDebloat(); };
-
-            btnRemote = SmallButton("Remote desktop setup", 22, 378);
+            btnRemote = Slot("Remote desktop setup", 1, 3, 372);
             btnRemote.Click += delegate { OpenRemote(); };
+            btnBackup = Slot("Backup kit", 2, 3, 372);
+            btnBackup.Click += delegate { OpenBackup(); };
 
-            // Two doors to other people's debloaters - launched, not imitated.
-            btnWinUtil = SmallButton("ChrisTitus WinUtil", 182, 378);
-            btnWinUtil.Click += delegate { RunWinUtil(); };
-            btnZoic = SmallButton("Zoicware", 342, 378);
-            btnZoic.Click += delegate { RunZoicware(); };
-
-            updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(22, 420, 480, 20);
-            updateLabel.AutoEllipsis = true;
-            updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            Controls.Add(updateLabel);
+            // The program itself, not the machine - gray, so it stays out of
+            // the way of the three bands that do something to Windows. Two
+            // buttons and then the words the corner arrow does not say: the
+            // version, and whatever the update check last found.
+            Band("IDLE MASTER", Theme.Dim, 423,
+                 "This program: its switches, its version, and where to say it went wrong.");
+            btnConfig = Slot("Settings", 0, 4, 423);
+            btnConfig.Click += delegate { EditConfig(); };
 
             // The bug report door: whatever looked wrong, say so from right
             // here. Opens a pre-typed GitHub issue - the preview shows every
             // byte first, and nothing is sent until Submit in the browser.
-            btnFeedback = Theme.Quiet("Report a bug");
-            btnFeedback.SetBounds(510, 414, 152, 30);
-            btnFeedback.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnFeedback = Slot("Report a bug", 1, 4, 423);
             btnFeedback.Click += delegate { OpenFeedback(); };
-            Controls.Add(btnFeedback);
+
+            updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
+            updateLabel.SetBounds(346, 443, 316, 18);
+            updateLabel.AutoEllipsis = true;
+            Controls.Add(updateLabel);
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 454, 190, 22);
+            chkSentry.SetBounds(24, 478, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 456, 300, 20);
+            sentryLabel.SetBounds(220, 480, 300, 20);
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, 450, 152, 30);
+            btnSentry.SetBounds(510, 474, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -4888,7 +4990,7 @@ namespace IdleMaster
             chkOverclock = new CheckBox();
             chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
             chkOverclock.Checked = cfg.OverclockedSentry;
-            chkOverclock.SetBounds(24, 484, 636, 22);
+            chkOverclock.SetBounds(24, 510, 636, 22);
             chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
             chkOverclock.FlatStyle = FlatStyle.Flat;
             chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -4903,7 +5005,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 512, 640, 212);
+            logBox.SetBounds(22, 540, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -6034,8 +6136,11 @@ namespace IdleMaster
 
         private Button BigButton(string text, string sub, Color color, int y)
         {
+            // Colour from the theme, height from the band layout: the themes
+            // work owns what colour this is, the band work owns how much room
+            // it may take above the four named bands below it.
             Button b = Theme.Button(text + "\n" + sub, color, Theme.OnAccent);
-            b.SetBounds(22, y, 640, 76);
+            b.SetBounds(22, y, 640, 72);
             b.Font = Theme.Big();
             b.TextAlign = ContentAlignment.MiddleCenter;
             b.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -6090,10 +6195,41 @@ namespace IdleMaster
             catch (Exception ex) { AppendLog("Could not reload the config: " + ex.Message); }
         }
 
-        private Button SmallButton(string text, int x, int y)
+        // ---- the bands under the big buttons
+
+        // A band is one rule and the row of buttons under it. Rule and row
+        // both run the full width of the window, the way the gauge and the
+        // console do, so there is no dead column down the right: a band of
+        // three splits that width three ways, a band of four splits it four
+        // ways, and every row still ends on the same edge.
+        private const int BandLeft = 22;
+        private const int RowRight = 662;    // where the gauge and console end
+        private const int RowGap   = 8;
+        private const int SlotHigh = 28;
+        private const int RuleHigh = 14;     // one line of 7.5pt, nothing more
+        private const int RuleDrop = 15;     // ...and the row sits just under it
+
+        // The rule that heads a band. The name is as much as fits on a line
+        // that short, so the longer answer goes in the tooltip.
+        private BandRule Band(string name, Color ink, int y, string tip)
         {
+            BandRule r = new BandRule(name, ink);
+            r.SetBounds(BandLeft, y, RowRight - BandLeft, RuleHigh);
+            Controls.Add(r);
+            listTip.SetToolTip(r, tip);
+            return r;
+        }
+
+        // Button number i of the n in the band whose rule is at y. They share
+        // the row evenly and the last one takes up whatever the division left
+        // over, so a row of four ends on exactly the edge a row of three does.
+        private Button Slot(string text, int i, int n, int y)
+        {
+            int w = (RowRight - BandLeft - (n - 1) * RowGap) / n;
+            int x = BandLeft + i * (w + RowGap);
+            if (i == n - 1) w = RowRight - x;
             Button b = Theme.Quiet(text);
-            b.SetBounds(x, y, 152, 30);
+            b.SetBounds(x, y + RuleDrop, w, SlotHigh);
             Controls.Add(b);
             return b;
         }
