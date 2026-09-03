@@ -194,8 +194,10 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <span class="tag">BOOST NOW</span>
           <h3>You are sitting there</h3>
           <p>Closes <code>[boost.kill]</code> processes and stops <code>[boost.services]</code>:
-            updaters, launcher services, tray webviews, the search indexer. Then it trims working
-            sets and purges the standby list.</p>
+            updaters, launcher services, tray webviews, the search indexer. Every megabyte it
+            reports is a process that is gone, not memory pushed to the pagefile — working-set
+            trimming is off by default, and lives on the <em>Trim RAM now</em> button for the
+            times you actually want it.</p>
           <div class="keeps"><b>Survives:</b> your desktop, your browser, anything you opened
             yourself, and — with <code>SkipOpenApps=1</code> — every process belonging to an app
             with a window on screen.</div>
@@ -251,7 +253,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <tbody>
             <tr><td class="n">20 s</td><td class="wrap-ok">sweeps processes against the active mode's kill lists</td><td class="n">SentrySeconds</td></tr>
             <tr><td class="n">5 min</td><td class="wrap-ok">re-stops services from those lists that restarted themselves</td><td class="n">SentryServiceMinutes</td></tr>
-            <tr><td class="n">10 min</td><td class="wrap-ok">trims working sets and purges the standby list again</td><td class="n">SentryTrimMinutes</td></tr>
+            <tr><td class="n">10 min</td><td class="wrap-ok">trims working sets again — only if <code>TrimWorkingSets=1</code>, which is off by default</td><td class="n">SentryTrimMinutes</td></tr>
             <tr><td class="n">5 min</td><td class="wrap-ok">checks your protected services are alive, restarts any that died</td><td class="n">SentryGuardMinutes</td></tr>
           </tbody>
         </table>
@@ -681,8 +683,8 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
           <tbody>
             <tr><td class="n">KillExplorer</td><td class="n">1</td><td class="wrap-ok">Absolute idle recycles the Windows shell: explorer is terminated, Winlogon rebuilds the session, and the desktop, taskbar and Start menu come back fresh — a few hundred MB lighter than the shell that had been running all day. The screen flashes black, and open File Explorer windows do not survive it. Set to <code>0</code> and idle leaves the shell alone.</td></tr>
             <tr><td class="n">NetworkGuard</td><td class="n">1</td><td class="wrap-ok">The network guard: after every destructive step verify Sunshine + Tailscale are alive and restart them if not — and, whenever Idle Master runs, keep the standing watch over the connection (see <a href="#netguard">Network guard</a>).</td></tr>
-            <tr><td class="n">TrimWorkingSets</td><td class="n">1</td><td class="wrap-ok">Squeeze the working set of every surviving process.</td></tr>
-            <tr><td class="n">ClearStandbyList</td><td class="n">1</td><td class="wrap-ok">Purge the standby (cached) list, so Task Manager shows the memory as free.</td></tr>
+            <tr><td class="n">TrimWorkingSets</td><td class="n">0</td><td class="wrap-ok">Squeeze the working set of every surviving process at the end of boost/idle and on the sentry timer. <b>Off</b>: what a trim &ldquo;frees&rdquo; is not freed, it is evicted towards the pagefile and faulted straight back the moment you use the app again — a stutter every sweep, for memory you were not short of. <em>Trim RAM now</em> works whatever this says.</td></tr>
+            <tr><td class="n">ClearStandbyList</td><td class="n">0</td><td class="wrap-ok">Purge the standby (cached) list, so Task Manager shows the memory as free. <b>Off</b>: standby already <em>is</em> available to whatever asks next, so purging wins no allocation — it only drops the file cache and makes the next launch of everything read from disk.</td></tr>
             <tr><td class="n">CloseBrowsersInBoost</td><td class="n">0</td><td class="wrap-ok">Off, because during a boost you are working. Turn it on and boost treats browsers like idle does.</td></tr>
           </tbody>
         </table>
@@ -696,7 +698,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">Sentry</td><td class="n">1</td><td class="wrap-ok">Keep sweeping after a mode has run. Off means a mode is a one-shot.</td></tr>
             <tr><td class="n">SentrySeconds</td><td class="n">20</td><td class="wrap-ok">Seconds between process sweeps.</td></tr>
             <tr><td class="n">SentryServiceMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between re-stopping services that trigger-started themselves.</td></tr>
-            <tr><td class="n">SentryTrimMinutes</td><td class="n">10</td><td class="wrap-ok">Minutes between working-set trims and standby purges.</td></tr>
+            <tr><td class="n">SentryTrimMinutes</td><td class="n">10</td><td class="wrap-ok">Minutes between working-set trims and standby purges. Does nothing unless <code>TrimWorkingSets=1</code>.</td></tr>
             <tr><td class="n">SentryGuardMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between protected-service health checks.</td></tr>
             <tr><td class="n">SentryRespawnLimit</td><td class="n">6</td><td class="wrap-ok">Times one name may come back before the sentry stops fighting it.</td></tr>
             <tr><td class="n">SentryBackoffMinutes</td><td class="n">30</td><td class="wrap-ok">How long that truce lasts — and how long <em>Keep it</em> buys an app.</td></tr>
@@ -705,7 +707,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">SentryStandDown</td><td class="n">1</td><td class="wrap-ok">The watch follows the room. Any keyboard or mouse input and an <strong>idle</strong> watch drops to <em>boost</em> rules — front window spared, open windows spared, newcomers asked about — with Overclocked suspended; go quiet again and the idle rules come back on their own. It never ends the watch (that is Restore) and never restarts a service. <code>0</code> = the old behaviour, which reaps every app you open until the respawn backoff gives up.</td></tr>
             <tr><td class="n">SentryAwaySeconds</td><td class="n">120</td><td class="wrap-ok">How long with no input at all counts as “away” again.</td></tr>
             <tr><td class="n">CloseGraceMs</td><td class="n">3000</td><td class="wrap-ok">Ask an app with a window to shut itself down, and wait this long, before terminating it. What stops Electron apps coming back with a stale singleton lock and refusing to start. <code>0</code> = terminate outright.</td></tr>
-            <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. <code>0</code> = off.</td></tr>
+            <tr><td class="n">TrimWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">Emergency trim when free RAM drops under this many MB. The one automatic trim that pays for itself: it fires only when you are genuinely short of memory, which is the only time evicting pages beats keeping them — so it runs even with <code>TrimWorkingSets=0</code>. <code>0</code> = off.</td></tr>
             <tr><td class="n">SentryFullPassMinutes</td><td class="n">0</td><td class="wrap-ok">Repeat a <em>whole</em> boost pass — re-stop services, trim, purge, check the stream stack — every this many minutes, on top of the 20-second sweep. 0 = off.</td></tr>
             <tr><td class="n">BoostWhenFreeBelowMb</td><td class="n">0</td><td class="wrap-ok">…and do one right now when free RAM drops under this many MB (at most once per 5 minutes). 0 = off.</td></tr>
             <tr><td class="n">RepeatBoostMinutes</td><td class="n">0</td><td class="wrap-ok">The repeat loop: the window clicks <strong>BOOST NOW</strong> for you every this many minutes, for as long as it is open — a whole boost each time, not the sentry’s sweep. Set from the refresh arrow on the button, or here. 0 = off.</td></tr>

@@ -34,8 +34,10 @@ Two modes:
 
 Most memory optimizers free memory once and the software respawns within the
 hour. Idle Master runs a **sentry**: a background thread that re-applies the same
-kill lists every 20 seconds, re-stops services every 5 minutes, and trims working
-sets every 10 minutes. The RAM stays freed instead of drifting back up.
+kill lists every 20 seconds and re-stops services every 5 minutes. The RAM stays
+freed instead of drifting back up. It does not trim working sets on a timer:
+trimming evicts pages towards the pagefile and they fault back the moment the app
+is used again, so it is off by default and lives on a button.
 
 It does not claim to "compress" or "defragment" memory. The mechanism is closing
 processes that should not have been running, and keeping them closed.

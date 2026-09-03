@@ -145,7 +145,7 @@ service came back. The **sentry** is a background thread that re-applies the
 |---|---|
 | 20 s | sweeps processes against the active mode's kill lists |
 | 5 min | re-stops services from those lists that restarted themselves |
-| 10 min | trims working sets and purges the standby list again |
+| 10 min | trims working sets again — only with `TrimWorkingSets=1`, which is off by default |
 | 5 min | checks Sunshine + Tailscale, restarts them if they died |
 
 It enforces **whichever mode ran last** — boost after Boost Now, the full idle

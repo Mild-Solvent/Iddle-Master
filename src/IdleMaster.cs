@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.26.0.0")]
-[assembly: AssemblyFileVersion("0.26.0.0")]
+[assembly: AssemblyVersion("0.27.0.0")]
+[assembly: AssemblyFileVersion("0.27.0.0")]
 
 namespace IdleMaster
 {
@@ -346,8 +346,20 @@ namespace IdleMaster
     {
         public bool KillExplorer = true;
         public bool NetworkGuard = true;            // the guard: checks inside a run, and the standing watch (NetGuard)
-        public bool TrimWorkingSets = true;
-        public bool ClearStandbyList = true;
+        // Both off. A trim frees nothing: it evicts pages from processes that are
+        // still running and still wanted, and the bill arrives later, as a fault
+        // storm the moment you go back to them. On a box whose whole job is handing
+        // Sunshine a steady frame, that is a stutter every sweep, in exchange for
+        // memory nobody was short of. The TRIM button runs regardless of this flag,
+        // and so does TrimWhenFreeBelowMb; what this governs is the automatic trim
+        // at the end of every boost and on the sentry's timer.
+        public bool TrimWorkingSets = false;
+        // Strictly worse than doing nothing. Standby IS available memory - the
+        // allocator reclaims it on demand without being asked - so purging it wins
+        // no allocation that was not already going to succeed. It only drops the
+        // file cache, turning the cheap soft faults a trim leaves behind into reads
+        // from disk, and makes Task Manager's number look better.
+        public bool ClearStandbyList = false;
         public bool CloseBrowsersInBoost = false;
 
         // --- sentry: the thing that keeps hunting after the mode has run
@@ -364,7 +376,7 @@ namespace IdleMaster
         public bool SentryStandDown = true;         // ...and all of that stops the moment somebody touches the keyboard
         public int SentryAwaySeconds = 120;         // ...which counts as over after this long with no input at all
         public int CloseGraceMs = 3000;             // ask a window to close, and wait this long, before terminating. 0 = terminate outright
-        public int TrimWhenFreeBelowMb = 0;         // 0 = only on the timer
+        public int TrimWhenFreeBelowMb = 0;         // real pressure: trims whatever TrimWorkingSets says. 0 = off
         public int SentryFullPassMinutes = 0;       // a whole boost pass (services + trim + guard) every N min. 0 = off
         public int BoostWhenFreeBelowMb = 0;        // ...and one right now when free RAM drops under this. 0 = off
 
@@ -788,10 +800,18 @@ KillExplorer=1
 # are alive and restarts them if not - and, whenever Idle Master is running, it
 # keeps watch over the connection itself (see NETWORK GUARD below).
 NetworkGuard=1
-# Squeeze the working set of every surviving process.
-TrimWorkingSets=1
+# Squeeze the working set of every surviving process at the end of boost/idle
+# and on the sentry's timer. Off, because what this ""frees"" is not freed - it is
+# pushed towards the pagefile and faulted straight back the moment you touch the
+# app again, which on a streaming box is a stutter you would blame on the
+# network. Trim RAM now still works with this off, and so does the one automatic
+# trim worth having: TrimWhenFreeBelowMb, further down.
+TrimWorkingSets=0
 # Purge the standby (cached) list so Task Manager shows the memory as free.
-ClearStandbyList=1
+# Off, because standby already IS available to whatever asks next - purging wins
+# no allocation, it just throws away the file cache, so the next launch of
+# everything reads from disk again.
+ClearStandbyList=0
 # BOOST NOW leaves browsers alone by default - you are working.
 CloseBrowsersInBoost=0
 
@@ -804,7 +824,8 @@ Sentry=1
 SentrySeconds=20
 # Minutes between re-stopping services that trigger-started themselves again.
 SentryServiceMinutes=5
-# Minutes between working-set trims + standby purges.
+# Minutes between working-set trims + standby purges. Only does anything with
+# TrimWorkingSets=1 above; with it off, the sentry never trims on a clock.
 SentryTrimMinutes=10
 # Minutes between Sunshine/Tailscale health checks.
 SentryGuardMinutes=5
@@ -844,7 +865,10 @@ OverclockedSentry=0
 SentryStandDown=1
 # How long with no input at all counts as ""away"" again.
 SentryAwaySeconds=120
-# Emergency trim: also trim when free RAM drops under this many MB. 0 = off.
+# Emergency trim: trim when free RAM drops under this many MB. This is the one
+# automatic trim that pays for itself - it fires only when you are actually short
+# of memory, which is the only time evicting pages is cheaper than keeping them -
+# so it runs even with TrimWorkingSets=0. 0 = off.
 TrimWhenFreeBelowMb=0
 # Repeated boost: every N minutes do a WHOLE pass at once - re-stop services,
 # trim, purge, check the stream stack - not just the 20-second process sweep.
@@ -2623,11 +2647,18 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
         // ---- trimming
 
-        public void TrimAll() { TrimAll(true); }
+        // Deliberate trims - the TRIM button, and the emergency one under real
+        // memory pressure - always run: somebody asked for this one, now, knowing
+        // what it costs. Automatic trims - end of boost, end of idle, the sentry's
+        // clock - obey TrimWorkingSets, which is off. The flag used to sit inside
+        // this method, which meant turning it off silently broke the button too.
+        public void TrimAll() { TrimAll(true, true); }
 
-        public long TrimAll(bool loud)
+        public long TrimAll(bool loud) { return TrimAll(loud, false); }
+
+        public long TrimAll(bool loud, bool deliberate)
         {
-            if (!cfg.TrimWorkingSets) return 0;
+            if (!deliberate && !cfg.TrimWorkingSets) return 0;
             if (loud) log("-- squeezing working sets");
             int n = 0;
             long before = 0, after = 0;
@@ -2771,10 +2802,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
 
             log("-- checking your way back in");
             NetworkGuard(true);
-            TrimAll();
+            long squeezed = TrimAll(true);
             state.SentryArmed = cfg.Sentry;
             state.Save();
-            Done(t, f0);
+            Done(t, f0, squeezed);
         }
 
         public static readonly string[] Browsers =
@@ -2837,10 +2868,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                 log("   !! Remote access looks degraded. Fixing what I can - if this persists, "
                     + "hit Restore before you walk away.");
 
-            TrimAll();
+            long squeezed = TrimAll(true);
             state.SentryArmed = cfg.Sentry;
             state.Save();
-            Done(t, f0);
+            Done(t, f0, squeezed);
         }
 
         public void RunRestore()
@@ -2959,7 +2990,14 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             log("    starting at " + (total - free) + " MB used / " + total + " MB");
         }
 
-        private void Done(ulong total, ulong freeBefore)
+        private void Done(ulong total, ulong freeBefore) { Done(total, freeBefore, 0); }
+
+        // The headline used to sum two things that are not the same thing. Memory a
+        // kill released is gone, and stays gone until you open the app on purpose.
+        // Memory a trim "freed" is on its way to the pagefile and walks back in the
+        // moment its process is touched. Adding them makes the bigger number and
+        // the worse claim, so they get a line each.
+        private void Done(ulong total, ulong freeBefore, long squeezed)
         {
             Thread.Sleep(800);
             ulong t, f;
@@ -2968,6 +3006,10 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             log("");
             log("=== done: " + (t - f) + " MB used / " + t + " MB   ("
                 + (delta >= 0 ? "+" : "") + delta + " MB freed)");
+            log("    " + Mb(freedBytes) + " released by closing things - that stays released");
+            if (squeezed > 0)
+                log("    " + Mb(squeezed) + " squeezed out of processes still running - "
+                    + "that part comes back as they are used");
             log("");
         }
     }
@@ -3267,7 +3309,8 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                         SweepServices(engine.ServicesFor(Enforcing));
                         long pushed = engine.TrimAll(false);
                         engine.NetworkGuard(false);
-                        log("[sentry] full pass done - " + Engine.Size(pushed) + " pushed out");
+                        log("[sentry] full pass done"
+                            + (pushed > 0 ? " - " + Engine.Size(pushed) + " pushed out" : ""));
                         nextService = DateTime.Now.AddMinutes(cfg.SentryServiceMinutes);
                         nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
                         nextGuard = DateTime.Now.AddMinutes(cfg.SentryGuardMinutes);
@@ -3286,12 +3329,21 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
                     Engine.ReadMemory(out total, out free);
                     bool starved = cfg.TrimWhenFreeBelowMb > 0 && free < (ulong)cfg.TrimWhenFreeBelowMb;
 
-                    if (DateTime.Now >= nextTrim || starved)
+                    // Being genuinely short of memory is the one moment evicting
+                    // pages beats keeping them, so TrimWhenFreeBelowMb trims
+                    // deliberately - flag or no flag. The clock is automatic and
+                    // obeys TrimWorkingSets, so with the flag off it costs a
+                    // compare and returns.
+                    if (starved)
                     {
-                        long pushed = engine.TrimAll(false);
-                        if (starved)
-                            log("[sentry] free RAM was " + free + " MB - trimmed, "
-                                + Engine.Size(pushed) + " pushed out");
+                        long pushed = engine.TrimAll(false, true);
+                        log("[sentry] free RAM was " + free + " MB - trimmed, "
+                            + Engine.Size(pushed) + " pushed out");
+                        nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
+                    }
+                    else if (DateTime.Now >= nextTrim)
+                    {
+                        engine.TrimAll(false);
                         nextTrim = DateTime.Now.AddMinutes(cfg.SentryTrimMinutes);
                     }
 

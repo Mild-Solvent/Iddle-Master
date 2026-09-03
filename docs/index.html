@@ -78,7 +78,7 @@
           "name": "Do RAM cleaners actually work on Windows?",
           "acceptedAnswer": {
             "@type": "Answer",
-            "text": "Most do not, because they free memory once and the software respawns within the hour. Idle Master closes the same processes on a 20-second timer, so the memory stays freed. It also trims working sets and purges the standby list, but the durable win comes from the processes never coming back, not from the trim."
+            "text": "Most do not, and the reason is that trimming working sets is not freeing memory - it evicts pages towards the pagefile and they fault straight back the moment you use the app again. Idle Master does not do that by default. It closes the processes instead, and re-closes them on a 20-second timer, so what it frees is gone rather than parked on disk. Trimming is still there as a button for the times you want it."
           }
         },
         {
@@ -231,7 +231,7 @@
         <tbody>
           <tr><td class="n">20 s</td><td>sweeps processes against the active mode's kill lists</td></tr>
           <tr><td class="n">5 min</td><td>re-stops services from those lists that restarted themselves</td></tr>
-          <tr><td class="n">10 min</td><td>trims working sets and purges the standby list again</td></tr>
+          <tr><td class="n">10 min</td><td>trims working sets again, if you switched that on</td></tr>
           <tr><td class="n">5 min</td><td>checks your protected services are alive, restarts any that died</td></tr>
         </tbody>
       </table>
@@ -658,10 +658,11 @@ IdleMaster.exe --debloat-report  <span class="d">print the removable Store apps<
     <div class="cols" style="margin-top:26px">
       <div>
         <h3>Do RAM cleaners actually work on Windows?</h3>
-        <p class="lead">Most don't, and for one reason: they free memory once, and the software
-           respawns within the hour. Idle Master closes the same processes on a 20-second
-           timer, so the memory stays freed. It trims working sets and purges the standby list
-           too, but the durable win comes from things not coming back — not from the trim.</p>
+        <p class="lead">Most don't, and the reason is that trimming working sets isn't freeing
+           memory: it evicts pages towards the pagefile, and they fault straight back the moment
+           you use the app again. Idle Master doesn't do that by default. It closes the processes
+           instead, and re-closes them on a 20-second timer, so what it frees is gone rather than
+           parked on disk. The trim is still there as a button, for when you want it.</p>
 
         <h3>How much RAM will it free?</h3>
         <p class="lead">On the measured machine — 15.9 GB total, 11.4 GB in use — boost freed
