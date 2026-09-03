@@ -153,6 +153,23 @@ list after Absolute Idle — and it stands down the instant you hit Restore. In 
 window it's the *Sentry: keep hunting* checkbox, with a live count of what it
 has reaped; on the command line it's `--watch` / `--unwatch`.
 
+### If you are updating, it tells you the trim stopped
+
+Up to v0.25 a boost finished by squeezing every process still running and purging
+the standby list, and the sentry did it again every ten minutes. That frees
+nothing — it evicts pages that are still wanted, and they fault back the moment
+you touch the app again — so v0.26 turned it off.
+
+An update keeps your `idlemaster.ini` exactly as it found it, though, which means
+a machine that has been running Idle Master for a while carries the old setting
+forward and goes on trimming. So it gets **told once**, on the same frosted pane
+the theme picker uses: *Stop trimming automatically*, which writes
+`TrimWorkingSets=0` and `ClearStandbyList=0`, or *Leave it as it is*, which
+changes nothing. Either answer writes `TrimNotice=1` and it never comes back.
+
+Fresh installs ship `TrimNotice=1` and never see it. *Trim RAM now* stays on the
+window either way.
+
 ### It asks before killing anything you started
 
 On its first sweep the sentry takes a census. Everything running *then* that

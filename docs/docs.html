@@ -77,6 +77,7 @@
     <a href="#remote">Remote desktop setup</a>
     <a href="#feedback">Report a bug</a>
     <a href="#backup">Backup kit</a>
+    <a href="#trim-notice">The trim notice</a>
     <a href="#themes">Themes</a>
     <b>Reference</b>
     <a href="#config">idlemaster.ini</a>
@@ -699,6 +700,7 @@ IdleMasterSetup.exe --uninstall                     <span class="d">remove it, k
             <tr><td class="n">SentrySeconds</td><td class="n">20</td><td class="wrap-ok">Seconds between process sweeps.</td></tr>
             <tr><td class="n">SentryServiceMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between re-stopping services that trigger-started themselves.</td></tr>
             <tr><td class="n">SentryTrimMinutes</td><td class="n">10</td><td class="wrap-ok">Minutes between working-set trims and standby purges. Does nothing unless <code>TrimWorkingSets=1</code>.</td></tr>
+            <tr><td class="n">TrimNotice</td><td class="n">1</td><td class="wrap-ok">Written by the one-time notice below, so it appears once and never again. A config file from before v0.26 does not have this line, which is how the app knows it is still on the old trimming default and owes you the explanation.</td></tr>
             <tr><td class="n">SentryGuardMinutes</td><td class="n">5</td><td class="wrap-ok">Minutes between protected-service health checks.</td></tr>
             <tr><td class="n">SentryRespawnLimit</td><td class="n">6</td><td class="wrap-ok">Times one name may come back before the sentry stops fighting it.</td></tr>
             <tr><td class="n">SentryBackoffMinutes</td><td class="n">30</td><td class="wrap-ok">How long that truce lasts — and how long <em>Keep it</em> buys an app.</td></tr>
@@ -813,6 +815,27 @@ IdleMaster.exe --removetask      <span class="d">undo that</span></pre>
         message pump to put the <em>something just started</em> dialog on screen. Starting a second
         watch while one is running prints <em>a sentry is already on watch</em> and exits with
         code 1.</p>
+    </section>
+
+    <!-- --------------------------------------------------------- trim notice -->
+    <section id="trim-notice">
+      <h2>The trim notice <a class="anchor" href="#trim-notice">#</a></h2>
+      <p>Up to v0.25 Idle Master trimmed working sets and purged the standby list at the end of
+        every boost, and again every ten minutes for as long as the sentry was armed. That was
+        wrong &mdash; see <a href="#settings"><code>TrimWorkingSets</code></a> for why &mdash; and
+        v0.26 stopped doing it.</p>
+      <p>But updating <strong>keeps your <code>idlemaster.ini</code> exactly as it found it</strong>,
+        which is the right promise to keep and also means a machine that has been running Idle
+        Master for a while carries the old setting forward and goes on trimming. So it gets told,
+        once, on the same frosted pane the theme picker uses: what it has been doing, why that
+        stopped being the default, and two buttons &mdash; <em>Stop trimming automatically</em>,
+        which writes <code>TrimWorkingSets=0</code> and <code>ClearStandbyList=0</code>, or
+        <em>Leave it as it is</em>, which changes nothing.</p>
+      <p><strong>Either answer writes <code>TrimNotice=1</code> and it never comes back.</strong>
+        A prompt that reappears every start is a nag, and the point of the change was to stop doing
+        things to your machine you did not ask for. A fresh install ships <code>TrimNotice=1</code>
+        and never sees the pane at all; neither does a machine that had already turned trimming off
+        by hand. <em>Trim RAM now</em> stays on the window either way.</p>
     </section>
 
     <!-- ------------------------------------------------------------- themes -->

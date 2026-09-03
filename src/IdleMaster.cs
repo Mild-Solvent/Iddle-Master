@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.27.0.0")]
-[assembly: AssemblyFileVersion("0.27.0.0")]
+[assembly: AssemblyVersion("0.28.0.0")]
+[assembly: AssemblyFileVersion("0.28.0.0")]
 
 namespace IdleMaster
 {
@@ -360,6 +360,11 @@ namespace IdleMaster
         // file cache, turning the cheap soft faults a trim leaves behind into reads
         // from disk, and makes Task Manager's number look better.
         public bool ClearStandbyList = false;
+        // The one-shot "you have been told". False means an ini written before
+        // v0.26, which carried the old defaults forward on update and is still
+        // trimming; the pane says so once and writes this. Fresh installs ship
+        // it already set, so they never see it.
+        public bool TrimNotice = false;
         public bool CloseBrowsersInBoost = false;
 
         // --- sentry: the thing that keeps hunting after the mode has run
@@ -468,6 +473,7 @@ namespace IdleMaster
                         case "networkguard": c.NetworkGuard = b; break;
                         case "trimworkingsets": c.TrimWorkingSets = b; break;
                         case "clearstandbylist": c.ClearStandbyList = b; break;
+                        case "trimnotice": c.TrimNotice = b; break;
                         case "closebrowsersinboost": c.CloseBrowsersInBoost = b; break;
                         case "sentry": c.Sentry = b; break;
                         case "sentryskipforeground": c.SentrySkipForeground = b; break;
@@ -564,6 +570,7 @@ namespace IdleMaster
         {
             KillExplorer = o.KillExplorer; NetworkGuard = o.NetworkGuard;
             TrimWorkingSets = o.TrimWorkingSets; ClearStandbyList = o.ClearStandbyList;
+            TrimNotice = o.TrimNotice;
             CloseBrowsersInBoost = o.CloseBrowsersInBoost;
             Sentry = o.Sentry; SentrySeconds = o.SentrySeconds;
             SentryServiceMinutes = o.SentryServiceMinutes; SentryTrimMinutes = o.SentryTrimMinutes;
@@ -812,6 +819,10 @@ TrimWorkingSets=0
 # no allocation, it just throws away the file cache, so the next launch of
 # everything reads from disk again.
 ClearStandbyList=0
+# Set here because this file was written by v0.26 or later, so its defaults are
+# already the new ones. An ini from before that carries TrimWorkingSets=1 forward
+# on update, and gets told once, on screen, that it is still trimming.
+TrimNotice=1
 # BOOST NOW leaves browsers alone by default - you are working.
 CloseBrowsersInBoost=0
 

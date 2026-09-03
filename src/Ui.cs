@@ -4870,6 +4870,7 @@ namespace IdleMaster
         private BackupForm backupWin;
         private bool reallyExit;
         private bool askedTheme;                // the first-run picker has had its turn
+        private bool askedTrim;                 // ...and so has the one-time trim notice
         private CaptionBar caption;             // the theme's own title bar, when it draws one
         private bool chromeCustom;              // ...and whether it does
         private bool startHidden;
@@ -5632,6 +5633,28 @@ namespace IdleMaster
         {
             base.OnShown(e);
             ThemeIntro();
+            TrimNotice();
+        }
+
+        // Only for installs that predate v0.26 and are still trimming, and only
+        // once the theme picker is out of the way - two panes cannot share the
+        // window, so on the one start where both are owed the theme card wins
+        // and this waits for the next.
+        private void TrimNotice()
+        {
+            if (askedTrim || cfg.TrimNotice || !Visible || IsDisposed) return;
+            if (!cfg.TrimWorkingSets && !cfg.ClearStandbyList) return;
+            if (!cfg.ThemeIntro) return;
+            askedTrim = true;
+            BeginInvoke((MethodInvoker)delegate
+            {
+                try
+                {
+                    Refresh();
+                    TrimGate.Open(this, cfg, AppendLog);
+                }
+                catch (Exception ex) { AppendLog("! trim notice: " + ex.Message); }
+            });
         }
 
         private void ThemeIntro()
