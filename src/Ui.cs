@@ -4872,6 +4872,7 @@ namespace IdleMaster
         private bool busyNow;                   // a mode is running right now
         private bool repeatOn;                  // the repeat loop is armed
         private int repeatMinutes = 30;         // ...every this many minutes
+        private int drop;                       // how far the header pushed the column below it
         private bool syncingRepeat;             // the badge is following the ini, not the user
         private DateTime nextRepeat = DateTime.MaxValue;
         private ToolStripMenuItem trayRepeat;
@@ -4883,8 +4884,6 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 882);
-            MinimumSize = new Size(560, 640);
             StartPosition = FormStartPosition.CenterScreen;
 
             // The three header lines are measured, not typed. A 20pt title in
@@ -4905,11 +4904,34 @@ namespace IdleMaster
             title.ForeColor = Theme.Accent;
             title.AutoSize = true;
             title.Location = new Point(20, 5);
-            Controls.Add(title);
+            title.Size = title.PreferredSize;   // so Bottom is true before it is parented
 
             Label sub = Theme.Hint("Sunshine + Tailscale stay up. Everything else is negotiable.   v"
                 + App.Version);
             sub.SetBounds(22, title.Bottom, 500, Math.Max(18, Theme.Base().Height));
+
+            // Everything under the header is one column, and where it starts is
+            // now a measurement rather than a number. Measuring the title fixed
+            // the title and handed the problem straight to the next control: on
+            // a screen that scales the text but not the layout the gauge came
+            // down far enough to sit on the boost slab. So the gauge follows the
+            // subtitle, the big buttons follow the gauge, and everything below
+            // them - the four bands, the three centred lines, the switches, the
+            // console - takes the same drop. The window grows by exactly that
+            // much, so the console keeps its height instead of paying for the
+            // header. At 9pt on a 96dpi screen the drop is zero and every one of
+            // them lands on the pixel it used to be pinned to.
+            int gaugeY = Math.Max(66, sub.Bottom + 6);
+            int boostY = Math.Max(108, gaugeY + 34 + 8);
+            drop = boostY - 108;
+
+            // Before the first anchored control goes in: an anchor remembers its
+            // distance to the edge it was added under, so a form resized after
+            // the fact drags them all out of place.
+            Size = new Size(700, 882 + drop);
+            MinimumSize = new Size(560, 640 + drop);
+
+            Controls.Add(title);
             Controls.Add(sub);
 
             // Updates live in the corner now instead of in the button grid: an
@@ -4925,13 +4947,13 @@ namespace IdleMaster
             updateTip.SetToolTip(updateBadge, "Check for updates");
 
             gauge = new MemGauge();
-            gauge.SetBounds(22, Math.Max(66, sub.Bottom + 6), 640, 34);
+            gauge.SetBounds(22, gaugeY, 640, 34);
             gauge.Font = Theme.Bold();
             gauge.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(gauge);
 
             btnBoost = BigButton("BOOST NOW",
-                "Kill the background junk. Desktop stays usable.", Theme.Good, 108);
+                "Kill the background junk.", Theme.Good, boostY);
             btnBoost.Click += delegate { Run("boost"); };
 
             // The repeat loop. Not a second kind of boost: it is this button,
@@ -4966,7 +4988,7 @@ namespace IdleMaster
             listTip.SetToolTip(listBoost, "What Boost closes and stops - click to edit");
 
             btnIdle = BigButton("ABSOLUTE IDLE",
-                "Strip to Windows vitals", Theme.Danger, 188);
+                "Strip to Windows vitals", Theme.Danger, 188 + drop);
             btnIdle.Click += delegate { ConfirmIdle(); };
 
             listIdle = ListsHandle(btnIdle, Theme.Danger, "idle");
@@ -5061,7 +5083,7 @@ namespace IdleMaster
             btnFeedback.Click += delegate { OpenFeedback(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(BandLeft, VersionY, RowRight - BandLeft, 18);
+            updateLabel.SetBounds(BandLeft, VersionY + drop, RowRight - BandLeft, 18);
             updateLabel.TextAlign = ContentAlignment.MiddleCenter;
             updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             updateLabel.AutoEllipsis = true;
@@ -5070,7 +5092,7 @@ namespace IdleMaster
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, LowerY + 4, 190, 22);
+            chkSentry.SetBounds(24, LowerY + drop + 4, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
@@ -5082,14 +5104,14 @@ namespace IdleMaster
             // Under the version now, centred on the same column, with the
             // separating gap below it.
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(BandLeft, SentryMsgY, RowRight - BandLeft, 18);
+            sentryLabel.SetBounds(BandLeft, SentryMsgY + drop, RowRight - BandLeft, 18);
             sentryLabel.TextAlign = ContentAlignment.MiddleCenter;
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, LowerY, 152, 30);
+            btnSentry.SetBounds(510, LowerY + drop, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -5100,7 +5122,7 @@ namespace IdleMaster
             chkOverclock = new CheckBox();
             chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
             chkOverclock.Checked = cfg.OverclockedSentry;
-            chkOverclock.SetBounds(24, LowerY + 36, 636, 22);
+            chkOverclock.SetBounds(24, LowerY + drop + 36, 636, 22);
             chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
             chkOverclock.FlatStyle = FlatStyle.Flat;
             chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -5115,7 +5137,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, LowerY + 66, 640, 212);
+            logBox.SetBounds(22, LowerY + drop + 66, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -6347,7 +6369,7 @@ namespace IdleMaster
         private BandRule Band(string name, Color ink, int y, string tip)
         {
             BandRule r = new BandRule(name, ink);
-            r.SetBounds(BandLeft, y, RowRight - BandLeft, RuleHigh);
+            r.SetBounds(BandLeft, y + drop, RowRight - BandLeft, RuleHigh);
             Controls.Add(r);
             listTip.SetToolTip(r, tip);
             return r;
@@ -6369,7 +6391,7 @@ namespace IdleMaster
         private Button SlotAt(string text, int x, int y, int w)
         {
             Button b = Theme.Quiet(text);
-            b.SetBounds(x, y + RuleDrop, w, SlotHigh);
+            b.SetBounds(x, y + RuleDrop + drop, w, SlotHigh);
             Controls.Add(b);
             return b;
         }
