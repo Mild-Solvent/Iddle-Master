@@ -610,9 +610,10 @@ namespace IdleMaster
     // and fades as it goes.
     //
     // Deliberately short. Four of these had to be found inside the window
-    // without taking any height from the console or pushing the window past
-    // the bottom of an 816px desktop, so a rule is one line of 7.5pt and
-    // nothing else - no box, no padding, no second colour behind it.
+    // without taking any height from the console, so a rule is one line of
+    // 7.5pt and nothing else - no box, no padding, no second colour behind it.
+    // (The 816px ceiling this was originally cut to no longer holds - see the
+    // note where the bands are built.)
     //
     // The name carries the band's colour, and the line starts in the same
     // colour before it dies away: steel for the boost's own row, soft red for
@@ -4807,7 +4808,7 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 806);
+            Size = new Size(700, 862);
             MinimumSize = new Size(560, 620);
             StartPosition = FormStartPosition.CenterScreen;
 
@@ -4897,11 +4898,16 @@ namespace IdleMaster
             // dividing them.
             //
             // The height had to come from somewhere and it was not going to
-            // come from the console: a rule is one 7.5pt line, the header
-            // gives up a dozen pixels, and the fourth row stands where the
-            // version line used to - which now rides on that row, beside the
-            // two buttons that are the program's own. The window still fits an
-            // 816px desktop, which is the point.
+            // come from the console: a rule is one 7.5pt line and the header
+            // gives up a dozen pixels.
+            //
+            // The version line no longer rides on the fourth row beside the two
+            // buttons - it and the sentry's status line are centred under them,
+            // three lines reading down the middle. That cost 56px and the
+            // window is 862 tall now, so it NO LONGER fits an 816px desktop
+            // standing up. The console kept its 212px rather than paying for
+            // the change, which was the trade made on purpose; if the window
+            // has to come back under 816 it is the log box that has to give.
 
             Band("AFTER THE BOOST", Theme.Accent, 270,
                  "Put the desktop back, or look at what the boost went after.");
@@ -4916,7 +4922,7 @@ namespace IdleMaster
             // stay away - a boost is over when you reboot, this is not. The
             // last two are doors to other people's debloaters, launched rather
             // than imitated; they belong here, with ours.
-            Band("GONE FOR GOOD", Theme.Warn, 321,
+            Band("DISK AND SYSTEM", Theme.Warn, 321,
                  "Removal that survives a reboot - disk, apps, and other people's debloaters.");
             btnCleanup = Slot("Disk cleanup", 0, 4, 321);
             btnCleanup.Click += delegate { OpenCleanup(); };
@@ -4949,37 +4955,53 @@ namespace IdleMaster
             // version, and whatever the update check last found.
             Band("IDLE MASTER", Theme.Dim, 423,
                  "This program: its switches, its version, and where to say it went wrong.");
-            btnConfig = Slot("Settings", 0, 4, 423);
+            // This band has two members, not four. Left-aligned on a
+            // four-column grid they sat under "Disk cleanup" and "Debloat"
+            // with half a row of nothing beside them, which reads as a bug
+            // rather than as a short band. Centred, at the same width the
+            // four-up rows use, so the columns still line up vertically.
+            int idleW = (RowRight - BandLeft - 3 * RowGap) / 4;
+            int idleX = BandLeft + ((RowRight - BandLeft) - (2 * idleW + RowGap)) / 2;
+
+            btnConfig = SlotAt("Settings", idleX, 423, idleW);
             btnConfig.Click += delegate { EditConfig(); };
 
             // The bug report door: whatever looked wrong, say so from right
             // here. Opens a pre-typed GitHub issue - the preview shows every
             // byte first, and nothing is sent until Submit in the browser.
-            btnFeedback = Slot("Report a bug", 1, 4, 423);
+            btnFeedback = SlotAt("Report a bug", idleX + idleW + RowGap, 423, idleW);
             btnFeedback.Click += delegate { OpenFeedback(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
-            updateLabel.SetBounds(346, 443, 316, 18);
+            updateLabel.SetBounds(BandLeft, VersionY, RowRight - BandLeft, 18);
+            updateLabel.TextAlign = ContentAlignment.MiddleCenter;
+            updateLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             updateLabel.AutoEllipsis = true;
             Controls.Add(updateLabel);
 
             chkSentry = new CheckBox();
             chkSentry.Text = "Keep hunting after boost";
             chkSentry.Checked = cfg.Sentry;
-            chkSentry.SetBounds(24, 478, 190, 22);
+            chkSentry.SetBounds(24, LowerY + 4, 190, 22);
             chkSentry.ForeColor = Theme.Fg;
             chkSentry.FlatStyle = FlatStyle.Flat;
             chkSentry.Click += delegate { ToggleSentry(); };
             Controls.Add(chkSentry);
 
+            // It used to sit at x=220 w=300, ending at 520, with "Sentry
+            // lists & timers" starting at 510 - ten pixels of overlap, and it
+            // is anchored to both edges so widening the window made it worse.
+            // Under the version now, centred on the same column, with the
+            // separating gap below it.
             sentryLabel = Theme.Hint("");
-            sentryLabel.SetBounds(220, 480, 300, 20);
+            sentryLabel.SetBounds(BandLeft, SentryMsgY, RowRight - BandLeft, 18);
+            sentryLabel.TextAlign = ContentAlignment.MiddleCenter;
             sentryLabel.AutoEllipsis = true;
             sentryLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(sentryLabel);
 
             btnSentry = Theme.Quiet("Sentry lists && timers");
-            btnSentry.SetBounds(510, 474, 152, 30);
+            btnSentry.SetBounds(510, LowerY, 152, 30);
             btnSentry.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnSentry.Click += delegate { OpenSentry(); };
             Controls.Add(btnSentry);
@@ -4990,7 +5012,7 @@ namespace IdleMaster
             chkOverclock = new CheckBox();
             chkOverclock.Text = "Overclocked sentry - while hunting, kill EVERYTHING not protected (for when you are away)";
             chkOverclock.Checked = cfg.OverclockedSentry;
-            chkOverclock.SetBounds(24, 510, 636, 22);
+            chkOverclock.SetBounds(24, LowerY + 36, 636, 22);
             chkOverclock.ForeColor = cfg.OverclockedSentry ? Theme.Warn : Theme.Fg;
             chkOverclock.FlatStyle = FlatStyle.Flat;
             chkOverclock.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
@@ -5005,7 +5027,7 @@ namespace IdleMaster
             logBox.ForeColor = Theme.LogFg;
             logBox.Font = Theme.Mono();
             logBox.BorderStyle = BorderStyle.FixedSingle;
-            logBox.SetBounds(22, 540, 640, 212);
+            logBox.SetBounds(22, LowerY + 66, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
 
@@ -6209,6 +6231,16 @@ namespace IdleMaster
         private const int RuleHigh = 14;     // one line of 7.5pt, nothing more
         private const int RuleDrop = 15;     // ...and the row sits just under it
 
+        // The tail of the IDLE MASTER band: the two centred buttons, then the
+        // version, then whatever the sentry is currently doing - three centred
+        // lines reading down the middle. LowerY is deliberately 24 px below the
+        // last of them and not 6, because that gap is what separates "the
+        // program" above from the switches and the console below.
+        private const int IdleBandY   = 423;
+        private const int VersionY    = IdleBandY + RuleDrop + SlotHigh + 6;   // 472
+        private const int SentryMsgY  = VersionY + 22;                          // 494
+        private const int LowerY      = SentryMsgY + 40;                        // 534
+
         // The rule that heads a band. The name is as much as fits on a line
         // that short, so the longer answer goes in the tooltip.
         private BandRule Band(string name, Color ink, int y, string tip)
@@ -6228,6 +6260,13 @@ namespace IdleMaster
             int w = (RowRight - BandLeft - (n - 1) * RowGap) / n;
             int x = BandLeft + i * (w + RowGap);
             if (i == n - 1) w = RowRight - x;
+            return SlotAt(text, x, y, w);
+        }
+
+        // One row button at an explicit x and width, for a band that does not
+        // fill its row and would rather sit in the middle of it.
+        private Button SlotAt(string text, int x, int y, int w)
+        {
             Button b = Theme.Quiet(text);
             b.SetBounds(x, y + RuleDrop, w, SlotHigh);
             Controls.Add(b);
