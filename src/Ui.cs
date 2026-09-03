@@ -4844,6 +4844,7 @@ namespace IdleMaster
         private readonly UpdateBadge updateBadge;   // the corner arrow: white waiting, green when a release is out
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
+        private readonly CheckBox chkTrim;
         private readonly RepeatBadge repeatBadge;   // the repeat loop, riding on BOOST NOW
         private readonly ListBadge listBoost, listIdle;   // each button's own lists, riding on its left
         private readonly ToolTip listTip = new ToolTip();
@@ -5118,6 +5119,21 @@ namespace IdleMaster
             // is anchored to both edges so widening the window made it worse.
             // Under the version now, centred on the same column, with the
             // separating gap below it.
+            // The trim switch, in the gap the sentry row left between the
+            // checkbox and the button. It is here rather than buried in
+            // advanced settings because it is the one setting in this app that
+            // can make the machine FEEL worse while every number says better -
+            // an emptied working set is a Start menu that hangs on the next
+            // click - so it should be one glance away, and amber when it is on.
+            chkTrim = new CheckBox();
+            chkTrim.Text = "Auto-trim RAM after each boost";
+            chkTrim.Checked = cfg.TrimWorkingSets;
+            chkTrim.SetBounds(224, LowerY + drop + 4, 280, 22);
+            chkTrim.ForeColor = cfg.TrimWorkingSets ? Theme.Warn : Theme.Fg;
+            chkTrim.FlatStyle = FlatStyle.Flat;
+            chkTrim.Click += delegate { ToggleTrim(); };
+            Controls.Add(chkTrim);
+
             sentryLabel = Theme.Hint("");
             sentryLabel.SetBounds(BandLeft, SentryMsgY + drop, RowRight - BandLeft, 18);
             sentryLabel.TextAlign = ContentAlignment.MiddleCenter;
@@ -5651,7 +5667,7 @@ namespace IdleMaster
                 try
                 {
                     Refresh();
-                    TrimGate.Open(this, cfg, AppendLog);
+                    TrimGate.Open(this, cfg, AppendLog, SyncTrimBox);
                 }
                 catch (Exception ex) { AppendLog("! trim notice: " + ex.Message); }
             });
@@ -6032,6 +6048,42 @@ namespace IdleMaster
 
         // Saved straight to the ini; a hunting sentry reads cfg every sweep, so
         // it goes overclocked (or calms down) without being restarted.
+        // Writes TrimWorkingSets only. ClearStandbyList stays in advanced
+        // settings on purpose: purging standby is the half that can never help -
+        // standby is already available to the next allocation - so it should not
+        // ride along on a switch somebody flips to get a bit of RAM back.
+        private void ToggleTrim()
+        {
+            cfg.TrimWorkingSets = chkTrim.Checked;
+            chkTrim.ForeColor = cfg.TrimWorkingSets ? Theme.Warn : Theme.Fg;
+            try
+            {
+                IniFile ini = new IniFile();
+                ini.SetSetting("TrimWorkingSets", cfg.TrimWorkingSets ? "1" : "0");
+                ini.Save();
+            }
+            catch (Exception ex) { AppendLog("! could not save TrimWorkingSets: " + ex.Message.Split('\n')[0]); }
+
+            if (cfg.TrimWorkingSets)
+                AppendLog("Auto-trim ON - every boost now ends by emptying the working set of every "
+                    + "process still running, and the sentry does it again every "
+                    + cfg.SentryTrimMinutes + " min. That memory is not freed, it is evicted: the app "
+                    + "you go back to next has to fault it in again, which is a hang before it "
+                    + "responds. Off is the default for a reason.");
+            else
+                AppendLog("Auto-trim off. Boosts report only what was actually closed, and the sentry "
+                    + "no longer trims on a clock. Trim RAM now still works whenever you want it.");
+        }
+
+        // The one-time notice writes the same setting, so the box has to follow
+        // it - otherwise answering the pane leaves a ticked switch behind.
+        private void SyncTrimBox()
+        {
+            if (chkTrim == null || chkTrim.IsDisposed) return;
+            chkTrim.Checked = cfg.TrimWorkingSets;
+            chkTrim.ForeColor = cfg.TrimWorkingSets ? Theme.Warn : Theme.Fg;
+        }
+
         private void ToggleOverclock()
         {
             cfg.OverclockedSentry = chkOverclock.Checked;

@@ -29,6 +29,7 @@ namespace IdleMaster
         private readonly Form owner;
         private readonly Config cfg;
         private readonly Action<string> log;
+        private readonly Action answered;         // let the window's own switch follow this
 
         private Bitmap frost;
         private Panel card;
@@ -42,9 +43,14 @@ namespace IdleMaster
         // one or the theme picker - already has the window.
         public static bool Open(Form owner, Config cfg, Action<string> log)
         {
+            return Open(owner, cfg, log, null);
+        }
+
+        public static bool Open(Form owner, Config cfg, Action<string> log, Action answered)
+        {
             foreach (Control c in owner.Controls)
                 if (c is TrimGate || c is ThemeGate) return false;
-            TrimGate g = new TrimGate(owner, cfg, log);
+            TrimGate g = new TrimGate(owner, cfg, log, answered);
             owner.Controls.Add(g);
             g.Dock = DockStyle.Fill;
             g.BringToFront();
@@ -52,11 +58,12 @@ namespace IdleMaster
             return true;
         }
 
-        private TrimGate(Form f, Config c, Action<string> logger)
+        private TrimGate(Form f, Config c, Action<string> logger, Action onAnswered)
         {
             owner = f;
             cfg = c;
             log = logger != null ? logger : delegate(string s) { };
+            answered = onAnswered;
 
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
                      | ControlStyles.UserPaint, true);
@@ -243,8 +250,10 @@ namespace IdleMaster
                     + "no longer trims on a clock. Trim RAM now still works.");
             else
                 log("Trim: left on. Working sets are still squeezed after every boost and every "
-                    + cfg.SentryTrimMinutes + " minutes - Advanced settings turns it off.");
+                    + cfg.SentryTrimMinutes + " minutes - the switch on the window turns it off.");
 
+            if (answered != null)
+                try { answered(); } catch (Exception) { }
             Close();
         }
 
