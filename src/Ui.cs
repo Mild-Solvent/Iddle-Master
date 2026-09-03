@@ -4883,20 +4883,33 @@ namespace IdleMaster
 
             Theme.Form(this);
             Text = "IDLE MASTER";
-            Size = new Size(700, 862);
-            MinimumSize = new Size(560, 620);
+            Size = new Size(700, 882);
+            MinimumSize = new Size(560, 640);
             StartPosition = FormStartPosition.CenterScreen;
 
+            // The three header lines are measured, not typed. A 20pt title in
+            // a 34px box had one pixel of slack at 9pt and none at all the
+            // moment anything made the font render bigger - a theme with a
+            // larger UI size, or a display that scales the text without
+            // scaling the layout - and the first thing the app said about
+            // itself came out sheared off halfway down the letters.
+            //
+            // So the title takes whatever height its own font needs, the
+            // subtitle starts where the title ends, and the gauge sits under
+            // whatever those two came to. At 9pt on a 96dpi screen every one
+            // of them lands on the pixel it used to be pinned to; above that
+            // they give ground downwards instead of cutting the text.
             Label title = new Label();
             title.Text = "IDLE MASTER";
             title.Font = Theme.Title();
             title.ForeColor = Theme.Accent;
-            title.SetBounds(20, 8, 400, 34);
+            title.AutoSize = true;
+            title.Location = new Point(20, 5);
             Controls.Add(title);
 
             Label sub = Theme.Hint("Sunshine + Tailscale stay up. Everything else is negotiable.   v"
                 + App.Version);
-            sub.SetBounds(22, 42, 500, 18);
+            sub.SetBounds(22, title.Bottom, 500, Math.Max(18, Theme.Base().Height));
             Controls.Add(sub);
 
             // Updates live in the corner now instead of in the button grid: an
@@ -4912,7 +4925,7 @@ namespace IdleMaster
             updateTip.SetToolTip(updateBadge, "Check for updates");
 
             gauge = new MemGauge();
-            gauge.SetBounds(22, 66, 640, 34);
+            gauge.SetBounds(22, Math.Max(66, sub.Bottom + 6), 640, 34);
             gauge.Font = Theme.Bold();
             gauge.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(gauge);
@@ -4979,56 +4992,56 @@ namespace IdleMaster
             // The version line no longer rides on the fourth row beside the two
             // buttons - it and the sentry's status line are centred under them,
             // three lines reading down the middle. That cost 56px and the
-            // window is 862 tall now, so it NO LONGER fits an 816px desktop
+            // window is 882 tall now, so it NO LONGER fits an 816px desktop
             // standing up. The console kept its 212px rather than paying for
             // the change, which was the trade made on purpose; if the window
             // has to come back under 816 it is the log box that has to give.
 
-            Band("AFTER THE BOOST", Theme.Accent, 270,
+            Band("AFTER THE BOOST", Theme.Accent, BoostBandY,
                  "Put the desktop back, or look at what the boost went after.");
-            btnRestore = Slot("Restore desktop", 0, 3, 270);
+            btnRestore = Slot("Restore desktop", 0, 3, BoostBandY);
             btnRestore.Click += delegate { Run("restore"); };
-            btnEaters = Slot("Task manager", 1, 3, 270);
+            btnEaters = Slot("Task manager", 1, 3, BoostBandY);
             btnEaters.Click += delegate { OpenEaters(); };
-            btnTrim = Slot("Trim RAM now", 2, 3, 270);
+            btnTrim = Slot("Trim RAM now", 2, 3, BoostBandY);
             btnTrim.Click += delegate { Run("trim"); };
 
             // Red, because this is the band that takes things away and they
             // stay away - a boost is over when you reboot, this is not. The
             // last two are doors to other people's debloaters, launched rather
             // than imitated; they belong here, with ours.
-            Band("DISK AND SYSTEM", Theme.Warn, 321,
+            Band("DISK AND SYSTEM", Theme.Warn, DiskBandY,
                  "Removal that survives a reboot - disk, apps, and other people's debloaters.");
-            btnCleanup = Slot("Disk cleanup", 0, 4, 321);
+            btnCleanup = Slot("Disk cleanup", 0, 4, DiskBandY);
             btnCleanup.Click += delegate { OpenCleanup(); };
-            btnDebloat = Slot("Debloat", 1, 4, 321);
+            btnDebloat = Slot("Debloat", 1, 4, DiskBandY);
             btnDebloat.Click += delegate { OpenDebloat(); };
-            btnWinUtil = Slot("ChrisTitus WinUtil", 2, 4, 321);
+            btnWinUtil = Slot("ChrisTitus WinUtil", 2, 4, DiskBandY);
             btnWinUtil.Click += delegate { RunWinUtil(); };
-            btnZoic = Slot("Zoicware", 3, 4, 321);
+            btnZoic = Slot("Zoicware", 3, 4, DiskBandY);
             btnZoic.Click += delegate { RunZoicware(); };
 
             // How you get back to a machine you have stripped from across the
             // house: the link stays up, the desktop stays reachable, and the
             // kit rebuilds the box if neither of those held.
-            Band("THE WAY BACK", Theme.Mix(Theme.Accent, Theme.Dim, 0.5), 372,
+            Band("THE WAY BACK", Theme.Mix(Theme.Accent, Theme.Dim, 0.5), BackBandY,
                  "Keeping the machine reachable - and rebuildable if it is not.");
 
             // The network guard's page. The button itself goes red while the
             // guard is fighting something, the way the corner arrow goes green
             // when there is news.
-            btnNetGuard = Slot("Network guard", 0, 3, 372);
+            btnNetGuard = Slot("Network guard", 0, 3, BackBandY);
             btnNetGuard.Click += delegate { OpenNetGuard(); };
-            btnRemote = Slot("Remote desktop setup", 1, 3, 372);
+            btnRemote = Slot("Remote desktop setup", 1, 3, BackBandY);
             btnRemote.Click += delegate { OpenRemote(); };
-            btnBackup = Slot("Backup kit", 2, 3, 372);
+            btnBackup = Slot("Backup kit", 2, 3, BackBandY);
             btnBackup.Click += delegate { OpenBackup(); };
 
             // The program itself, not the machine - gray, so it stays out of
             // the way of the three bands that do something to Windows. Two
             // buttons and then the words the corner arrow does not say: the
             // version, and whatever the update check last found.
-            Band("IDLE MASTER", Theme.Dim, 423,
+            Band("IDLE MASTER", Theme.Dim, IdleBandY,
                  "This program: its switches, its version, and where to say it went wrong.");
             // This band has two members, not four. Left-aligned on a
             // four-column grid they sat under "Disk cleanup" and "Debloat"
@@ -5038,13 +5051,13 @@ namespace IdleMaster
             int idleW = (RowRight - BandLeft - 3 * RowGap) / 4;
             int idleX = BandLeft + ((RowRight - BandLeft) - (2 * idleW + RowGap)) / 2;
 
-            btnConfig = SlotAt("Settings", idleX, 423, idleW);
+            btnConfig = SlotAt("Settings", idleX, IdleBandY, idleW);
             btnConfig.Click += delegate { EditConfig(); };
 
             // The bug report door: whatever looked wrong, say so from right
             // here. Opens a pre-typed GitHub issue - the preview shows every
             // byte first, and nothing is sent until Submit in the browser.
-            btnFeedback = SlotAt("Report a bug", idleX + idleW + RowGap, 423, idleW);
+            btnFeedback = SlotAt("Report a bug", idleX + idleW + RowGap, IdleBandY, idleW);
             btnFeedback.Click += delegate { OpenFeedback(); };
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
@@ -6304,17 +6317,30 @@ namespace IdleMaster
         private const int RowGap   = 8;
         private const int SlotHigh = 28;
         private const int RuleHigh = 14;     // one line of 7.5pt, nothing more
-        private const int RuleDrop = 15;     // ...and the row sits just under it
+
+        // How far under the rule the row starts. It was 15 - one pixel of
+        // clearance - and the band's name sat right on the caps of the buttons
+        // it names, which read as the name being crowded out rather than as a
+        // heading. Six pixels of air now, and the pitch below carries the extra
+        // down the wall so every band keeps the same 8px gap to the next rule.
+        private const int RuleDrop  = 20;
+        private const int BandPitch = RuleDrop + SlotHigh + RowGap;   // 56
+
+        // The first band starts here, and every one after it is a pitch below.
+        private const int FirstBandY = 270;
+        private const int BoostBandY = FirstBandY;                    // 270
+        private const int DiskBandY  = FirstBandY + BandPitch;        // 326
+        private const int BackBandY  = FirstBandY + 2 * BandPitch;    // 382
 
         // The tail of the IDLE MASTER band: the two centred buttons, then the
         // version, then whatever the sentry is currently doing - three centred
         // lines reading down the middle. LowerY is deliberately 24 px below the
         // last of them and not 6, because that gap is what separates "the
         // program" above from the switches and the console below.
-        private const int IdleBandY   = 423;
-        private const int VersionY    = IdleBandY + RuleDrop + SlotHigh + 6;   // 472
-        private const int SentryMsgY  = VersionY + 22;                          // 494
-        private const int LowerY      = SentryMsgY + 40;                        // 534
+        private const int IdleBandY   = FirstBandY + 3 * BandPitch;   // 438
+        private const int VersionY    = IdleBandY + RuleDrop + SlotHigh + 6;   // 492
+        private const int SentryMsgY  = VersionY + 22;                          // 514
+        private const int LowerY      = SentryMsgY + 40;                        // 554
 
         // The rule that heads a band. The name is as much as fits on a line
         // that short, so the longer answer goes in the tooltip.
