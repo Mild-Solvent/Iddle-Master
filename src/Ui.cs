@@ -4676,6 +4676,7 @@ namespace IdleMaster
             report.Multiline = true;
             report.ReadOnly = true;
             report.ScrollBars = ScrollBars.Vertical;
+            Theme.Scrollbars(report);
             report.BackColor = Theme.LogBg;
             report.ForeColor = Theme.LogFg;
             report.Font = Theme.Mono();
@@ -4885,6 +4886,15 @@ namespace IdleMaster
             Theme.Form(this);
             Text = "IDLE MASTER";
             StartPosition = FormStartPosition.CenterScreen;
+
+            // Not resizable. Every number in this window is a pixel typed into
+            // a SetBounds - there is no layout engine underneath to re-flow it
+            // - so dragging an edge only ever moved the console and stretched
+            // the rows out of line with the rules above them. Theme.Fit() sizes
+            // the window to the screen it opens on, which is the part a drag
+            // was standing in for.
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
 
             // The three header lines are measured, not typed. A 20pt title in
             // a 34px box had one pixel of slack at 9pt and none at all the
@@ -5140,6 +5150,7 @@ namespace IdleMaster
             logBox.SetBounds(22, LowerY + drop + 66, 640, 212);
             logBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             Controls.Add(logBox);
+            Theme.Scrollbars(logBox);
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 2000;
@@ -5668,6 +5679,8 @@ namespace IdleMaster
                 listBoost.Invalidate();
                 listIdle.Invalidate();
                 if (caption != null) caption.Invalidate();
+                Theme.Frame(this);              // light theme, light title bar
+                Theme.Scrollbars(logBox);
 
                 // Colours change under your hands; the frame cannot. Swapping
                 // FormBorderStyle on a live window means destroying and

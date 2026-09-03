@@ -193,16 +193,224 @@ namespace IdleMaster
 
         // ---- form setup
 
-        // Colours, base font, and DPI scaling in one call. Must run before any
-        // controls are added, or AutoScale measures the wrong baseline.
+        // Colours, base font, the frame Windows draws, and the DPI the layout
+        // has to survive - all of it in one call, so no window has to remember
+        // any of it. Must run before any controls are added.
+        //
+        // AutoScaleMode is None on purpose. It was Dpi, and it did nothing: see
+        // Fit() below for why, and for what does the scaling instead.
         public static void Form(Form f)
         {
-            f.AutoScaleMode = AutoScaleMode.Dpi;
-            f.AutoScaleDimensions = new SizeF(96f, 96f);
+            f.AutoScaleMode = AutoScaleMode.None;
             f.BackColor = Bg;
             f.ForeColor = Fg;
             f.Font = Base();
             try { f.Icon = App.Icon; } catch (Exception) { }
+
+            // Load, not the constructor: the whole tree has to exist before it
+            // can be scaled, and the handle has to exist before Windows will
+            // take an answer about the title bar. Once per form - Load can fire
+            // again after a handle is rebuilt, and scaling twice would double.
+            bool fitted = false;
+            f.Load += delegate
+            {
+                if (fitted) return;
+                fitted = true;
+                Fit(f);
+                Frame(f);
+            };
+        }
+
+        // ---- the frame, and the parts of the window Windows paints
+        //
+        // Everything inside the window is ours. The title bar, the resize
+        // border and the scrollbars are not - Windows draws those, in white,
+        // and a white cap on a black window is the one thing that gives a dark
+        // theme away. Both have a switch, and both are asked for here.
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
+
+        [System.Runtime.InteropServices.DllImport("uxtheme.dll",
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr h, string app, string idList);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr h);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr h, IntPtr dc);
+
+        [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+        private static extern int GetDeviceCaps(IntPtr dc, int index);
+
+        private const int LOGPIXELSY = 90;
+
+        // Is the current look a dark one? Perceived luminance of the window
+        // background, so a theme file does not have to declare it: paper comes
+        // out light, every other one shipped so far comes out dark.
+        public static bool IsDark
+        {
+            get { return (0.299 * cur.Bg.R + 0.587 * cur.Bg.G + 0.114 * cur.Bg.B) < 128.0; }
+        }
+
+        // The title bar. Windows 10 1809 spelled the attribute 19 and 2004
+        // onwards spell it 20 - 19 means something else entirely on the newer
+        // builds, so it is the build number that picks, not a try of both.
+        public static void Frame(Form f)
+        {
+            if (f == null || !f.IsHandleCreated) return;
+            try
+            {
+                int attr = Environment.OSVersion.Version.Major >= 10
+                    && Environment.OSVersion.Version.Build >= 18985 ? 20 : 19;
+                int on = IsDark ? 1 : 0;
+                DwmSetWindowAttribute(f.Handle, attr, ref on, 4);
+            }
+            catch (Exception) { }
+        }
+
+        // Scrollbars, for anything that scrolls. The same call the task
+        // manager's list already makes for itself, reachable now by the plain
+        // controls - the console, the bug report's two boxes - that cannot
+        // subclass their way to it.
+        public static void Scrollbars(Control c)
+        {
+            if (c == null) return;
+            if (!c.IsHandleCreated)
+            {
+                c.HandleCreated += delegate { Scrollbars(c); };
+                return;
+            }
+            try { SetWindowTheme(c.Handle, IsDark ? "DarkMode_Explorer" : "Explorer", null); }
+            catch (Exception) { }
+        }
+
+        // ---- the layout, against the screen it is actually drawn on
+        //
+        // The app declares per-monitor DPI awareness in its manifest, but .NET
+        // Framework 4.x acts on that only with opt-ins an app.config would have
+        // to carry, and this is one exe with nothing beside it. So AutoScale
+        // found a factor of 1.0 and every SetBounds in the app kept its 96dpi
+        // number - while GDI+ went on rendering every point-size font at the
+        // screen's real DPI. Layout at 100%, text at 125%, and every control
+        // whose height was typed to just fit its text clipped: the title first,
+        // then the checkbox labels, the band buttons, the big buttons' second
+        // lines.
+        //
+        // The factor is ours to apply, then. Ask the screen once, scale the
+        // whole tree when the window loads, and leave the fonts alone - they
+        // are in points and are already the right size. Then clamp to the work
+        // area, because a window that does not fit the screen is its own bug.
+
+        private static float dpiK;
+
+        public static float DpiScale
+        {
+            get
+            {
+                if (dpiK > 0f) return dpiK;
+                float k = 1f;
+                try
+                {
+                    IntPtr dc = GetDC(IntPtr.Zero);
+                    if (dc != IntPtr.Zero)
+                    {
+                        int dpi = GetDeviceCaps(dc, LOGPIXELSY);
+                        ReleaseDC(IntPtr.Zero, dc);
+                        if (dpi >= 96 && dpi <= 480) k = dpi / 96f;
+                    }
+                }
+                catch (Exception) { }
+                return (dpiK = k);
+            }
+        }
+
+        private static int K(int v) { return (int)Math.Round(v * DpiScale); }
+
+        // Every control's bounds, parents before children, read before anything
+        // moves. The form is resized first and that drags the anchored ones out
+        // of place, so the originals have to be in hand before it happens.
+        private static void Collect(Control p, List<Control> flat, List<Rectangle> was)
+        {
+            foreach (Control c in p.Controls)
+            {
+                flat.Add(c);
+                was.Add(c.Bounds);
+                Collect(c, flat, was);
+            }
+        }
+
+        public static void Fit(Form f)
+        {
+            if (f == null) return;
+            try
+            {
+                float k = DpiScale;
+                if (k > 1.01f)
+                {
+                    List<Control> flat = new List<Control>();
+                    List<Rectangle> was = new List<Rectangle>();
+                    Collect(f, flat, was);
+
+                    f.SuspendLayout();
+                    if (!f.MinimumSize.IsEmpty)
+                        f.MinimumSize = new Size(K(f.MinimumSize.Width), K(f.MinimumSize.Height));
+                    if (!f.MaximumSize.IsEmpty)
+                        f.MaximumSize = new Size(K(f.MaximumSize.Width), K(f.MaximumSize.Height));
+                    f.ClientSize = new Size(K(f.ClientSize.Width), K(f.ClientSize.Height));
+
+                    // Parents already carry their final size by the time their
+                    // children are set, so each anchor is captured against the
+                    // size it will actually live under.
+                    // Two widths that live in a property rather than in Bounds,
+                    // and are just as typed-in as the rest: a fixed tab's
+                    // header, and a list's columns. Left alone, nine tabs and
+                    // ten columns come out ellipsised on a scaled screen while
+                    // everything around them fits.
+                    //
+                    // Before the bounds, not after. A list that shares its width
+                    // out between a fixed set of columns and a flexible one does
+                    // it from its Resize handler, which fires the moment the
+                    // bounds below are set - so the fixed ones have to already
+                    // carry their new width when it runs, or the flexible one is
+                    // computed against the old numbers and then scaled on top of
+                    // that, and the row overflows into a scrollbar.
+                    for (int i = 0; i < flat.Count; i++)
+                    {
+                        TabControl tc = flat[i] as TabControl;
+                        if (tc != null && tc.SizeMode == TabSizeMode.Fixed)
+                            tc.ItemSize = new Size(K(tc.ItemSize.Width), K(tc.ItemSize.Height));
+
+                        ListView lv = flat[i] as ListView;
+                        if (lv != null)
+                            foreach (ColumnHeader col in lv.Columns) col.Width = K(col.Width);
+                    }
+
+                    for (int i = 0; i < flat.Count; i++)
+                    {
+                        Rectangle b = was[i];
+                        flat[i].Bounds = new Rectangle(K(b.X), K(b.Y), K(b.Width), K(b.Height));
+                    }
+                    f.ResumeLayout(true);
+                }
+
+                // What is left over goes to whatever the window anchors to its
+                // bottom edge - the console, a list, a preview pane. A window
+                // taller than the desktop is worse than a short console.
+                Rectangle wa = Screen.FromPoint(f.Location).WorkingArea;
+                if (wa.Width < 200 || wa.Height < 200) return;
+                int w = Math.Min(f.Width, wa.Width);
+                int h = Math.Min(f.Height, wa.Height);
+                if (w == f.Width && h == f.Height) return;
+                if (!f.MinimumSize.IsEmpty)
+                    f.MinimumSize = new Size(Math.Min(f.MinimumSize.Width, w),
+                                             Math.Min(f.MinimumSize.Height, h));
+                f.Size = new Size(w, h);
+                if (f.StartPosition == FormStartPosition.CenterScreen)
+                    f.Location = new Point(wa.X + (wa.Width - w) / 2, wa.Y + (wa.Height - h) / 2);
+            }
+            catch (Exception) { }
         }
 
         // ---- controls

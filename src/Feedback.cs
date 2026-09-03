@@ -155,6 +155,7 @@ namespace IdleMaster
             what = new TextBox();
             what.Multiline = true;
             what.ScrollBars = ScrollBars.Vertical;
+            Theme.Scrollbars(what);
             what.Font = Theme.Base();
             Theme.Input_(what);
             what.SetBounds(16, 52, 552, 96);
@@ -180,6 +181,7 @@ namespace IdleMaster
             preview.Multiline = true;
             preview.ReadOnly = true;
             preview.ScrollBars = ScrollBars.Vertical;
+            Theme.Scrollbars(preview);
             preview.BackColor = Theme.LogBg;
             preview.ForeColor = Theme.LogFg;
             preview.Font = Theme.Mono();
