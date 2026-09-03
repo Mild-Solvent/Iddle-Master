@@ -317,6 +317,14 @@ namespace IdleMaster
             later.Location = new Point(440, y);
             y += use.Height + 12;
 
+            // The footer wraps to as many lines as its text needs. Pinned at
+            // the 40 px it was created with, the last line ("only if you want
+            // it.") fell off the bottom of the card - and this panel is the
+            // first thing a new install shows, so it was the first thing read.
+            if (footer.Text.Length > 0)
+                footer.Height = TextRenderer.MeasureText(footer.Text, footer.Font,
+                    new Size(footer.Width, 0), TextFormatFlags.WordBreak).Height + 4;
+
             footer.Location = new Point(28, y);
             folder.Location = new Point(440, y + 2);
 
@@ -389,6 +397,11 @@ namespace IdleMaster
                 c.Invalidate();
             }
             card.Invalidate();
+
+            // Restyle is what sets the footer's text and font, and a theme can
+            // carry a taller one - so re-flow, or the height measured for the
+            // old font is the one the card keeps.
+            Relayout();
         }
 
         private static string Safe(string family)
