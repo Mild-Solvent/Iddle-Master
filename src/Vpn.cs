@@ -25,6 +25,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Net.NetworkInformation;
 using System.Threading;
 
@@ -179,6 +180,155 @@ namespace IdleMaster
 
             log("-- hanging up the VPN before anything else");
             foreach (VpnApp v in due) StandDown(v, log);
+        }
+
+        // ---- the residue a stopped VPN leaves behind
+        //
+        // StandDown covers the case where the tunnel is still UP. This is the
+        // other one, and it is worse because the machine looks fine: stop
+        // NordVPN after it has been connected and the adapter stays up holding
+        //
+        //   0.0.0.0/1    via the tunnel gateway   metric 25
+        //   128.0.0.0/1  via the tunnel gateway   metric 25
+        //   0.0.0.0/0    via the real router      metric 35
+        //
+        // Those two halves cover the whole address space between them and are
+        // MORE SPECIFIC than the real default route, so they win no matter what
+        // the metric says - and they point at a gateway that died with the
+        // tunnel. Its DNS servers (reachable only through that tunnel) are left
+        // on the adapter too. Ping still answers, because ICMP to the router is
+        // a directly-connected route, so the machine reads as online while DNS
+        // and TCP go nowhere. Starting the VPN again "fixes" it by restoring
+        // the gateway those routes point at, which is exactly how someone ends
+        // up believing they can never turn the VPN off.
+        //
+        // Everything here is gated on NO service of this VPN running: every one
+        // of these is legitimate while it is connected, and the app rebuilds all
+        // of it on its next connect. Nothing is removed that is not both on this
+        // VPN's own adapter and pointing into a tunnel that is gone.
+        public static List<string> ClearResidue(Action<string> log, bool dryRun)
+        {
+            List<string> did = new List<string>();
+            foreach (VpnApp v in Known)
+            {
+                // The gate. Any of its services alive means it is in charge of
+                // its own configuration and this must keep its hands off.
+                if (Engine.ServiceRunning(v.Service)) continue;
+
+                List<int> idx = new List<int>();
+                List<string> alias = new List<string>();
+                try
+                {
+                    foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                    {
+                        string d = ni.Description + " " + ni.Name;
+                        bool mine = false;
+                        foreach (string w in v.Adapters)
+                            if (d.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0) mine = true;
+                        if (!mine) continue;
+                        try
+                        {
+                            IPInterfaceProperties ip = ni.GetIPProperties();
+                            IPv4InterfaceProperties v4 = ip.GetIPv4Properties();
+                            if (v4 != null) { idx.Add(v4.Index); alias.Add(ni.Name); }
+                        }
+                        catch (Exception) { }
+                    }
+                }
+                catch (Exception) { }
+                if (idx.Count == 0) continue;
+
+                // The split default, if it is still there. Matched by interface
+                // index rather than by name, because netsh reports the index and
+                // an adapter alias can contain anything at all.
+                string routes;
+                NetGuard.Exec("netsh", "interface ipv4 show route", 8000, out routes);
+                foreach (string half in new string[] { "0.0.0.0/1", "128.0.0.0/1" })
+                {
+                    foreach (string raw in routes.Split('\n'))
+                    {
+                        string line = raw.Trim();
+                        if (line.Length == 0 || line.IndexOf(half, StringComparison.Ordinal) < 0)
+                            continue;
+
+                        int on = IndexOn(line, half, idx);
+                        if (on < 0) continue;
+
+                        string what = half + " on " + v.Service + "'s adapter (interface " + on + ")";
+                        if (dryRun) { did.Add("WOULD DROP " + what); continue; }
+
+                        string outp;
+                        int rc = NetGuard.Exec("netsh",
+                            "interface ipv4 delete route prefix=" + half + " interface=" + on,
+                            8000, out outp);
+                        if (rc == 0) { did.Add("dropped " + what); if (log != null) log("   + dropped the dead " + what); }
+                        else if (log != null) log("   ! could not drop " + what + " (netsh rc=" + rc + ")");
+                    }
+                }
+
+                // The DNS servers, which only ever resolved through the tunnel.
+                for (int i = 0; i < idx.Count; i++)
+                {
+                    bool any = false;
+                    try
+                    {
+                        foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                        {
+                            if (ni.Name != alias[i]) continue;
+                            foreach (IPAddress a in ni.GetIPProperties().DnsAddresses)
+                                if (a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                                    any = true;
+                        }
+                    }
+                    catch (Exception) { }
+                    if (!any) continue;
+
+                    string what2 = "DNS servers on " + alias[i];
+                    if (dryRun) { did.Add("WOULD RESET " + what2); continue; }
+
+                    string outp;
+                    int rc = NetGuard.Exec("netsh",
+                        "interface ipv4 set dnsservers name=\"" + alias[i] + "\" source=dhcp",
+                        8000, out outp);
+                    if (rc == 0) { did.Add("reset " + what2); if (log != null) log("   + reset the " + what2); }
+                    else if (log != null) log("   ! could not reset the " + what2 + " (netsh rc=" + rc + ")");
+                }
+            }
+
+            if (did.Count > 0 && !dryRun)
+            {
+                string outp;
+                NetGuard.Exec("ipconfig", "/flushdns", 8000, out outp);
+                did.Add("flushed the DNS cache");
+            }
+            return did;
+        }
+
+        // The interface index a netsh route line belongs to, if it is one of
+        // ours. netsh prints
+        //
+        //   Publish  Type    Met  Prefix       Idx  Gateway/Interface Name
+        //   No       System  256  10.5.0.0/16   24  NordLynx
+        //
+        // so the index is the token immediately after the prefix. It is found
+        // that way rather than by scanning the line for any number we happen to
+        // recognise: Met is a bare number too, and a metric of 25 beside an
+        // interface index of 25 would have matched the wrong thing and deleted
+        // a route on somebody else's adapter. Anchoring on the prefix also
+        // survives a localised header, which counting columns would not.
+        private static int IndexOn(string line, string prefix, List<int> mine)
+        {
+            string[] tok = line.Split(new char[] { ' ', '	' },
+                               StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i + 1 < tok.Length; i++)
+            {
+                if (!string.Equals(tok[i], prefix, StringComparison.Ordinal)) continue;
+                int n;
+                if (int.TryParse(tok[i + 1], System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out n)
+                    && mine.Contains(n)) return n;
+            }
+            return -1;
         }
 
         private static string FindExe(VpnApp v)

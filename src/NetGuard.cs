@@ -1470,6 +1470,33 @@ namespace IdleMaster
             // NordVPN's kill switch with its service down is the famous one.
             if (Attempt >= 2)
             {
+                // Before trying to start anything back up: a VPN that stopped
+                // AFTER it had connected leaves a split default route pointing
+                // at a gateway that died with the tunnel, and its own DNS on
+                // its own adapter. That is not a service that needs restarting
+                // - it is configuration that needs removing, and restarting the
+                // VPN to "fix" it is how someone ends up unable to turn it off
+                // at all. Gated inside ClearResidue on no service of that VPN
+                // running, so it can never touch a live tunnel's setup.
+                //
+                // Tailscale is deliberately left to the ladder below: it can
+                // log itself out while DNS is dead, and the existing NeedsLogin
+                // path says so rather than running "tailscale up" from a
+                // background sweep, which can want an interactive login.
+                try
+                {
+                    List<string> cleared = Vpn.ClearResidue(log, false);
+                    if (cleared.Count > 0)
+                    {
+                        foreach (string c in cleared) done.Add(c);
+                        FixCount++;
+                        Thread.Sleep(2000);
+                        now = Again(now, done);
+                        if (now.Internet) return now;
+                    }
+                }
+                catch (Exception) { }
+
                 bool any = false;
                 try
                 {
