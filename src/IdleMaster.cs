@@ -1,4 +1,4 @@
-// IDLE MASTER - two-mode RAM reclaimer for an always-on Sunshine/Tailscale host.
+﻿// IDLE MASTER - two-mode RAM reclaimer for an always-on Sunshine/Tailscale host.
 //
 //   BOOST NOW      : kill background bloat, keep a usable desktop.
 //   ABSOLUTE IDLE  : strip down to Windows vitals + Sunshine + Tailscale.
@@ -29,8 +29,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Idle Master")]
 [assembly: AssemblyDescription("Two-mode RAM reclaimer with a persistent sentry")]
 [assembly: AssemblyProduct("Idle Master")]
-[assembly: AssemblyVersion("0.29.0.0")]
-[assembly: AssemblyFileVersion("0.29.0.0")]
+[assembly: AssemblyVersion("0.30.0.0")]
+[assembly: AssemblyFileVersion("0.30.0.0")]
 
 namespace IdleMaster
 {
@@ -1261,9 +1261,19 @@ FnHotkeyCapsLKNumLK
 # nothing: they are protected in code, like Tailscale. KillExplorer=1 recycles the
 # whole session instead, which takes them down and brings them back fresh. Killing
 # them on their own is what leaves a taskbar whose Start button answers nothing.
+#
+# RuntimeBroker used to be on this list and is gone from it for the same reason,
+# and is protected in code too, so an older ini that still names it does nothing.
+# It is not a resident cost you can reclaim - DCOM starts one when something asks
+# for a brokered call and drops it when nothing is asking - so it was back before
+# the next sweep every time, six comebacks per run into the respawn backoff, for
+# 14 to 144 MB. The half that is not merely pointless: a broker killed mid-call
+# leaves the caller waiting on an answer that is never coming, and the caller is
+# usually explorer's UI thread. That is This PC stuck on ""Working on it..."" and
+# then (Not Responding) - and killing it fifteen seconds before recycling the
+# shell handed that freeze straight to the desktop Winlogon had just rebuilt.
 LockApp
 backgroundTaskHost
-RuntimeBroker
 # The indexer, killed on sight - which is fine for one idle run and corrosive
 # under a watch: hunted every 20 seconds it never finishes an index, so Start
 # search stays useless long after WSearch is running again. This is the entry
@@ -1899,9 +1909,45 @@ C:\Program Files\Tailscale\tailscale-ipn.exe
             return false;
         }
 
+        // The shell's brokers. Not the shell itself - RecycleShell does not take
+        // these down and does not need to. They are the surrogate processes a
+        // brokered call is answered in: DCOM starts one when something asks and
+        // lets it go when nothing is asking, so what you kill is not a resident
+        // cost, it is the thing that happens to be holding an answer right now.
+        //
+        // Which is why killing one is not a saving. RuntimeBroker was on
+        // [idle.kill] for eleven versions and it hit the respawn backoff on every
+        // single idle run - six comebacks, then thirty minutes of giving up -
+        // for between 14 and 144 MB that was back before the next sweep.
+        //
+        // And it is how File Explorer freezes. A broker terminated mid-call
+        // leaves the caller waiting on an object that is never going to answer,
+        // and the caller is usually explorer's own UI thread: This PC sits on
+        // "Working on it..." and then the title bar says (Not Responding).
+        // Absolute Idle killed RuntimeBroker fifteen seconds before it recycled
+        // the shell on 2026-09-04, and the desktop Winlogon rebuilt could not
+        // open This PC.
+        //
+        // Protected in code, like the shell hosts above, so an ini written
+        // before this carries the old entry harmlessly instead of needing a
+        // migration.
+        internal static readonly string[] ShellBrokers = new string[]
+        {
+            "RuntimeBroker",
+        };
+
+        public static bool IsShellBroker(string name)
+        {
+            foreach (string s in ShellBrokers)
+                if (string.Equals(s, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
         public bool IsProtectedProcess(string name)
         {
             if (IsShellFamily(name)) return true;
+            if (IsShellBroker(name)) return true;
             foreach (string p in NeverKill)
                 if (Match(p, name)) return true;
             foreach (string p in cfg.Protect)
