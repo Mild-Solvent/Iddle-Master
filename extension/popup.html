@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tab Vampire</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <img src="icons/icon-48.svg" alt="" class="logo">
+        <h1>TAB VAMPIRE</h1>
+        <p id="ramText" class="ram">RAM …</p>
+      </header>
+
+      <button id="gameButton" class="game" type="button">GAME MODE</button>
+      <p id="gameText" class="hint">Sleeps every background tab and parks extensions. The tab you are on keeps running.</p>
+
+      <section>
+        <div class="bar">
+          <h2 id="tabsTitle">TABS</h2>
+          <button id="heapButton" class="small" type="button">show memory</button>
+          <button id="sleepOthersButton" class="small" type="button">sleep background</button>
+        </div>
+        <ul id="tabList" class="list"></ul>
+      </section>
+
+      <section>
+        <div class="bar">
+          <h2 id="extTitle">EXTENSIONS</h2>
+        </div>
+        <ul id="extList" class="list"></ul>
+      </section>
+
+      <section>
+        <div class="bar">
+          <h2>ACTIVITY</h2>
+        </div>
+        <pre id="logBox" class="log"></pre>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

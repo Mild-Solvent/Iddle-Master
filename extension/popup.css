@@ -1,0 +1,211 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0e13;
+  --panel: #111821;
+  --line: #1f2a37;
+  --text: #c9d6e3;
+  --dim: #6f8196;
+  --ice: #9fd3ff;
+  --amber: #ffb84d;
+  --red: #ff6b6b;
+  font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 440px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.popup {
+  padding: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.logo {
+  width: 22px;
+  height: 22px;
+}
+
+h1 {
+  margin: 0;
+  color: var(--ice);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+}
+
+.ram {
+  margin: 0 0 0 auto;
+  color: var(--dim);
+}
+
+h2 {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 0.12em;
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ice);
+  cursor: pointer;
+  font: inherit;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ice);
+}
+
+button:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+.game {
+  width: 100%;
+  padding: 10px;
+  border-color: var(--ice);
+  font-weight: bold;
+  letter-spacing: 0.14em;
+}
+
+.game.on {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.hint {
+  margin: 6px 0 0;
+  color: var(--dim);
+  line-height: 1.4;
+}
+
+section {
+  margin-top: 12px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.bar h2 {
+  margin-right: auto;
+}
+
+.small {
+  padding: 2px 8px;
+}
+
+.list {
+  max-height: 170px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.list li:last-child {
+  border-bottom: 0;
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ice);
+}
+
+.asleep .dot {
+  background: transparent;
+  border: 1px solid var(--dim);
+}
+
+.asleep .name,
+.asleep .meta {
+  color: var(--dim);
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+span.name {
+  cursor: default;
+}
+
+.meta {
+  flex: 0 0 auto;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.tag {
+  color: var(--amber);
+}
+
+.list li button.act {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 1px 6px;
+}
+
+.keep.on {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.log {
+  height: 96px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: #05080b;
+  color: var(--ice);
+  font: inherit;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.error {
+  color: var(--red);
+}

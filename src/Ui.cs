@@ -4840,7 +4840,7 @@ namespace IdleMaster
         private readonly Engine engine;
         private readonly TextBox logBox;
         private readonly MemGauge gauge;
-        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback;
+        private readonly Button btnBoost, btnIdle, btnRestore, btnEaters, btnTrim, btnConfig, btnCleanup, btnBackup, btnSentry, btnNetGuard, btnDebloat, btnRemote, btnWinUtil, btnZoic, btnFeedback, btnBrowserExt;
         private readonly UpdateBadge updateBadge;   // the corner arrow: white waiting, green when a release is out
         private readonly CheckBox chkSentry;
         private readonly CheckBox chkOverclock;
@@ -5080,14 +5080,14 @@ namespace IdleMaster
             // buttons and then the words the corner arrow does not say: the
             // version, and whatever the update check last found.
             Band("IDLE MASTER", Theme.Dim, IdleBandY,
-                 "This program: its switches, its version, and where to say it went wrong.");
-            // This band has two members, not four. Left-aligned on a
-            // four-column grid they sat under "Disk cleanup" and "Debloat"
-            // with half a row of nothing beside them, which reads as a bug
-            // rather than as a short band. Centred, at the same width the
-            // four-up rows use, so the columns still line up vertically.
+                 "This program: its switches, its browser extension, its version, and where to say it went wrong.");
+            // This band has three members, not four. Left-aligned on a
+            // four-column grid they sat under the first buttons of the row
+            // above with a stretch of nothing beside them, which reads as a
+            // bug rather than as a short band. Centred, at the same width the
+            // four-up rows use.
             int idleW = (RowRight - BandLeft - 3 * RowGap) / 4;
-            int idleX = BandLeft + ((RowRight - BandLeft) - (2 * idleW + RowGap)) / 2;
+            int idleX = BandLeft + ((RowRight - BandLeft) - (3 * idleW + 2 * RowGap)) / 2;
 
             btnConfig = SlotAt("Settings", idleX, IdleBandY, idleW);
             btnConfig.Click += delegate { EditConfig(); };
@@ -5097,6 +5097,13 @@ namespace IdleMaster
             // byte first, and nothing is sent until Submit in the browser.
             btnFeedback = SlotAt("Report a bug", idleX + idleW + RowGap, IdleBandY, idleW);
             btnFeedback.Click += delegate { OpenFeedback(); };
+
+            // The browser extension door: Tab Vampire, unpacked beside the
+            // exe, with the steps to load it opened in the browser.
+            btnBrowserExt = SlotAt("Browser extension", idleX + 2 * (idleW + RowGap), IdleBandY, idleW);
+            btnBrowserExt.Click += delegate { OpenBrowserExt(); };
+            listTip.SetToolTip(btnBrowserExt,
+                "Tab Vampire: put tabs and extensions to sleep from inside the browser.");
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
             updateLabel.SetBounds(BandLeft, VersionY + drop, RowRight - BandLeft, 18);
@@ -5382,6 +5389,56 @@ namespace IdleMaster
                 else if (f.Copied)
                     AppendLog("Bug report copied - paste it at " + Feedback.NewIssueUrl);
             }
+        }
+
+        // Everything a program is allowed to do towards installing a browser
+        // extension, and then the presses it is not. The folder goes on the
+        // clipboard because the last step is a folder box, and typing a path
+        // into one of those is where people give up.
+        private void OpenBrowserExt()
+        {
+            BrowserExt.Browser b = BrowserExt.Find();
+            bool update;
+            string guide;
+            try
+            {
+                update = BrowserExt.Unpack();
+                guide = BrowserExt.WriteGuide(b, update);
+            }
+            catch (Exception ex)
+            {
+                AppendLog("! could not unpack the browser extension: " + ex.Message.Split('\n')[0]);
+                return;
+            }
+            try { Clipboard.SetText(BrowserExt.Dir); } catch (Exception) { }
+
+            AppendLog(update ? "Browser extension updated in " + BrowserExt.Dir
+                             : "Browser extension unpacked to " + BrowserExt.Dir);
+            AppendLog("   the folder is on the clipboard - the rest is yours, in the browser:");
+            string[] steps = BrowserExt.Steps(b, update);
+            for (int i = 0; i < steps.Length; i++)
+                AppendLog("   " + (i + 1) + ". " + steps[i]);
+
+            if (b == null)
+            {
+                MessageBox.Show(this,
+                    "No Brave, Chrome or Edge was found, so there is no browser to open the steps in."
+                    + " They are in the log, and the extension is here:\n\n    " + BrowserExt.Dir,
+                    "Browser extension", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Off the window's thread: a browser that is not open yet takes a
+            // few seconds to arrive, and the window should not hang for it.
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    BrowserExt.OpenGuide(b, guide);
+                    AppendLog("The same steps are open in " + b.Name + ".");
+                }
+                catch (Exception ex) { AppendLog("! " + ex.Message.Split('\n')[0]); }
+            });
         }
 
         // Chris Titus Tech's WinUtil, launched the way its README says to.

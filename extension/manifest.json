@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Vampire",
+  "version": "2.0.0",
+  "description": "A task manager for the browser: put tabs and extensions to sleep, wake them when needed, or do it all in one click.",
+  "permissions": ["storage", "tabs", "management", "system.memory", "scripting"],
+  "optional_host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Tab Vampire",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "commands": {
+    "sleep-tab": {
+      "suggested_key": {
+        "default": "Alt+R"
+      },
+      "description": "Put the current tab to sleep"
+    },
+    "game-mode": {
+      "suggested_key": {
+        "default": "Alt+Shift+G"
+      },
+      "description": "Game mode on or off"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

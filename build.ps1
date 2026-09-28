@@ -3,7 +3,8 @@
 #
 # Three exes, nested like dolls:
 #   IdleMasterRebuild.exe   goes inside every backup kit the app writes
-#   IdleMaster.exe          the app; carries the rebuild exe and the icon inside it
+#   IdleMaster.exe          the app; carries the rebuild exe, the icon and the
+#                           browser extension (extension\, zipped) inside it
 #   IdleMasterSetup.exe     the installer; carries the app inside it
 # so each one is built from the one that just came out, in that order.
 
@@ -54,17 +55,26 @@ $iconArg = "/win32icon:$icon"
   /out:"$rebuild" $refs "$root\src\Rebuild.cs"
 if ($LASTEXITCODE -ne 0) { throw "rebuild build failed ($LASTEXITCODE)" }
 
+# The browser extension rides inside the app as a zip. It is made fresh each
+# build and thrown away after - the folder is the source, not the zip.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$extZip = Join-Path $env:TEMP 'idlemaster-tab-vampire.zip'
+if (Test-Path $extZip) { Remove-Item $extZip -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $root 'extension'), $extZip)
+$resExt = "/resource:$extZip,tab-vampire.zip"
+
 $resRebuild = "/resource:$rebuild,IdleMasterRebuild.exe"
 $resIcon = "/resource:$icon,idlemaster.ico"
 
 & $csc /nologo /target:winexe /platform:x64 /optimize+ `
-  /win32manifest:"$root\src\app.manifest" $iconArg $resRebuild $resIcon `
+  /win32manifest:"$root\src\app.manifest" $iconArg $resRebuild $resIcon $resExt `
   /out:"$out" $refs "$root\src\IdleMaster.cs" "$root\src\Theme.cs" `
   "$root\src\Themes.cs" "$root\src\Skin.cs" "$root\src\ThemeGate.cs" "$root\src\TrimGate.cs" "$root\src\Ui.cs" `
   "$root\src\Cleanup.cs" "$root\src\DiskScan.cs" "$root\src\TreeMap.cs" "$root\src\WizTree.cs" "$root\src\Debloat.cs" "$root\src\Backup.cs" `
   "$root\src\NetGuard.cs" "$root\src\Vpn.cs" "$root\src\Procs.cs" `
-  "$root\src\SoloInstance.cs" "$root\src\Feedback.cs"
+  "$root\src\SoloInstance.cs" "$root\src\Feedback.cs" "$root\src\BrowserExt.cs"
 if ($LASTEXITCODE -ne 0) { throw "app build failed ($LASTEXITCODE)" }
+Remove-Item $extZip -Force
 
 $resource = "/resource:$out,IdleMaster.exe"
 
