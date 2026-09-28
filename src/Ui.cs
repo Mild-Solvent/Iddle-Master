@@ -5098,12 +5098,12 @@ namespace IdleMaster
             btnFeedback = SlotAt("Report a bug", idleX + idleW + RowGap, IdleBandY, idleW);
             btnFeedback.Click += delegate { OpenFeedback(); };
 
-            // The browser extension door: Tab Vampire, unpacked beside the
+            // The browser extension door: Idle Master Tabs, unpacked beside the
             // exe, with the steps to load it opened in the browser.
             btnBrowserExt = SlotAt("Browser extension", idleX + 2 * (idleW + RowGap), IdleBandY, idleW);
             btnBrowserExt.Click += delegate { OpenBrowserExt(); };
             listTip.SetToolTip(btnBrowserExt,
-                "Tab Vampire: put tabs and extensions to sleep from inside the browser.");
+                "Idle Master Tabs: put tabs and extensions to sleep from inside the browser.");
 
             updateLabel = Theme.Hint("running v" + App.Version + " - " + Updater.Repo);
             updateLabel.SetBounds(BandLeft, VersionY + drop, RowRight - BandLeft, 18);

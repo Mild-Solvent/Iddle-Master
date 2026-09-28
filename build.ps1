@@ -58,10 +58,10 @@ if ($LASTEXITCODE -ne 0) { throw "rebuild build failed ($LASTEXITCODE)" }
 # The browser extension rides inside the app as a zip. It is made fresh each
 # build and thrown away after - the folder is the source, not the zip.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$extZip = Join-Path $env:TEMP 'idlemaster-tab-vampire.zip'
+$extZip = Join-Path $env:TEMP 'idlemaster-browser-extension.zip'
 if (Test-Path $extZip) { Remove-Item $extZip -Force }
 [System.IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $root 'extension'), $extZip)
-$resExt = "/resource:$extZip,tab-vampire.zip"
+$resExt = "/resource:$extZip,browser-extension.zip"
 
 $resRebuild = "/resource:$rebuild,IdleMasterRebuild.exe"
 $resIcon = "/resource:$icon,idlemaster.ico"

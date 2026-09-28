@@ -1,6 +1,6 @@
 // IDLE MASTER - the browser extension door. The browser is the biggest thing
-// on most machines and the one thing the boost can only close, not slim. Tab
-// Vampire is the part that works from the inside: tabs and extensions put to
+// on most machines and the one thing the boost can only close, not slim. Idle
+// Master Tabs is the part that works from the inside: tabs and extensions put to
 // sleep and woken again, one button for all of it.
 //
 // The rule of the door: a Chromium browser will not let a program put an
@@ -29,7 +29,7 @@ namespace IdleMaster
     internal static class BrowserExt
     {
         // build.ps1 zips the extension folder and puts it inside the exe.
-        public const string Resource = "tab-vampire.zip";
+        public const string Resource = "browser-extension.zip";
 
         // The steps, as a page. It lives in the extension's folder but is no
         // part of the extension - the manifest does not name it.
@@ -154,7 +154,7 @@ namespace IdleMaster
                 return new string[]
                 {
                     open,
-                    "Find the Tab Vampire card and press the round reload arrow on it."
+                    "Find the Idle Master Tabs card and press the round reload arrow on it."
                 };
             return new string[]
             {
@@ -172,7 +172,7 @@ namespace IdleMaster
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("<!doctype html>");
             sb.AppendLine("<html lang=\"en\"><head><meta charset=\"utf-8\">");
-            sb.AppendLine("<title>Tab Vampire - " + (update ? "update" : "install") + "</title>");
+            sb.AppendLine("<title>Idle Master Tabs - " + (update ? "update" : "install") + "</title>");
             sb.AppendLine("<style>");
             sb.AppendLine("body{margin:0;background:#0a0e13;color:#c9d6e3;font:15px/1.6 Consolas,monospace}");
             sb.AppendLine("main{max-width:760px;margin:48px auto;padding:0 24px}");
@@ -182,7 +182,7 @@ namespace IdleMaster
             sb.AppendLine("code{display:inline-block;padding:2px 8px;border:1px solid #1f2a37;background:#111821;"
                 + "color:#9fd3ff;user-select:all}");
             sb.AppendLine("</style></head><body><main>");
-            sb.AppendLine("<h1>TAB VAMPIRE</h1>");
+            sb.AppendLine("<h1>IDLE MASTER TABS</h1>");
             sb.AppendLine("<p>Idle Master has " + (update ? "updated" : "unpacked")
                 + " the extension. A browser does not let a program install one, so these presses are yours.</p>");
             sb.AppendLine("<ol>");
@@ -191,7 +191,7 @@ namespace IdleMaster
             sb.AppendLine("</ol>");
             sb.AppendLine("<p>The page: <code>" + WebUtility.HtmlEncode(PageOf(b)) + "</code></p>");
             sb.AppendLine("<p>The folder, already on the clipboard: <code>" + WebUtility.HtmlEncode(Dir) + "</code></p>");
-            sb.AppendLine("<p>Afterwards, pin Tab Vampire from the extensions menu so its button stays on the toolbar.</p>");
+            sb.AppendLine("<p>Afterwards, pin Idle Master Tabs from the extensions menu so its button stays on the toolbar.</p>");
             sb.AppendLine("</main></body></html>");
 
             string at = Path.Combine(Dir, GuideFile);

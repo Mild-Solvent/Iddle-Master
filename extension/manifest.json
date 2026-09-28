@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Tab Vampire",
+  "name": "Idle Master Tabs",
   "version": "2.0.0",
   "description": "A task manager for the browser: put tabs and extensions to sleep, wake them when needed, or do it all in one click.",
   "permissions": ["storage", "tabs", "management", "system.memory", "scripting"],
@@ -9,7 +9,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Tab Vampire",
+    "default_title": "Idle Master Tabs",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

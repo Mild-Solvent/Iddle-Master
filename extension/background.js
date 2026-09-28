@@ -1,6 +1,6 @@
 const FROZEN_PATH = "/frozen.html";
 const LEGACY_KEY = "frozenTabs";
-const STATE_KEY = "vampire";
+const STATE_KEY = "idleTabs";
 const LOG_MAX = 40;
 const HEAP_TIMEOUT_MS = 800;
 const SETTLE_MS = 2000;
